@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-brand: #3d5afe;
+  --color-flame: #ff6b3d;
+  --color-ink: #161a2e;
+  --color-muted: #646b7d;
+  --color-canvas: #f5f7fb;
+  --color-surface: #ffffff;
+  --color-line: #dde3f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI",
+    sans-serif;
+}

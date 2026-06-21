@@ -1,0 +1,28 @@
+{
+  "name": "ssamplanner",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "supabase:start": "supabase start",
+    "supabase:reset": "supabase db reset",
+    "supabase:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "eslint": "9.39.4",
+    "globals": "16.5.0",
+    "pnpm": "9.15.9",
+    "prettier": "3.8.4",
+    "supabase": "2.107.0",
+    "turbo": "2.9.18",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.61.1",
+    "vitest": "4.1.9"
+  }
+}

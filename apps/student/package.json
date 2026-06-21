@@ -1,0 +1,37 @@
+{
+  "name": "@ssamplanner/student",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start",
+    "start": "expo start",
+    "build": "expo export --platform web --output-dir dist",
+    "lint": "eslint app src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "56.0.15",
+    "@ssamplanner/design-tokens": "workspace:*",
+    "@ssamplanner/shared": "workspace:*",
+    "babel-preset-expo": "56.0.15",
+    "expo": "56.0.12",
+    "expo-constants": "56.0.18",
+    "expo-linking": "56.0.14",
+    "expo-router": "56.2.11",
+    "expo-status-bar": "56.0.4",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-native": "0.86.0",
+    "react-native-gesture-handler": "3.0.2",
+    "react-native-reanimated": "4.2.0",
+    "react-native-safe-area-context": "5.8.0",
+    "react-native-screens": "4.25.2",
+    "react-native-worklets": "0.7.4",
+    "react-native-web": "0.21.2"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17"
+  }
+}
