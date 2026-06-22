@@ -11,11 +11,18 @@ import { colors, radii, spacing } from "@ssamplanner/design-tokens";
 import {
   FOCUS_CAMERA_PRIVACY_COPY,
   FOCUS_CAMERA_TIMER_ONLY_COPY,
+  type FocusDrowsinessResult,
   getFocusCameraFallbackTitle
 } from "@ssamplanner/shared";
 
+export type FocusCheckEvent = FocusDrowsinessResult & {
+  checkedAt: string;
+};
+
 type FocusCameraProps = {
   active: boolean;
+  onFocusCheck?: (check: FocusCheckEvent) => void;
+  sessionId?: string;
   style?: StyleProp<ViewStyle>;
 };
 

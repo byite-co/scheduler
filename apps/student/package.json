@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "56.0.15",
+    "@mediapipe/tasks-vision": "^0.10.35",
     "@ssamplanner/design-tokens": "workspace:*",
     "@ssamplanner/shared": "workspace:*",
     "@supabase/supabase-js": "2.108.2",
@@ -33,6 +34,7 @@
     "react-native-safe-area-context": "5.8.0",
     "react-native-screens": "4.25.2",
     "react-native-vision-camera": "^5.0.11",
+    "react-native-vision-camera-worklets": "^5.0.11",
     "react-native-web": "0.21.2",
     "react-native-worklets": "0.7.4"
   },
