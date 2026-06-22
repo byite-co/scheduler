@@ -1,4 +1,9 @@
-export type UserRole = "student" | "teacher" | "parent";
+export type UserRole = "student" | "teacher";
+
+export type ReportShareAccess = {
+  kind: "report_share_token";
+  shareToken: string;
+};
 
 export type M1ConnectionStatus = "pending" | "active" | "rejected";
 export type ConnectionStatus = M1ConnectionStatus | "disconnected";
@@ -177,6 +182,10 @@ export function resolveConnectionRequest(input: {
     activatedAt: undefined,
     rejectedAt: decidedAt
   };
+}
+
+export function canRequestConnectionAgain(status: ConnectionStatus | undefined): boolean {
+  return status === undefined || status === "rejected" || status === "disconnected";
 }
 
 export function updateDisclosureScope(input: {

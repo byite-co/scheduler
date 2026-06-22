@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DISCLOSURE_SCOPE,
   M1_CONNECTION_STATUS_SCREENS,
+  canRequestConnectionAgain,
   canCompleteStudentSignup,
   createConnectionRequest,
   formatInviteCode,
@@ -72,6 +73,14 @@ describe("M1 invite and connection handshake", () => {
       "rejected"
     ]);
     expect(new Set(Object.values(M1_CONNECTION_STATUS_SCREENS).map((s) => s.route)).size).toBe(3);
+  });
+
+  it("allows a rejected or disconnected student to request again with a code", () => {
+    expect(canRequestConnectionAgain(undefined)).toBe(true);
+    expect(canRequestConnectionAgain("rejected")).toBe(true);
+    expect(canRequestConnectionAgain("disconnected")).toBe(true);
+    expect(canRequestConnectionAgain("pending")).toBe(false);
+    expect(canRequestConnectionAgain("active")).toBe(false);
   });
 });
 

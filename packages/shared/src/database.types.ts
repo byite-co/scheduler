@@ -479,6 +479,7 @@ export type Database = {
           birth_date: string | null
           created_at: string
           grade: string | null
+          guardian_consented_at: string | null
           id: string
           name: string
           onboarded: boolean
@@ -493,6 +494,7 @@ export type Database = {
           birth_date?: string | null
           created_at?: string
           grade?: string | null
+          guardian_consented_at?: string | null
           id: string
           name: string
           onboarded?: boolean
@@ -507,6 +509,7 @@ export type Database = {
           birth_date?: string | null
           created_at?: string
           grade?: string | null
+          guardian_consented_at?: string | null
           id?: string
           name?: string
           onboarded?: boolean
@@ -912,6 +915,25 @@ export type Database = {
       is_connected_active: {
         Args: { p_student: string; p_teacher: string }
         Returns: boolean
+      }
+      request_connection_by_invite: {
+        Args: { p_code: string }
+        Returns: {
+          activated_at: string | null
+          created_at: string
+          id: string
+          invite_code: string | null
+          requested_by: string | null
+          status: Database["public"]["Enums"]["connection_status"]
+          student_id: string
+          teacher_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "connections"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {

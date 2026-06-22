@@ -23,5 +23,13 @@ describe("M1 Supabase schema coverage", () => {
   it("uses the teacher study-session view to enforce share_study_time", () => {
     expect(schema).toContain("create or replace view v_teacher_study_sessions");
     expect(schema).toContain("d.share_study_time = true");
+    expect(schema).toContain("c.teacher_id = auth.uid()");
+  });
+
+  it("keeps live M1 invite RPC and guardian consent persistence in schema.sql", () => {
+    expect(schema).toContain("guardian_consented_at");
+    expect(schema).toContain("create or replace function request_connection_by_invite");
+    expect(schema).toContain("status in ('rejected', 'disconnected')");
+    expect(schema).toContain("grant execute on function request_connection_by_invite(text) to authenticated");
   });
 });
