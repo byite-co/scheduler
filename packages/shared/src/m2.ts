@@ -25,6 +25,17 @@ export type StudyStreak = {
   message: string;
 };
 
+export const PEER_RANKING_MIN_COHORT = 5;
+
+export type PeerRankingSnapshot = {
+  peer_count: number;
+  min_cohort: number;
+  can_show_peer_ranking: boolean;
+  current_user_minutes: number;
+  peer_average_minutes: number | null;
+  rank_percentile: number | null;
+};
+
 export function getStudentHomeVariant(input: HomeVariantInput): StudentHomeVariant {
   if (input.activeConnectionCount > 0) return "tutored";
 
@@ -46,7 +57,23 @@ export function canStudentToggleTodoAiCheck(todo: TodoLockState): boolean {
   return todo.source === "self" && !todo.locked;
 }
 
+export function canShowPeerRanking(
+  ranking: PeerRankingSnapshot | null
+): ranking is PeerRankingSnapshot & {
+  can_show_peer_ranking: true;
+  peer_average_minutes: number;
+  rank_percentile: number;
+} {
+  return Boolean(
+    ranking?.can_show_peer_ranking &&
+      ranking.peer_count + 1 >= ranking.min_cohort &&
+      ranking.peer_average_minutes !== null &&
+      ranking.rank_percentile !== null
+  );
+}
+
 export function getDateKey(value: string | Date): string {
+  // TODO(M8): switch streak/day bucketing to Asia/Seoul midnight before launch.
   const date = typeof value === "string" ? new Date(value) : value;
   return date.toISOString().slice(0, 10);
 }

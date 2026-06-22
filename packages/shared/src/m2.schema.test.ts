@@ -7,6 +7,10 @@ const migration = readFileSync(
   new URL("../../../supabase/migrations/20260622010000_m2_home_planner_todos.sql", import.meta.url),
   "utf8"
 );
+const privacyMigration = readFileSync(
+  new URL("../../../supabase/migrations/20260622011000_m2_peer_ranking_privacy.sql", import.meta.url),
+  "utf8"
+);
 
 describe("M2 Supabase schema coverage", () => {
   it("keeps todos, timetable blocks, and study sessions available for live M2 screens", () => {
@@ -30,7 +34,12 @@ describe("M2 Supabase schema coverage", () => {
   it("exposes anonymous peer ranking aggregates without returning peer identities", () => {
     expect(schema).toContain("create or replace function get_peer_study_ranking");
     expect(schema).toContain("returns table");
+    expect(schema).toContain("can_show_peer_ranking boolean");
+    expect(schema).toContain("min_cohort integer");
     expect(schema).toContain("peer_average_minutes");
+    expect(schema).toContain("else null::integer");
+    expect(privacyMigration).toContain("greatest(5, coalesce(p_min_cohort, 5))");
+    expect(privacyMigration).toContain("mine.cohort_count >= limits.min_cohort");
     expect(schema).not.toContain("peer_name");
   });
 });

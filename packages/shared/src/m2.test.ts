@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PEER_RANKING_MIN_COHORT,
   calculateStudyStreak,
+  canShowPeerRanking,
   canStudentToggleTodoAiCheck,
   getStudentHomeVariant,
   shouldShowPeerRanking,
@@ -53,6 +55,35 @@ describe("M2 todo AI-check lock", () => {
     expect(canStudentToggleTodoAiCheck({ source: "self", locked: false })).toBe(true);
     expect(canStudentToggleTodoAiCheck({ source: "self", locked: true })).toBe(false);
     expect(canStudentToggleTodoAiCheck({ source: "teacher", locked: true })).toBe(false);
+  });
+});
+
+describe("M2 peer ranking privacy", () => {
+  it("hides ranking aggregates until the minimum cohort is met", () => {
+    expect(PEER_RANKING_MIN_COHORT).toBe(5);
+    expect(
+      canShowPeerRanking({
+        peer_count: 2,
+        min_cohort: PEER_RANKING_MIN_COHORT,
+        can_show_peer_ranking: false,
+        current_user_minutes: 80,
+        peer_average_minutes: null,
+        rank_percentile: null
+      })
+    ).toBe(false);
+  });
+
+  it("shows ranking only when the DB flag and aggregate fields are present", () => {
+    expect(
+      canShowPeerRanking({
+        peer_count: 4,
+        min_cohort: PEER_RANKING_MIN_COHORT,
+        can_show_peer_ranking: true,
+        current_user_minutes: 120,
+        peer_average_minutes: 90,
+        rank_percentile: 75
+      })
+    ).toBe(true);
   });
 });
 

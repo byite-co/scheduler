@@ -913,9 +913,11 @@ export type Database = {
         Returns: boolean
       }
       get_peer_study_ranking: {
-        Args: { p_days?: number }
+        Args: { p_days?: number; p_min_cohort?: number }
         Returns: {
+          can_show_peer_ranking: boolean
           current_user_minutes: number
+          min_cohort: number
           peer_average_minutes: number
           peer_count: number
           rank_percentile: number

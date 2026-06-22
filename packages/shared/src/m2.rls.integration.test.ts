@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 
+import { PEER_RANKING_MIN_COHORT } from "./m2";
 import type { Database } from "./database.types";
 
 type ApiKey = {
@@ -21,6 +22,81 @@ const env = loadTestEnv();
 const describeIfRemote = env ? describe : describe.skip;
 
 describeIfRemote("M2 RLS integration against linked Supabase", () => {
+  it("hides peer ranking aggregates when the same-grade cohort is below the minimum", async () => {
+    if (!env) throw new Error("Missing Supabase test environment");
+
+    const keys = await fetchApiKeys(env);
+    const anonKey = getApiKey(keys, "anon");
+    const serviceRoleKey = getApiKey(keys, "service_role");
+    const admin = createClient<Database>(env.url, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+    const studentClient = createClient<Database>(env.url, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+
+    const suffix = randomUUID();
+    const password = `M2-privacy-${suffix}-12345678`;
+    const studentEmail = `student-privacy-${suffix}@m2.test`;
+    const uniqueGrade = `privacy-${suffix.slice(0, 8)}`;
+    let studentId = "";
+
+    try {
+      const student = await admin.auth.admin.createUser({
+        email: studentEmail,
+        password,
+        email_confirm: true
+      });
+      if (student.error) throw student.error;
+      studentId = student.data.user.id;
+
+      assertOk(
+        await admin.from("profiles").insert({
+          id: studentId,
+          role: "student",
+          name: "M2 privacy student",
+          grade: uniqueGrade,
+          birth_date: "2010-03-01",
+          guardian_consented_at: new Date().toISOString(),
+          onboarded: true
+        })
+      );
+      assertOk(
+        await admin.from("study_sessions").insert({
+          student_id: studentId,
+          subject: "math",
+          started_at: new Date().toISOString(),
+          ended_at: new Date().toISOString(),
+          duration_sec: 3600
+        })
+      );
+
+      const studentSignIn = await studentClient.auth.signInWithPassword({
+        email: studentEmail,
+        password
+      });
+      if (studentSignIn.error) throw studentSignIn.error;
+
+      const rankingResult = await studentClient.rpc("get_peer_study_ranking", {
+        p_days: 7,
+        p_min_cohort: PEER_RANKING_MIN_COHORT
+      });
+      assertOk(rankingResult);
+      const ranking = assertData(rankingResult.data?.[0] ?? null);
+
+      expect(ranking).toMatchObject({
+        peer_count: 0,
+        min_cohort: PEER_RANKING_MIN_COHORT,
+        can_show_peer_ranking: false,
+        current_user_minutes: 60,
+        peer_average_minutes: null,
+        rank_percentile: null
+      });
+    } finally {
+      if (studentId) await admin.auth.admin.deleteUser(studentId);
+    }
+  }, 60_000);
+
   it("prevents students from changing locked teacher homework AI-check settings", async () => {
     if (!env) throw new Error("Missing Supabase test environment");
 

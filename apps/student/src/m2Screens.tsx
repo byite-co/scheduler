@@ -15,8 +15,10 @@ import {
 
 import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
 import {
+  PEER_RANKING_MIN_COHORT,
   SUBJECT_LABELS,
   calculateStudyStreak,
+  canShowPeerRanking,
   canStudentToggleTodoAiCheck,
   getDateKey,
   getStudentHomeVariant,
@@ -24,7 +26,7 @@ import {
   shouldShowTeacherHomework,
   sumStudySecondsForDate
 } from "@ssamplanner/shared";
-import type { Database, SubjectCode } from "@ssamplanner/shared";
+import type { Database, PeerRankingSnapshot, SubjectCode } from "@ssamplanner/shared";
 
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
@@ -33,13 +35,6 @@ type TimetableBlockRow = Database["public"]["Tables"]["timetable_blocks"]["Row"]
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
 type ActivityType = Database["public"]["Enums"]["activity_type"];
 type PlannerView = "todos" | "timetable" | "calendar";
-
-type PeerRanking = {
-  peer_count: number;
-  current_user_minutes: number;
-  peer_average_minutes: number;
-  rank_percentile: number;
-};
 
 const supabase = createClient<Database>(
   process.env.EXPO_PUBLIC_SUPABASE_URL ??
@@ -66,7 +61,7 @@ function useStudentM2Data() {
   const [todos, setTodos] = useState<TodoRow[]>([]);
   const [timetableBlocks, setTimetableBlocks] = useState<TimetableBlockRow[]>([]);
   const [studySessions, setStudySessions] = useState<StudySessionRow[]>([]);
-  const [peerRanking, setPeerRanking] = useState<PeerRanking | null>(null);
+  const [peerRanking, setPeerRanking] = useState<PeerRankingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("세션 확인 중");
 
@@ -115,7 +110,10 @@ function useStudentM2Data() {
           .eq("student_id", userId)
           .gte("started_at", since)
           .order("started_at", { ascending: false }),
-        supabase.rpc("get_peer_study_ranking", { p_days: 7 })
+        supabase.rpc("get_peer_study_ranking", {
+          p_days: 7,
+          p_min_cohort: PEER_RANKING_MIN_COHORT
+        })
       ]);
 
     setProfile(profileResult.data);
@@ -123,7 +121,7 @@ function useStudentM2Data() {
     setTodos(todosResult.data ?? []);
     setTimetableBlocks(timetableResult.data ?? []);
     setStudySessions(sessionsResult.data ?? []);
-    setPeerRanking((peerResult.data?.[0] as PeerRanking | undefined) ?? null);
+    setPeerRanking((peerResult.data?.[0] as PeerRankingSnapshot | undefined) ?? null);
 
     const firstError =
       profileResult.error ??
@@ -794,19 +792,29 @@ function TimetableItem({
   );
 }
 
-function PeerRankingCard({ ranking }: { ranking: PeerRanking | null }) {
+function PeerRankingCard({ ranking }: { ranking: PeerRankingSnapshot | null }) {
+  const showRanking = canShowPeerRanking(ranking);
+
   return (
     <Section title="또래 랭킹" badge="익명 집계">
-      {ranking ? (
+      {ranking && showRanking ? (
         <View style={styles.metricRow}>
           <Metric label="내 7일 공부" value={`${ranking.current_user_minutes}분`} />
           <Metric label="또래 평균" value={`${ranking.peer_average_minutes}분`} />
           <Metric label="상위" value={`${ranking.rank_percentile}%`} />
         </View>
+      ) : ranking ? (
+        <>
+          <View style={styles.metricRow}>
+            <Metric label="내 7일 공부" value={`${ranking.current_user_minutes}분`} />
+            <Metric label="필요 인원" value={`${ranking.peer_count + 1}/${ranking.min_cohort}명`} />
+          </View>
+          <EmptyText>또래 비교는 같은 학년 친구가 더 모이면 보여드려요.</EmptyText>
+        </>
       ) : (
         <EmptyText>같은 학년 집계를 만들 데이터가 아직 없어요.</EmptyText>
       )}
-      <Text style={styles.metaText}>개별 친구 이름 없이 같은 학년의 공부 시간 집계만 보여줘요.</Text>
+      <Text style={styles.metaText}>최소 {PEER_RANKING_MIN_COHORT}명 이상일 때만 익명 평균과 백분위를 보여줘요.</Text>
     </Section>
   );
 }
