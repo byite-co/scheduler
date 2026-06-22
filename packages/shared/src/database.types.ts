@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -911,6 +911,17 @@ export type Database = {
       current_role_is: {
         Args: { p: Database["public"]["Enums"]["user_role"] }
         Returns: boolean
+      }
+      get_peer_study_ranking: {
+        Args: { p_days?: number; p_min_cohort?: number }
+        Returns: {
+          can_show_peer_ranking: boolean
+          current_user_minutes: number
+          min_cohort: number
+          peer_average_minutes: number
+          peer_count: number
+          rank_percentile: number
+        }[]
       }
       is_connected_active: {
         Args: { p_student: string; p_teacher: string }
