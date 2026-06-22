@@ -717,7 +717,76 @@ create table report_views (
   report_id  uuid not null references reports(id) on delete cascade,
   viewed_at  timestamptz not null default now()
 );
-alter table report_views enable row level security; -- 쓰기는 Edge Function(서비스롤)로만
+alter table report_views enable row level security; -- 쓰기는 정의자 RPC(get_shared_report)로만
+
+-- M5: 과외쌤이 공유 링크 발급(토큰+만료+발송).
+create or replace function create_report_share(p_report_id uuid, p_ttl_hours integer default 168)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  report_row reports%rowtype;
+  new_token text;
+  expires timestamptz;
+begin
+  if auth.uid() is null then raise exception 'authentication_required'; end if;
+  select * into report_row from reports where id = p_report_id;
+  if not found then raise exception 'report_not_found'; end if;
+  if not (
+    report_row.teacher_id = auth.uid()
+    or exists (select 1 from connections c
+               where c.student_id = report_row.student_id and c.teacher_id = auth.uid() and c.status = 'active')
+  ) then
+    raise exception 'not_authorized';
+  end if;
+  new_token := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
+  expires := now() + make_interval(hours => greatest(1, coalesce(p_ttl_hours, 168)));
+  update reports
+    set share_token = new_token, share_expires_at = expires, status = 'sent', sent_at = now()
+    where id = p_report_id;
+  return jsonb_build_object('token', new_token, 'expires_at', expires);
+end;
+$$;
+revoke all on function create_report_share(uuid, integer) from public;
+grant execute on function create_report_share(uuid, integer) to authenticated;
+
+-- M5: 학부모(anon)가 토큰으로 조회 — 만료/무효 처리 + report_views 기록(테이블 직접 노출 금지).
+create or replace function get_shared_report(p_token text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  report_row reports%rowtype;
+begin
+  if p_token is null or length(p_token) < 16 then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+  select * into report_row from reports where share_token = p_token;
+  if not found or report_row.status <> 'sent' then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+  if report_row.share_expires_at is not null and report_row.share_expires_at < now() then
+    return jsonb_build_object('status', 'expired');
+  end if;
+  insert into report_views (report_id) values (report_row.id);
+  return jsonb_build_object(
+    'status', 'ok',
+    'report', jsonb_build_object(
+      'id', report_row.id, 'type', report_row.type,
+      'period_start', report_row.period_start, 'period_end', report_row.period_end,
+      'data', report_row.data, 'ai_draft', report_row.ai_draft,
+      'teacher_comment', report_row.teacher_comment,
+      'included_subjects', report_row.included_subjects, 'sent_at', report_row.sent_at
+    )
+  );
+end;
+$$;
+revoke all on function get_shared_report(text) from public;
+grant execute on function get_shared_report(text) to anon, authenticated;
 
 -- ============================================================================
 -- 9. 수업·수업료 (수기 트래커 — 결제 처리 아님!)

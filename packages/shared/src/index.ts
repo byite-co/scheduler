@@ -4,6 +4,7 @@ export * from "./m2";
 export * from "./m3";
 export * from "./m3Focus";
 export * from "./m4";
+export * from "./m5";
 export * from "./pricing";
 export * from "./subjects";
 export * from "./supabase";

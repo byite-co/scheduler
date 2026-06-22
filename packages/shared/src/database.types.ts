@@ -1005,6 +1005,10 @@ export type Database = {
         Args: { p_session: string; p_teacher: string }
         Returns: boolean
       }
+      create_report_share: {
+        Args: { p_report_id: string; p_ttl_hours?: number }
+        Returns: Json
+      }
       current_role_is: {
         Args: { p: Database["public"]["Enums"]["user_role"] }
         Returns: boolean
@@ -1020,6 +1024,7 @@ export type Database = {
           rank_percentile: number
         }[]
       }
+      get_shared_report: { Args: { p_token: string }; Returns: Json }
       is_connected_active: {
         Args: { p_student: string; p_teacher: string }
         Returns: boolean

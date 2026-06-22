@@ -46,3 +46,32 @@
 ### 다음 / 막힌 점
 - 다음: M5(AI 공부량 추천·리포트 + 학부모 공유 링크).
 - 막힌 점 없음. (Edge Function 배포만 사람 승인 대기 — 블로커 아님.)
+
+---
+
+## M5 — AI 공부량 추천 · 리포트  ✅ 구현·검증 완료
+브랜치: `codex/m5-recommendations-reports`
+
+### 무엇을
+- **학부모 공유(프라이버시 핵심)**: `create_report_share`(과외쌤 발급, 토큰+만료+발송) + `get_shared_report`(anon 토큰 조회, 만료 확인, `report_views` 기록). 마이그레이션 `20260625000000` + 토큰 생성 수정 `20260625010000`(gen_random_uuid 기반). schema.sql 미러.
+- **순수 로직**(`packages/shared/src/m5.ts`): `getStubStudyRecommendation`, `aggregateWeeklyStudy`(차트 집계), `getStubReportDraft`, `getFeatureGateState`(무료=광고 언락/프리미엄=무제한), `isShareExpired`, `createPlannerTodosFromRecommendation`.
+- **학생 화면**(`m5Screens.tsx` + `app/(tabs)/ai.tsx`, `app/report.tsx`): AI 추천(C7) 게이팅→추천→"플래너에 반영"(todos+ai_recommendations), 나의 리포트(C8) 주간 차트+초안, 게이팅.
+- **과외쌤 화면**(`app/m5.tsx` + `reports/weekly/page.tsx`, B7): 학생 선택→주간 집계(공개범위 뷰)→AI 초안→담을 과목/코멘트→저장+공유 링크 발급→히스토리/만료 표시.
+- **학부모 웹뷰**(`app/r/[token]/page.tsx`, J16): 인증 없이 토큰으로 리포트 열람, 만료/무효 카피.
+
+### 실제 동작 vs mock
+- **실제**: 공유 링크 발급/조회/만료/조회기록, 게이팅 판정, 추천→플래너 반영(todos 생성), 주간 집계 차트, DB 마이그레이션 원격 push 완료.
+- **STUB(명시)**: AI 추천·리포트 초안 = 결정적 스텁(키 준비 후 Edge Function `ai-study-rec`/`ai-report-draft`로 교체).
+- **MOCK(명시)**: 리워드 광고 = 모의(SDK 없이 언락 기록). 실제 광고 SDK 연동은 추후.
+
+### 검증 결과
+- `lint`/`typecheck`/`test`(71)/`build` 모두 green.
+- 원격 RLS 통합 테스트 ✅ `m5.reports.rls.integration.test.ts`:
+  - 미연결 과외쌤은 공유 링크 발급 불가.
+  - 학부모(anon, 미로그인)는 reports 직접 조회 불가, 토큰 RPC로만 열람 + `report_views` 기록.
+  - 잘못된 토큰→not_found, 만료→expired.
+- 프라이버시 grep: 집중 파일 upload/photo/record 없음(무변경).
+
+### 다음 / 막힌 점
+- 다음: M6(수익화 — 구독/결제). **주의: 실제 키/실결제/실 AI 호출 직전에 STOP**(mock/스텁까지만 진행).
+- 막힌 점 없음.
