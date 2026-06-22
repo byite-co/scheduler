@@ -689,9 +689,11 @@ export type Database = {
           focus_mode: boolean
           focus_score: number | null
           id: string
+          last_resumed_at: string | null
           started_at: string
           student_id: string
           subject: Database["public"]["Enums"]["subject_code"] | null
+          timer_state: string
         }
         Insert: {
           check_total?: number | null
@@ -702,9 +704,11 @@ export type Database = {
           focus_mode?: boolean
           focus_score?: number | null
           id?: string
+          last_resumed_at?: string | null
           started_at: string
           student_id: string
           subject?: Database["public"]["Enums"]["subject_code"] | null
+          timer_state?: string
         }
         Update: {
           check_total?: number | null
@@ -715,9 +719,11 @@ export type Database = {
           focus_mode?: boolean
           focus_score?: number | null
           id?: string
+          last_resumed_at?: string | null
           started_at?: string
           student_id?: string
           subject?: Database["public"]["Enums"]["subject_code"] | null
+          timer_state?: string
         }
         Relationships: [
           {

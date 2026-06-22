@@ -177,36 +177,6 @@ export function StudentTodayM2Screen() {
   const streak = calculateStudyStreak(data.studySessions, new Date());
   const activeSession = data.studySessions.find((studySession) => !studySession.ended_at);
 
-  async function toggleStudySession(focusMode: boolean) {
-    if (!data.session) {
-      data.setMessage("로그인 후 공부를 시작할 수 있어요.");
-      return;
-    }
-
-    if (activeSession) {
-      const now = new Date();
-      const started = new Date(activeSession.started_at);
-      const duration_sec = Math.max(activeSession.duration_sec, Math.floor((now.getTime() - started.getTime()) / 1000));
-      const { error } = await supabase
-        .from("study_sessions")
-        .update({ ended_at: now.toISOString(), duration_sec })
-        .eq("id", activeSession.id);
-      data.setMessage(error ? error.message : "공부 시간을 저장했어요.");
-      await data.refresh();
-      return;
-    }
-
-    const { error } = await supabase.from("study_sessions").insert({
-      student_id: data.session.user.id,
-      started_at: new Date().toISOString(),
-      duration_sec: 0,
-      focus_mode: focusMode,
-      subject: "etc"
-    });
-    data.setMessage(error ? error.message : focusMode ? "집중 모드를 시작했어요." : "공부를 시작했어요.");
-    await data.refresh();
-  }
-
   async function toggleTodoStatus(todo: TodoRow) {
     const nextStatus = todo.status === "done" ? "todo" : "done";
     const { error } = await supabase.from("todos").update({ status: nextStatus }).eq("id", todo.id);
@@ -229,8 +199,6 @@ export function StudentTodayM2Screen() {
       <HeroCard
         activeSession={activeSession}
         goalSeconds={todayGoalSeconds}
-        onFocus={() => void toggleStudySession(true)}
-        onStart={() => void toggleStudySession(false)}
         streakMessage={streak.message}
         streakCount={streak.count}
         studySeconds={todayStudySeconds}
@@ -623,8 +591,6 @@ function CalendarPlanner({ data }: { data: ReturnType<typeof useStudentM2Data> }
 function HeroCard({
   activeSession,
   goalSeconds,
-  onFocus,
-  onStart,
   streakCount,
   streakMessage,
   studySeconds,
@@ -632,8 +598,6 @@ function HeroCard({
 }: {
   activeSession?: StudySessionRow;
   goalSeconds: number;
-  onFocus: () => void;
-  onStart: () => void;
   streakCount: number;
   streakMessage: string;
   studySeconds: number;
@@ -659,8 +623,16 @@ function HeroCard({
         <Metric label="달성" value={goalSeconds > 0 ? `${progress}%` : "-"} />
       </View>
       <View style={styles.inlineActions}>
-        <ActionButton label={activeSession ? "공부 끝내기" : "공부 시작"} onPress={onStart} tone="flame" />
-        <ActionButton label={activeSession?.focus_mode ? "집중 끝내기" : "집중 모드"} onPress={onFocus} tone="neutral" />
+        <Link href={"/timer" as Href} asChild>
+          <Pressable style={[styles.actionButton, styles.flameButton]}>
+            <Text style={styles.actionButtonPrimaryText}>{activeSession ? "타이머 열기" : "공부 시작"}</Text>
+          </Pressable>
+        </Link>
+        <Link href={"/timer?focus=1" as Href} asChild>
+          <Pressable style={[styles.actionButton, styles.neutralButton]}>
+            <Text style={styles.actionButtonText}>{activeSession?.focus_mode ? "집중 타이머" : "집중 모드"}</Text>
+          </Pressable>
+        </Link>
       </View>
     </View>
   );

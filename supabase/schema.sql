@@ -339,6 +339,8 @@ create table study_sessions (
   started_at   timestamptz not null,
   ended_at     timestamptz,
   duration_sec integer not null default 0,
+  timer_state  text not null default 'completed' check (timer_state in ('running', 'paused', 'completed')),
+  last_resumed_at timestamptz,
   focus_mode   boolean not null default false,
   focus_score  numeric,        -- 집중률(%) — 집중 모드 시
   drowsy_count integer,        -- 졸음 감지 횟수(메타데이터)
@@ -632,6 +634,7 @@ create index on todos (student_id, status);
 create index on todos (connection_id);
 create index on homework_submissions (student_id, teacher_status);
 create index on study_sessions (student_id, started_at);
+create index if not exists sessions_student_active_timer_idx on study_sessions (student_id, timer_state, started_at) where ended_at is null;
 create index on connections (teacher_id, status);
 create index on connections (student_id, status);
 create index on notifications (user_id, read);
