@@ -14,6 +14,7 @@ import {
 import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
 import {
   SUBJECT_LABELS,
+  FOCUS_CAMERA_PRIVACY_COPY,
   calculateStudyStreak,
   createTimerEndPatch,
   createTimerPausePatch,
@@ -25,6 +26,8 @@ import {
   sumTimerSecondsForDate
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
+
+import { FocusCameraPanel } from "./focusCamera";
 
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type StudySessionRow = Database["public"]["Tables"]["study_sessions"]["Row"];
@@ -109,7 +112,7 @@ function useTimerData() {
   };
 }
 
-export function StudentTimerScreen() {
+export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolean } = {}) {
   const params = useLocalSearchParams<{ focus?: string }>();
   const data = useTimerData();
   const [selectedSubject, setSelectedSubject] = useState<SubjectCode>("math");
@@ -130,7 +133,7 @@ export function StudentTimerScreen() {
   const todayGoalSeconds = getTodayGoalSeconds(data.timetableBlocks);
   const streak = calculateStudyStreak(sessionsWithLiveTimer, now);
   const weeklyDays = getRecentStudyDays(sessionsWithLiveTimer, now);
-  const focusIntent = params.focus === "1";
+  const focusIntent = focusEntry || params.focus === "1";
 
   useEffect(() => {
     if (activeTimer?.subject) {
@@ -262,6 +265,12 @@ export function StudentTimerScreen() {
           </View>
         </View>
 
+        {activeTimer?.focus_mode ? (
+          <FocusCameraPanel active={timerState === "running"} />
+        ) : focusIntent ? (
+          <FocusIntroCard onStart={() => void startTimer(true)} />
+        ) : null}
+
         <View style={styles.metricRow}>
           <Metric label="오늘 공부" value={formatDuration(todaySeconds)} />
           <Metric label="목표" value={todayGoalSeconds > 0 ? formatDuration(todayGoalSeconds) : "미설정"} />
@@ -284,6 +293,32 @@ export function StudentTimerScreen() {
 
       </ScrollView>
       <BottomNav />
+    </View>
+  );
+}
+
+function FocusIntroCard({ onStart }: { onStart: () => void }) {
+  return (
+    <View style={styles.focusIntro}>
+      <View style={styles.focusIntroIcon}>
+        <Text style={styles.focusIntroIconText}>●</Text>
+      </View>
+      <Text style={styles.focusIntroTitle}>즐기 싫지 않게 지켜봐 주는 공부 친구예요</Text>
+      <Text style={styles.focusIntroBody}>
+        집중 세션에서만 카메라 프리뷰를 켜고, 앱이 뒤로 가면 바로 꺼요.
+      </Text>
+      <View style={styles.focusPrivacy}>
+        <Text style={styles.focusPrivacyTitle}>{FOCUS_CAMERA_PRIVACY_COPY}</Text>
+        <Text style={styles.focusPrivacyBody}>프레임과 영상은 저장하거나 업로드하지 않아요.</Text>
+      </View>
+      <View style={styles.inlineActions}>
+        <ActionButton label="카메라 허용하고 집중 모드 켜기" onPress={onStart} tone="flame" />
+        <Link href={"/focus/permission" as Href} asChild>
+          <Pressable style={[styles.actionButton, styles.neutralButton]}>
+            <Text style={styles.actionButtonText}>권한 먼저 보기</Text>
+          </Pressable>
+        </Link>
+      </View>
     </View>
   );
 }
@@ -554,6 +589,59 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
     lineHeight: 22
+  },
+  focusIntro: {
+    gap: spacing.md,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface
+  },
+  focusIntroIcon: {
+    width: 56,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.card,
+    backgroundColor: colors.flame
+  },
+  focusIntroIconText: {
+    color: colors.surface,
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  focusIntroTitle: {
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 31
+  },
+  focusIntroBody: {
+    color: colors.muted,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 23
+  },
+  focusPrivacy: {
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: "#BFEFD7",
+    borderRadius: radii.control,
+    backgroundColor: "#F0FFF7"
+  },
+  focusPrivacyTitle: {
+    color: "#087A47",
+    fontSize: 14,
+    fontWeight: "900",
+    lineHeight: 20
+  },
+  focusPrivacyBody: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19
   },
   subjectWrap: {
     flexDirection: "row",

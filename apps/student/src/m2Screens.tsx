@@ -628,7 +628,7 @@ function HeroCard({
             <Text style={styles.actionButtonPrimaryText}>{activeSession ? "타이머 열기" : "공부 시작"}</Text>
           </Pressable>
         </Link>
-        <Link href={"/timer?focus=1" as Href} asChild>
+        <Link href={(activeSession?.focus_mode ? "/focus/session" : "/focus/intro") as Href} asChild>
           <Pressable style={[styles.actionButton, styles.neutralButton]}>
             <Text style={styles.actionButtonText}>{activeSession?.focus_mode ? "집중 타이머" : "집중 모드"}</Text>
           </Pressable>
