@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { Link, useLocalSearchParams, type Href } from "expo-router";
+import { Link, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { createClient, type Session } from "@supabase/supabase-js";
 import {
   ActivityIndicator,
@@ -25,13 +25,14 @@ import {
   getTimerState,
   sumTimerSecondsForDate
 } from "@ssamplanner/shared";
-import type { Database, SubjectCode } from "@ssamplanner/shared";
+import type { Database, FocusDrowsinessResult, SubjectCode } from "@ssamplanner/shared";
 
 import { FocusCameraPanel } from "./focusCamera";
 
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type StudySessionRow = Database["public"]["Tables"]["study_sessions"]["Row"];
 type TimetableBlockRow = Database["public"]["Tables"]["timetable_blocks"]["Row"];
+type FocusCheckEvent = FocusDrowsinessResult & { checkedAt: string };
 
 const supabase = createClient<Database>(
   process.env.EXPO_PUBLIC_SUPABASE_URL ??
@@ -114,6 +115,7 @@ function useTimerData() {
 
 export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolean } = {}) {
   const params = useLocalSearchParams<{ focus?: string }>();
+  const router = useRouter();
   const data = useTimerData();
   const [selectedSubject, setSelectedSubject] = useState<SubjectCode>("math");
   const [now, setNow] = useState(new Date());
@@ -195,11 +197,40 @@ export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolea
   async function endTimer() {
     if (!activeTimer) return;
 
+    const endingFocusMode = activeTimer.focus_mode;
     const { error } = await supabase
       .from("study_sessions")
       .update(createTimerEndPatch(activeTimer, new Date()))
       .eq("id", activeTimer.id);
     data.setMessage(error ? error.message : "세션을 종료하고 오늘 누적에 반영했어요.");
+    await data.refresh();
+    if (!error && endingFocusMode) {
+      router.push("/focus/summary");
+    }
+  }
+
+  async function saveFocusCheck(check: FocusCheckEvent) {
+    if (!activeTimer?.focus_mode) return;
+
+    const { error, data: focusSummary } = await supabase.rpc("save_focus_check", {
+      p_session_id: activeTimer.id,
+      p_drowsy: check.drowsy,
+      p_checked_at: check.checkedAt
+    });
+
+    if (error) {
+      data.setMessage(error.message);
+      return;
+    }
+
+    const summary = focusSummary?.[0];
+    data.setMessage(
+      check.drowsy
+        ? "잠깐 환기 신호를 남겼어요. 타이머는 계속 이어져요."
+        : summary
+          ? `집중 신호 기록 중 · 집중 ${Math.round(summary.focus_score ?? 0)}%`
+          : "집중 신호를 기록했어요."
+    );
     await data.refresh();
   }
 
@@ -266,7 +297,11 @@ export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolea
         </View>
 
         {activeTimer?.focus_mode ? (
-          <FocusCameraPanel active={timerState === "running"} />
+          <FocusCameraPanel
+            active={timerState === "running"}
+            onFocusCheck={(check) => void saveFocusCheck(check)}
+            sessionId={activeTimer.id}
+          />
         ) : focusIntent ? (
           <FocusIntroCard onStart={() => void startTimer(true)} />
         ) : null}

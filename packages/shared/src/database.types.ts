@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       ad_unlocks: {
@@ -880,6 +905,38 @@ export type Database = {
       }
     }
     Views: {
+      v_teacher_focus_checks: {
+        Row: {
+          checked_at: string | null
+          drowsy: boolean | null
+          id: string | null
+          session_id: string | null
+          teacher_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connections_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "focus_checks_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "study_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "focus_checks_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "v_teacher_study_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_teacher_study_sessions: {
         Row: {
           check_total: number | null
@@ -890,10 +947,12 @@ export type Database = {
           focus_mode: boolean | null
           focus_score: number | null
           id: string | null
+          last_resumed_at: string | null
           started_at: string | null
           student_id: string | null
           subject: Database["public"]["Enums"]["subject_code"] | null
           teacher_id: string | null
+          timer_state: string | null
         }
         Relationships: [
           {
@@ -914,6 +973,10 @@ export type Database = {
       }
     }
     Functions: {
+      can_teacher_read_focus_check: {
+        Args: { p_session: string; p_teacher: string }
+        Returns: boolean
+      }
       current_role_is: {
         Args: { p: Database["public"]["Enums"]["user_role"] }
         Returns: boolean
@@ -951,6 +1014,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      save_focus_check: {
+        Args: { p_checked_at?: string; p_drowsy: boolean; p_session_id: string }
+        Returns: {
+          check_total: number
+          drowsy_count: number
+          focus_score: number
+          session_id: string
+        }[]
       }
     }
     Enums: {
@@ -1102,6 +1174,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       activity_type: ["school", "academy", "self", "class"],

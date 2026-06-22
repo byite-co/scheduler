@@ -15,22 +15,29 @@ import {
 
 import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
 import {
+  FOCUS_DROWSINESS_THRESHOLDS,
   FOCUS_CAMERA_PRIVACY_COPY,
   FOCUS_CAMERA_TIMER_ONLY_COPY,
   getFocusCameraDecision,
   getFocusCameraFallbackTitle,
+  type FocusDrowsinessResult,
+  type FocusFaceSignals,
   type FocusAppState,
   type FocusCameraFallbackReason
 } from "@ssamplanner/shared";
+import { scheduleOnRN } from "react-native-worklets";
 import type * as VisionCamera from "react-native-vision-camera";
+import type { Frame } from "react-native-vision-camera";
 
 type VisionCameraModule = Pick<
   typeof VisionCamera,
-  "Camera" | "useCameraDevice" | "useCameraPermission"
+  "Camera" | "useCameraDevice" | "useCameraPermission" | "useFrameOutput"
 >;
 
 type FocusCameraProps = {
   active: boolean;
+  onFocusCheck?: (check: FocusCheckEvent) => void;
+  sessionId?: string;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -38,7 +45,29 @@ type PermissionGateProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-export function FocusCameraPanel({ active, style }: FocusCameraProps) {
+export type FocusCheckEvent = FocusDrowsinessResult & {
+  checkedAt: string;
+};
+
+type NativeMediaPipeFaceLandmarker = {
+  isReady: () => boolean;
+  scanFrame: (frame: Frame) => FocusFaceSignals | null;
+};
+
+const FOCUS_CHECK_INTERVAL_MS = 10_000;
+const FOCUS_EYE_BLINK_SCORE = FOCUS_DROWSINESS_THRESHOLDS.eyeBlinkScore;
+const FOCUS_PITCH_DOWN_DEG = FOCUS_DROWSINESS_THRESHOLDS.pitchDownDeg;
+const FOCUS_ROLL_DEG = FOCUS_DROWSINESS_THRESHOLDS.rollDeg;
+const FOCUS_YAW_DEG = FOCUS_DROWSINESS_THRESHOLDS.yawDeg;
+
+declare global {
+  // Installed by the custom native MediaPipe Face Landmarker module in dev-client builds.
+  // The object accepts VisionCamera Frames inside the worklet and returns numeric signals only.
+  var __SSAMPLANNER_MEDIAPIPE_FACE_LANDMARKER__: NativeMediaPipeFaceLandmarker | undefined;
+  var __SSAMPLANNER_LAST_FOCUS_CHECK_MS__: number | undefined;
+}
+
+export function FocusCameraPanel({ active, onFocusCheck, sessionId, style }: FocusCameraProps) {
   const { cameraModule, nativeUnavailable } = useVisionCameraModule(active);
 
   if (!active) {
@@ -59,7 +88,15 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
     return <LoadingCard style={style} />;
   }
 
-  return <NativeVisionCameraPanel active={active} cameraModule={cameraModule} style={style} />;
+  return (
+    <NativeVisionCameraPanel
+      active={active}
+      cameraModule={cameraModule}
+      onFocusCheck={onFocusCheck}
+      sessionId={sessionId}
+      style={style}
+    />
+  );
 }
 
 export function FocusCameraPermissionGate({ style }: PermissionGateProps) {
@@ -79,20 +116,69 @@ export function FocusCameraPermissionGate({ style }: PermissionGateProps) {
 function NativeVisionCameraPanel({
   active,
   cameraModule,
+  onFocusCheck,
+  sessionId,
   style
 }: FocusCameraProps & { cameraModule: VisionCameraModule }) {
   const [appState, setAppState] = useState<FocusAppState>(normalizeAppState(AppState.currentState));
+  const [detectorReady, setDetectorReady] = useState(false);
+  const [modelUnavailable, setModelUnavailable] = useState(false);
+  const [latestCheck, setLatestCheck] = useState<FocusCheckEvent | null>(null);
   const device = cameraModule.useCameraDevice("front");
   const { canRequestPermission, hasPermission, requestPermission } = cameraModule.useCameraPermission();
+  const detectionModelReady = !modelUnavailable && detectorReady;
   const decision = getFocusCameraDecision({
     appState,
     canRequestPermission,
     canUseNativeCamera: Platform.OS === "ios" || Platform.OS === "android",
     deviceAvailable: Boolean(device),
-    hasPermission
+    hasPermission,
+    detectionModelReady
   });
   const shouldMountPreview = active && decision.shouldMountCamera && Boolean(device);
   const CameraPreview = cameraModule.Camera;
+  const frameOutput = cameraModule.useFrameOutput({
+    pixelFormat: "yuv",
+    targetResolution: { width: 320, height: 240 },
+    dropFramesWhileBusy: true,
+    onFrame(frame) {
+      "worklet";
+      const detector = globalThis.__SSAMPLANNER_MEDIAPIPE_FACE_LANDMARKER__;
+      const nowMs = Date.now();
+      const lastCheckAtMs = globalThis.__SSAMPLANNER_LAST_FOCUS_CHECK_MS__ ?? 0;
+
+      if (!detector?.isReady()) {
+        frame.dispose();
+        scheduleOnRN(setModelUnavailable, true);
+        return;
+      }
+
+      if (nowMs - lastCheckAtMs < FOCUS_CHECK_INTERVAL_MS) {
+        frame.dispose();
+        return;
+      }
+
+      globalThis.__SSAMPLANNER_LAST_FOCUS_CHECK_MS__ = nowMs;
+      const signals = detector.scanFrame(frame);
+      frame.dispose();
+
+      if (!signals) {
+        scheduleOnRN(setModelUnavailable, true);
+        return;
+      }
+
+      const result = getDrowsinessFromSignalsOnWorklet(signals);
+      scheduleOnRN(reportFocusCheck, result, new Date(nowMs).toISOString());
+    }
+  });
+
+  function reportFocusCheck(result: FocusDrowsinessResult, checkedAt: string) {
+    const check = { ...result, checkedAt };
+    setLatestCheck(check);
+    if (sessionId) {
+      onFocusCheck?.(check);
+    }
+  }
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
@@ -102,6 +188,20 @@ function NativeVisionCameraPanel({
     return () => subscription.remove();
   }, []);
 
+  useEffect(() => {
+    if (!active || modelUnavailable) {
+      setDetectorReady(false);
+      return;
+    }
+
+    setDetectorReady(isMediaPipeFaceLandmarkerReady());
+    const intervalId = setInterval(() => {
+      setDetectorReady(isMediaPipeFaceLandmarkerReady());
+    }, 750);
+
+    return () => clearInterval(intervalId);
+  }, [active, modelUnavailable]);
+
   if (shouldMountPreview && device) {
     return (
       <View style={[styles.panel, styles.previewPanel, style]}>
@@ -109,6 +209,7 @@ function NativeVisionCameraPanel({
           <CameraPreview
             device={device}
             isActive={true}
+            outputs={[frameOutput]}
             resizeMode="cover"
             style={StyleSheet.absoluteFill}
           />
@@ -117,6 +218,7 @@ function NativeVisionCameraPanel({
             <Text style={styles.previewBadgeText}>카메라 ON</Text>
           </View>
         </View>
+        {latestCheck?.drowsy ? <DrowsyNudge reason={latestCheck.reason} /> : <FocusStatus latestCheck={latestCheck} />}
         <PrivacyNotice />
         <Text style={styles.helperText}>집중 세션 화면이 앞에 있을 때만 프리뷰가 켜져요.</Text>
       </View>
@@ -129,6 +231,97 @@ function NativeVisionCameraPanel({
       reason={decision.fallbackReason ?? "unsupported_environment"}
       style={style}
     />
+  );
+}
+
+function isMediaPipeFaceLandmarkerReady(): boolean {
+  try {
+    return globalThis.__SSAMPLANNER_MEDIAPIPE_FACE_LANDMARKER__?.isReady() === true;
+  } catch {
+    return false;
+  }
+}
+
+function getDrowsinessFromSignalsOnWorklet(signals: FocusFaceSignals): FocusDrowsinessResult {
+  "worklet";
+
+  if (!signals.facePresent) {
+    return { drowsy: false, reason: "no_face", confidence: 0.2 };
+  }
+
+  const leftScore = signals.leftEyeBlinkScore;
+  const rightScore = signals.rightEyeBlinkScore;
+  const validLeft = typeof leftScore === "number" && Number.isFinite(leftScore);
+  const validRight = typeof rightScore === "number" && Number.isFinite(rightScore);
+  const blinkScoreCount = (validLeft ? 1 : 0) + (validRight ? 1 : 0);
+  const averageBlinkScore = blinkScoreCount
+    ? ((validLeft ? leftScore : 0) + (validRight ? rightScore : 0)) / blinkScoreCount
+    : 0;
+
+  if (averageBlinkScore >= FOCUS_EYE_BLINK_SCORE) {
+    return {
+      drowsy: true,
+      reason: "eyes_closed",
+      confidence: clamp01OnWorklet(averageBlinkScore)
+    };
+  }
+
+  if (typeof signals.pitchDeg === "number" && signals.pitchDeg >= FOCUS_PITCH_DOWN_DEG) {
+    return {
+      drowsy: true,
+      reason: "head_down",
+      confidence: clamp01OnWorklet(signals.pitchDeg / 45)
+    };
+  }
+
+  const rollDeg = signals.rollDeg ?? 0;
+  const yawDeg = signals.yawDeg ?? 0;
+  const maxSideAngle = Math.max(Math.abs(rollDeg), Math.abs(yawDeg));
+  if (
+    (typeof signals.rollDeg === "number" && Math.abs(signals.rollDeg) >= FOCUS_ROLL_DEG) ||
+    (typeof signals.yawDeg === "number" && Math.abs(signals.yawDeg) >= FOCUS_YAW_DEG)
+  ) {
+    return {
+      drowsy: true,
+      reason: "head_tilted",
+      confidence: clamp01OnWorklet(maxSideAngle / 50)
+    };
+  }
+
+  return {
+    drowsy: false,
+    reason: "focused",
+    confidence: clamp01OnWorklet(1 - averageBlinkScore)
+  };
+}
+
+function clamp01OnWorklet(value: number): number {
+  "worklet";
+
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function DrowsyNudge({ reason }: { reason: FocusDrowsinessResult["reason"] }) {
+  return (
+    <View style={styles.nudgeCard}>
+      <Text style={styles.nudgeTitle}>잠깐 숨 고르고 다시 가요</Text>
+      <Text style={styles.nudgeBody}>
+        {reason === "eyes_closed"
+          ? "눈이 오래 감긴 신호가 잡혔어요. 물 한 모금 마시고 자세를 다시 잡아볼까요?"
+          : "고개 각도가 흐트러진 신호가 잡혔어요. 화면을 보고 목을 편하게 세워요."}
+      </Text>
+    </View>
+  );
+}
+
+function FocusStatus({ latestCheck }: { latestCheck: FocusCheckEvent | null }) {
+  return (
+    <View style={styles.statusCard}>
+      <Text style={styles.statusTitle}>{latestCheck ? "방금 집중 신호를 확인했어요" : "집중 신호를 기다리고 있어요"}</Text>
+      <Text style={styles.statusBody}>
+        {latestCheck ? "졸음 신호가 없으면 조용히 타이머만 이어가요." : "첫 신호가 들어오면 숫자만 기록해요."}
+      </Text>
+    </View>
   );
 }
 
@@ -382,6 +575,46 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     fontWeight: "800",
+    lineHeight: 19
+  },
+  nudgeCard: {
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: "#FFCDBD",
+    borderRadius: radii.control,
+    backgroundColor: "#FFF2ED"
+  },
+  nudgeTitle: {
+    color: colors.flame,
+    fontSize: 15,
+    fontWeight: "900",
+    lineHeight: 21
+  },
+  nudgeBody: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 19
+  },
+  statusCard: {
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.control,
+    backgroundColor: colors.canvas
+  },
+  statusTitle: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900",
+    lineHeight: 20
+  },
+  statusBody: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "700",
     lineHeight: 19
   },
   loadingRow: {
