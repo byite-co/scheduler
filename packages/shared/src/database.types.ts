@@ -1013,6 +1013,25 @@ export type Database = {
         Args: { p: Database["public"]["Enums"]["user_role"] }
         Returns: boolean
       }
+      generate_teacher_invoice: {
+        Args: { p_period: string }
+        Returns: {
+          amount: number
+          id: string
+          issued_at: string
+          paid_at: string | null
+          period: string
+          status: string
+          student_count: number
+          teacher_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "billing_invoices"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       get_peer_study_ranking: {
         Args: { p_days?: number; p_min_cohort?: number }
         Returns: {
@@ -1029,6 +1048,44 @@ export type Database = {
         Args: { p_student: string; p_teacher: string }
         Returns: boolean
       }
+      mock_set_student_subscription: {
+        Args: {
+          p_expires_at?: string
+          p_status: Database["public"]["Enums"]["sub_status"]
+        }
+        Returns: {
+          expires_at: string | null
+          provider: Database["public"]["Enums"]["sub_provider"]
+          status: Database["public"]["Enums"]["sub_status"]
+          student_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "student_subscriptions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      mock_set_teacher_subscription: {
+        Args: { p_status: Database["public"]["Enums"]["sub_status"] }
+        Returns: {
+          current_period_end: string | null
+          payment_method_last4: string | null
+          provider: Database["public"]["Enums"]["sub_provider"]
+          status: Database["public"]["Enums"]["sub_status"]
+          stripe_customer_id: string | null
+          teacher_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "teacher_subscriptions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      price_per_student_krw: { Args: never; Returns: number }
       request_connection_by_invite: {
         Args: { p_code: string }
         Returns: {

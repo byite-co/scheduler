@@ -75,3 +75,29 @@
 ### 다음 / 막힌 점
 - 다음: M6(수익화 — 구독/결제). **주의: 실제 키/실결제/실 AI 호출 직전에 STOP**(mock/스텁까지만 진행).
 - 막힌 점 없음.
+
+---
+
+## M6 — 수익화 (구독/결제)  ✅ 구현·검증 완료 (mock/스텁까지)
+브랜치: `codex/m6-monetization`
+
+### 무엇을
+- **단가 단일 출처**: SQL `price_per_student_krw()` + TS `PRICE_PER_STUDENT_KRW`, 스키마 테스트로 교차검증.
+- **앱 구독료**(과외쌤→우리, Stripe): `generate_teacher_invoice`(active 연결 수 × 단가) RPC. 마이그레이션 `20260626000000`.
+- **수업·수업료**(학생→과외쌤, 결제 아님): `lesson_fees` 수기 트래커 + `summarizeLessonFees`. 화면/테이블/카피로 앱 구독료와 명확히 분리.
+- **순수 로직**(`m6.ts`): `getTeacherBillingState`(미납→복구 던닝), `buildInvoiceDraft`, `getStudentPremiumState`, `summarizeLessonFees`, `formatKrw`.
+- **화면**: 과외쌤 `/billing`(상태·던닝·인보이스·해지/일시정지), `/billing/cancel`, `/lesson-fees`(수기). 학생 `/subscribe`(프리미엄), `/settings/subscription`(해지).
+
+### 실제 동작 vs mock
+- **실제**: 인보이스 계산(active×단가, 해제 시 감소), 단가 단일출처, 수업료 수기 트래커, 구독 상태 게이팅, DB 마이그레이션 원격 push.
+- **MOCK(명시)**: 구독 상태 전이 = `mock_set_teacher_subscription` / `mock_set_student_subscription` RPC(웹훅 대체, DEV 전용). 학생 IAP 결제 = 모의.
+- **STUB(미배포)**: `billing-stripe`, `iap-webhook` Edge Function = 레포에 501 스텁. 실제 Stripe/RevenueCat 키·서명 검증·실결제는 **STOP — 사람 승인/키 필요**.
+
+### 검증 결과
+- `lint`/`typecheck`/`test`(85)/`build` 모두 green.
+- 원격 RLS 통합 테스트 ✅ `m6.billing.rls.integration.test.ts`: 2명 active→2×단가, 1명 해제→1×단가로 감소, 과외쌤별 인보이스/구독 격리, 모의 던닝/학생 프리미엄 전이.
+- 프라이버시 grep: 집중 파일 무변경·청정.
+
+### 다음 / 막힌 점
+- 다음: M7(알림·계정·시스템 상태).
+- 막힌 점: 실제 결제/웹훅은 키·사람 승인 필요(설계상 STOP 지점, 블로커 아님 — mock으로 플로우 완성).
