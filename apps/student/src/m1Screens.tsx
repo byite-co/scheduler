@@ -1,0 +1,791 @@
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+
+import { Link } from "expo-router";
+import type { Href } from "expo-router";
+import { createClient, type Session } from "@supabase/supabase-js";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+
+import { colors, radii, spacing } from "@ssamplanner/design-tokens";
+import {
+  DEFAULT_DISCLOSURE_SCOPE,
+  canCompleteStudentSignup,
+  canRequestConnectionAgain,
+  formatInviteCode,
+  getMissingStudentSignupSteps,
+  normalizeInviteCode,
+  requiresGuardianConsent
+} from "@ssamplanner/shared";
+import type { ConnectionStatus, Database } from "@ssamplanner/shared";
+
+type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
+type DisclosureRow = Database["public"]["Tables"]["disclosure_settings"]["Row"];
+type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
+
+const supabase = createClient<Database>(
+  process.env.EXPO_PUBLIC_SUPABASE_URL ??
+    process.env.NEXT_PUBLIC_SUPABASE_URL ??
+    "",
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+    ""
+);
+
+function useStudentData() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [connections, setConnections] = useState<ConnectionRow[]>([]);
+  const [disclosures, setDisclosures] = useState<DisclosureRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("세션 확인 중");
+
+  const refresh = useCallback(async (nextSession?: Session | null) => {
+    const activeSession = nextSession ?? (await supabase.auth.getSession()).data.session;
+    setSession(activeSession);
+
+    if (!activeSession) {
+      setProfile(null);
+      setConnections([]);
+      setDisclosures([]);
+      setMessage("가입 또는 로그인이 필요합니다.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const userId = activeSession.user.id;
+    const [profileResult, connectionsResult] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+      supabase
+        .from("connections")
+        .select("*")
+        .eq("student_id", userId)
+        .order("created_at", { ascending: false })
+    ]);
+
+    setProfile(profileResult.data);
+    setConnections(connectionsResult.data ?? []);
+
+    const connectionIds = (connectionsResult.data ?? []).map((connection) => connection.id);
+    if (connectionIds.length) {
+      const disclosureResult = await supabase
+        .from("disclosure_settings")
+        .select("*")
+        .in("connection_id", connectionIds);
+      setDisclosures(disclosureResult.data ?? []);
+    } else {
+      setDisclosures([]);
+    }
+
+    setMessage(profileResult.error?.message ?? "라이브 데이터 동기화 완료");
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      void refresh(nextSession);
+    });
+
+    return () => data.subscription.unsubscribe();
+  }, [refresh]);
+
+  return {
+    session,
+    profile,
+    connections,
+    disclosures,
+    loading,
+    message,
+    refresh,
+    setMessage
+  };
+}
+
+export function StudentHomeM1Screen() {
+  const data = useStudentData();
+  const latest = data.connections[0];
+
+  return (
+    <ScreenFrame
+      eyebrow="학생 홈"
+      title="오늘 공부를 시작하기 전"
+      body="가입과 연결 상태를 확인하고, 선생님에게 공개할 범위를 학생이 직접 정합니다."
+      primaryHref="/signup"
+      primaryLabel={data.session ? "계정 확인" : "가입 시작"}
+      message={data.message}
+    >
+      <StatusBand label="현재 연결" value={latest?.status ?? "혼공생"} tone={latest?.status === "pending" ? "warning" : "success"} />
+      <StepList
+        steps={[
+          ["세션", data.session ? "로그인됨" : "로그인 필요"],
+          ["프로필", data.profile?.onboarded ? "완료" : "저장 필요"],
+          ["연결", latest ? `${latest.status} · ${latest.invite_code ?? "-"}` : "초대 코드 입력 가능"],
+          ["공개 범위", data.disclosures.length ? "저장됨" : "기본값"]
+        ]}
+      />
+    </ScreenFrame>
+  );
+}
+
+export function StudentSignupScreen() {
+  const data = useStudentData();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  async function signUp() {
+    const { data: result, error } = await supabase.auth.signUp({ email, password });
+    data.setMessage(error ? error.message : result.session ? "가입하고 로그인했습니다." : "가입 요청을 보냈습니다. Supabase 기본 인증 메일을 확인해 주세요.");
+    await data.refresh(result.session ?? undefined);
+  }
+
+  async function logIn() {
+    const { data: result, error } = await supabase.auth.signInWithPassword({ email, password });
+    data.setMessage(error ? error.message : "로그인했습니다.");
+    await data.refresh(result.session ?? undefined);
+  }
+
+  return (
+    <ScreenFrame
+      eyebrow="회원가입"
+      title="이메일로 시작"
+      body="Supabase Auth 이메일 가입과 로그인을 실제로 실행합니다."
+      primaryHref="/signup/terms"
+      primaryLabel="약관으로 이동"
+      secondaryHref="/forgot"
+      secondaryLabel="비밀번호 찾기"
+      message={data.message}
+    >
+      <InputRow label="이메일" value={email} onChange={setEmail} keyboardType="email-address" />
+      <InputRow label="비밀번호" value={password} onChange={setPassword} secure />
+      <View style={styles.actions}>
+        <ActionButton label="가입 메일 보내기" onPress={() => void signUp()} variant="primary" />
+        <ActionButton label="로그인" onPress={() => void logIn()} variant="secondary" />
+      </View>
+      <StatusBand label="세션" value={data.session ? "있음" : "없음"} />
+    </ScreenFrame>
+  );
+}
+
+export function StudentTermsScreen() {
+  const data = useStudentData();
+  const [termsAccepted, setTermsAccepted] = useState(true);
+  const [privacyAccepted, setPrivacyAccepted] = useState(true);
+  const [guardianAccepted, setGuardianAccepted] = useState(false);
+  const birthDate = data.profile?.birth_date ?? "2013-06-23";
+  const consentRequired = requiresGuardianConsent(birthDate, "2026-06-22");
+
+  return (
+    <ScreenFrame
+      eyebrow="약관"
+      title="약관과 보호자 동의"
+      body="만 14세 미만이면 프로필 저장 단계에서 보호자 동의가 완료되어야 가입을 끝낼 수 있습니다."
+      primaryHref="/signup/profile"
+      primaryLabel="프로필 입력"
+      message={data.message}
+    >
+      <ToggleRow label="서비스 이용약관" value={termsAccepted} onValueChange={setTermsAccepted} />
+      <ToggleRow label="개인정보 처리방침" value={privacyAccepted} onValueChange={setPrivacyAccepted} />
+      <ToggleRow label="보호자 동의" value={guardianAccepted} onValueChange={setGuardianAccepted} highlight={consentRequired} />
+      <Notice tone={consentRequired && !guardianAccepted ? "warning" : "success"}>
+        {consentRequired && !guardianAccepted
+          ? "생년월일 기준 보호자 동의가 없으면 가입 완료가 막힙니다."
+          : "다음 단계에서 프로필을 저장할 수 있습니다."}
+      </Notice>
+    </ScreenFrame>
+  );
+}
+
+export function StudentProfileScreen() {
+  const data = useStudentData();
+  const [name, setName] = useState("");
+  const [birthDate, setBirthDate] = useState("2013-06-23");
+  const [grade, setGrade] = useState("중1");
+  const [targetUniv, setTargetUniv] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(true);
+  const [guardianConsentAccepted, setGuardianConsentAccepted] = useState(false);
+
+  useEffect(() => {
+    setName(data.profile?.name ?? "");
+    setBirthDate(data.profile?.birth_date ?? "2013-06-23");
+    setGrade(data.profile?.grade ?? "중1");
+    setTargetUniv(data.profile?.target_univ ?? "");
+    setGuardianConsentAccepted(Boolean(data.profile?.guardian_consented_at));
+  }, [data.profile]);
+
+  async function saveProfile() {
+    if (!data.session) {
+      data.setMessage("로그인 후 프로필을 저장할 수 있습니다.");
+      return;
+    }
+
+    const signupState = {
+      name,
+      birthDate,
+      grade,
+      termsAccepted,
+      emailVerified: Boolean(data.session.user.email_confirmed_at || data.session),
+      guardianConsentAccepted
+    };
+    const missing = getMissingStudentSignupSteps(signupState, "2026-06-22");
+
+    if (!canCompleteStudentSignup(signupState, "2026-06-22")) {
+      data.setMessage(`가입 완료 불가: ${missing.join(", ")}`);
+      return;
+    }
+
+    const { error } = await supabase.from("profiles").upsert({
+      id: data.session.user.id,
+      role: "student",
+      name,
+      birth_date: birthDate,
+      grade,
+      target_univ: targetUniv,
+      guardian_consented_at: guardianConsentAccepted ? new Date().toISOString() : null,
+      onboarded: true
+    });
+
+    data.setMessage(error ? error.message : "학생 프로필을 저장했습니다.");
+    await data.refresh();
+  }
+
+  return (
+    <ScreenFrame
+      eyebrow="프로필"
+      title="공부 기준 입력"
+      body="학년과 목표를 저장하면 혼공생 상태로 먼저 사용할 수 있습니다."
+      primaryHref="/onboarding/connect"
+      primaryLabel="선생님 연결"
+      message={data.message}
+    >
+      <InputRow label="이름" value={name} onChange={setName} />
+      <InputRow label="생년월일" value={birthDate} onChange={setBirthDate} />
+      <InputRow label="학년" value={grade} onChange={setGrade} />
+      <InputRow label="목표 대학" value={targetUniv} onChange={setTargetUniv} />
+      <ToggleRow label="약관 동의" value={termsAccepted} onValueChange={setTermsAccepted} />
+      <ToggleRow
+        label="보호자 동의"
+        value={guardianConsentAccepted}
+        onValueChange={setGuardianConsentAccepted}
+        highlight={requiresGuardianConsent(birthDate, "2026-06-22")}
+      />
+      <ActionButton label="프로필 저장" onPress={() => void saveProfile()} variant="primary" />
+    </ScreenFrame>
+  );
+}
+
+export function StudentConnectScreen() {
+  const data = useStudentData();
+  const [inviteCode, setInviteCode] = useState("");
+  const latestStatus = data.connections[0]?.status as ConnectionStatus | undefined;
+
+  async function requestConnection() {
+    if (!data.session) {
+      data.setMessage("로그인 후 연결 요청을 보낼 수 있습니다.");
+      return;
+    }
+    if (!data.profile?.onboarded) {
+      data.setMessage("학생 프로필 저장을 먼저 완료해 주세요.");
+      return;
+    }
+    if (!canRequestConnectionAgain(latestStatus)) {
+      data.setMessage("이미 진행 중이거나 active 상태인 연결이 있습니다.");
+      return;
+    }
+
+    const { data: connection, error } = await supabase.rpc("request_connection_by_invite", {
+      p_code: normalizeInviteCode(inviteCode)
+    });
+
+    data.setMessage(error ? error.message : `연결 요청이 ${connection.status} 상태로 저장되었습니다.`);
+    await data.refresh();
+  }
+
+  return (
+    <ScreenFrame
+      eyebrow="선생님 연결"
+      title="초대 코드 입력"
+      body="코드를 입력하면 connections 행이 pending 상태로 실제 생성됩니다. rejected 이후에도 다시 요청할 수 있습니다."
+      primaryHref="/onboarding/connect/status"
+      primaryLabel="상태 확인"
+      secondaryHref="/onboarding/disclosure"
+      secondaryLabel="공개 범위"
+      message={data.message}
+    >
+      <InputRow label="초대 코드" value={inviteCode} onChange={setInviteCode} autoCapitalize="characters" />
+      <ActionButton label="요청 보내기" onPress={() => void requestConnection()} variant="primary" />
+      <StepList
+        steps={[
+          ["최근 상태", latestStatus ?? "없음"],
+          ["재요청 가능", canRequestConnectionAgain(latestStatus) ? "가능" : "불가"],
+          ["입력 코드", inviteCode ? formatInviteCode(inviteCode) : "-"]
+        ]}
+      />
+    </ScreenFrame>
+  );
+}
+
+export function StudentConnectStatusScreen() {
+  const data = useStudentData();
+
+  return (
+    <ScreenFrame
+      eyebrow="연결 상태"
+      title="DB 연결 상태"
+      body="선생님이 수락하면 active, 거절하면 rejected로 실제 DB 상태가 바뀝니다."
+      primaryHref="/onboarding/connect"
+      primaryLabel="다시 요청"
+      secondaryHref="/onboarding/disclosure"
+      secondaryLabel="공개 범위 설정"
+      message={data.message}
+    >
+      {data.connections.length ? (
+        <StepList
+          steps={data.connections.map((connection) => [
+            connection.invite_code ? formatInviteCode(connection.invite_code) : connection.id.slice(0, 8),
+            connection.status
+          ])}
+        />
+      ) : (
+        <Notice tone="warning">아직 연결 요청이 없습니다.</Notice>
+      )}
+    </ScreenFrame>
+  );
+}
+
+export function StudentDisclosureScreen() {
+  const data = useStudentData();
+  const connection = data.connections.find((row) => row.status === "active") ?? data.connections[0];
+  const disclosure = data.disclosures.find((row) => row.connection_id === connection?.id);
+  const [shareStudyTime, setShareStudyTime] = useState(DEFAULT_DISCLOSURE_SCOPE.shareStudyTime);
+  const [shareHomeworkPhotos, setShareHomeworkPhotos] = useState(DEFAULT_DISCLOSURE_SCOPE.shareHomeworkPhotos);
+  const [shareFocusData, setShareFocusData] = useState(DEFAULT_DISCLOSURE_SCOPE.shareFocusData);
+
+  useEffect(() => {
+    setShareStudyTime(disclosure?.share_study_time ?? DEFAULT_DISCLOSURE_SCOPE.shareStudyTime);
+    setShareHomeworkPhotos(disclosure?.share_homework_photos ?? DEFAULT_DISCLOSURE_SCOPE.shareHomeworkPhotos);
+    setShareFocusData(disclosure?.share_focus_data ?? DEFAULT_DISCLOSURE_SCOPE.shareFocusData);
+  }, [disclosure]);
+
+  async function saveDisclosure() {
+    if (!connection) {
+      data.setMessage("공개 범위를 저장할 연결이 없습니다.");
+      return;
+    }
+
+    const { error } = await supabase.from("disclosure_settings").upsert({
+      connection_id: connection.id,
+      share_study_time: shareStudyTime,
+      share_homework_photos: shareHomeworkPhotos,
+      share_focus_data: shareFocusData
+    });
+
+    data.setMessage(error ? error.message : "공개 범위를 저장했습니다.");
+    await data.refresh();
+  }
+
+  return (
+    <ScreenFrame
+      eyebrow="공개 범위"
+      title="선생님에게 보일 데이터"
+      body="공부 시간, 숙제 사진, 집중 데이터는 학생이 켜 둔 범위 안에서만 선생님에게 보입니다."
+      primaryHref="/"
+      primaryLabel="홈"
+      message={data.message}
+    >
+      <ToggleRow label="공부 시간·과목" value={shareStudyTime} onValueChange={setShareStudyTime} />
+      <ToggleRow label="숙제·검사 사진" value={shareHomeworkPhotos} onValueChange={setShareHomeworkPhotos} />
+      <ToggleRow label="집중도·졸음 데이터" value={shareFocusData} onValueChange={setShareFocusData} />
+      <ActionButton label="공개 범위 저장" onPress={() => void saveDisclosure()} variant="primary" />
+      <Notice tone="success">RLS 정책상 학생만 수정할 수 있고 선생님은 읽기만 가능합니다.</Notice>
+    </ScreenFrame>
+  );
+}
+
+export function StudentForgotPasswordScreen() {
+  const data = useStudentData();
+  const [email, setEmail] = useState("");
+
+  async function resetPassword() {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    data.setMessage(error ? error.message : "비밀번호 재설정 메일을 보냈습니다.");
+  }
+
+  return (
+    <ScreenFrame
+      eyebrow="비밀번호 찾기"
+      title="재설정 메일 받기"
+      body="가입한 이메일로 Supabase Auth 재설정 링크를 보냅니다."
+      primaryHref="/reset"
+      primaryLabel="새 비밀번호"
+      message={data.message}
+    >
+      <InputRow label="이메일" value={email} onChange={setEmail} keyboardType="email-address" />
+      <ActionButton label="메일 보내기" onPress={() => void resetPassword()} variant="primary" />
+    </ScreenFrame>
+  );
+}
+
+export function StudentResetPasswordScreen() {
+  const data = useStudentData();
+  const [password, setPassword] = useState("");
+
+  async function updatePassword() {
+    const { error } = await supabase.auth.updateUser({ password });
+    data.setMessage(error ? error.message : "비밀번호를 변경했습니다.");
+  }
+
+  return (
+    <ScreenFrame
+      eyebrow="비밀번호 재설정"
+      title="새 비밀번호 입력"
+      body="메일 링크로 돌아온 뒤 새 비밀번호를 저장하는 화면입니다."
+      primaryHref="/"
+      primaryLabel="홈"
+      message={data.message}
+    >
+      <InputRow label="새 비밀번호" value={password} onChange={setPassword} secure />
+      <ActionButton label="변경 완료" onPress={() => void updatePassword()} variant="primary" />
+    </ScreenFrame>
+  );
+}
+
+function ScreenFrame({
+  eyebrow,
+  title,
+  body,
+  primaryHref,
+  primaryLabel,
+  secondaryHref,
+  secondaryLabel,
+  message,
+  children
+}: {
+  eyebrow: string;
+  title: string;
+  body: string;
+  primaryHref: Href;
+  primaryLabel: string;
+  secondaryHref?: Href;
+  secondaryLabel?: string;
+  message: string;
+  children: ReactNode;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.scrollContent} style={styles.screen}>
+      <View style={styles.panel}>
+        <Text style={styles.eyebrow}>{eyebrow}</Text>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.body}>{body}</Text>
+        <Notice tone="success">{message}</Notice>
+        <View style={styles.content}>{children}</View>
+        <View style={styles.actions}>
+          <ActionLink href={primaryHref} label={primaryLabel} variant="primary" />
+          {secondaryHref && secondaryLabel ? (
+            <ActionLink href={secondaryHref} label={secondaryLabel} variant="secondary" />
+          ) : null}
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+function ActionLink({
+  href,
+  label,
+  variant
+}: {
+  href: Href;
+  label: string;
+  variant: "primary" | "secondary";
+}) {
+  return (
+    <Link href={href} asChild>
+      <Pressable style={[styles.actionButton, variant === "primary" ? styles.primary : styles.secondary]}>
+        <Text style={variant === "primary" ? styles.primaryText : styles.secondaryText}>{label}</Text>
+      </Pressable>
+    </Link>
+  );
+}
+
+function ActionButton({
+  label,
+  onPress,
+  variant
+}: {
+  label: string;
+  onPress: () => void;
+  variant: "primary" | "secondary";
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.actionButton, variant === "primary" ? styles.primary : styles.secondary]}>
+      <Text style={variant === "primary" ? styles.primaryText : styles.secondaryText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function InputRow({
+  label,
+  value,
+  onChange,
+  secure = false,
+  keyboardType = "default",
+  autoCapitalize = "none"
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  secure?: boolean;
+  keyboardType?: "default" | "email-address";
+  autoCapitalize?: "none" | "characters";
+}) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        autoCapitalize={autoCapitalize}
+        keyboardType={keyboardType}
+        onChangeText={onChange}
+        placeholderTextColor={colors.muted}
+        secureTextEntry={secure}
+        style={styles.input}
+        value={value}
+      />
+    </View>
+  );
+}
+
+function ToggleRow({
+  label,
+  value,
+  onValueChange,
+  highlight = false
+}: {
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  highlight?: boolean;
+}) {
+  return (
+    <View style={styles.toggleRow}>
+      <Text style={[styles.toggleLabel, highlight ? styles.warningText : null]}>{label}</Text>
+      <Switch
+        onValueChange={onValueChange}
+        trackColor={{ false: colors.line, true: colors.brand }}
+        thumbColor={colors.surface}
+        value={value}
+      />
+    </View>
+  );
+}
+
+function StepList({ steps }: { steps: Array<[string, string]> }) {
+  return (
+    <View style={styles.list}>
+      {steps.map(([label, value]) => (
+        <View key={label} style={styles.stepRow}>
+          <Text style={styles.stepLabel}>{label}</Text>
+          <Text style={styles.stepValue}>{value}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function StatusBand({
+  label,
+  value,
+  tone = "success"
+}: {
+  label: string;
+  value: string;
+  tone?: "success" | "warning";
+}) {
+  return (
+    <View style={styles.statusBand}>
+      <Text style={styles.stepLabel}>{label}</Text>
+      <Text style={[styles.statusValue, tone === "warning" ? styles.warningText : styles.successText]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function Notice({ tone, children }: { tone: "success" | "warning"; children: ReactNode }) {
+  return (
+    <View style={[styles.notice, tone === "warning" ? styles.noticeWarning : styles.noticeSuccess]}>
+      <Text style={[styles.noticeText, tone === "warning" ? styles.warningText : styles.successText]}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.canvas
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: spacing.xl
+  },
+  panel: {
+    gap: spacing.lg,
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.08,
+    shadowRadius: 40,
+    elevation: 4
+  },
+  eyebrow: {
+    color: colors.brand,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  title: {
+    color: colors.ink,
+    fontSize: 28,
+    fontWeight: "800",
+    lineHeight: 34
+  },
+  body: {
+    color: colors.muted,
+    fontSize: 16,
+    lineHeight: 24
+  },
+  content: {
+    gap: spacing.md
+  },
+  actions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm
+  },
+  actionButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.button
+  },
+  primary: {
+    backgroundColor: colors.brand
+  },
+  secondary: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface
+  },
+  primaryText: {
+    color: colors.surface,
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  secondaryText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  field: {
+    gap: spacing.xs
+  },
+  fieldLabel: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  input: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.control,
+    backgroundColor: colors.canvas,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700"
+  },
+  list: {
+    gap: spacing.sm
+  },
+  stepRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line
+  },
+  stepLabel: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  stepValue: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+    textAlign: "right"
+  },
+  toggleRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line
+  },
+  toggleLabel: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800"
+  },
+  statusBand: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.control,
+    backgroundColor: colors.canvas
+  },
+  statusValue: {
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  notice: {
+    padding: spacing.md,
+    borderRadius: radii.control
+  },
+  noticeSuccess: {
+    backgroundColor: "rgba(21, 166, 107, 0.1)"
+  },
+  noticeWarning: {
+    backgroundColor: "rgba(224, 161, 0, 0.12)"
+  },
+  noticeText: {
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 20
+  },
+  successText: {
+    color: colors.success
+  },
+  warningText: {
+    color: "#7A5700"
+  }
+});

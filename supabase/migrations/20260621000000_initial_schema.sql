@@ -30,12 +30,6 @@ create type activity_type        as enum ('school','academy','self','class'); --
 create type notif_type           as enum ('reminder','homework','resubmit','check_done','report','connection','billing','cheer','system');
 create type unlock_feature       as enum ('report','ai_check','ai_rec'); -- 광고 보상 언락 대상
 
--- ---------- helper: 현재 사용자 역할 ----------
-create or replace function current_role_is(p user_role) returns boolean
-language sql stable as $$
-  select exists(select 1 from profiles where id = auth.uid() and role = p);
-$$;
-
 -- ============================================================================
 -- 1. 프로필 (auth.users 1:1)
 -- ============================================================================
@@ -59,6 +53,12 @@ alter table profiles enable row level security;
 create policy profiles_self_rw on profiles
   for all using (id = auth.uid()) with check (id = auth.uid());
 -- 과외쌤은 연결된 학생 프로필(기본 정보) 조회 가능 / 학생은 연결된 쌤 프로필 조회 가능 → 아래 함수 정의 후 정책 추가(§연결)
+
+-- ---------- helper: 현재 사용자 역할 ----------
+create or replace function current_role_is(p user_role) returns boolean
+language sql stable as $$
+  select exists(select 1 from profiles where id = auth.uid() and role = p);
+$$;
 
 -- ============================================================================
 -- 2. 연결(과외쌤 ↔ 학생) + 초대코드 + 핸드셰이크

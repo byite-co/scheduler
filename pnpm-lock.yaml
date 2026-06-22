@@ -50,6 +50,9 @@ importers:
       '@ssamplanner/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@supabase/supabase-js':
+        specifier: 2.108.2
+        version: 2.108.2
       babel-preset-expo:
         specifier: 56.0.15
         version: 56.0.15(@babel/core@7.29.7)(@babel/runtime@7.29.7)(expo@56.0.12)(react-refresh@0.14.2)
@@ -108,6 +111,9 @@ importers:
       '@ssamplanner/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@supabase/supabase-js':
+        specifier: 2.108.2
+        version: 2.108.2
       next:
         specifier: 16.2.9
         version: 16.2.9(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -147,6 +153,10 @@ importers:
       '@supabase/supabase-js':
         specifier: 2.108.2
         version: 2.108.2
+    devDependencies:
+      '@types/node':
+        specifier: 26.0.0
+        version: 26.0.0
 
 packages:
 

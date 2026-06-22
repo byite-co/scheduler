@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "쌤플래너 과외쌤",
-  description: "독립 과외쌤을 위한 공부관리 대시보드"
+  description: "과외쌤을 위한 학생 공부관리 도구"
 };
 
 export default function RootLayout({
