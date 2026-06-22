@@ -329,6 +329,72 @@ create policy subs_teacher_update on homework_submissions for update using (
   exists(select 1 from connections c where c.student_id=homework_submissions.student_id and c.teacher_id=auth.uid() and c.status='active')
 );
 
+-- M4: AI 판정은 서버 권위적 — ai_* 는 서비스롤(정의자 RPC)로만 기록(채점 아님, 완료 확인).
+create or replace function apply_homework_ai_verdict(
+  p_submission_id uuid,
+  p_verdict submission_verdict,
+  p_confidence numeric,
+  p_reason text
+)
+returns homework_submissions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  result_row homework_submissions%rowtype;
+begin
+  update homework_submissions
+    set ai_verdict = p_verdict,
+        ai_confidence = case when p_confidence is null then null else greatest(0, least(1, p_confidence)) end,
+        ai_reason = p_reason
+    where id = p_submission_id
+    returning * into result_row;
+  if not found then
+    raise exception 'homework_submission_not_found';
+  end if;
+  return result_row;
+end;
+$$;
+revoke all on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) from public;
+revoke all on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) from authenticated;
+grant execute on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) to service_role;
+
+-- 무결성: ai_* 는 인증 사용자가 못 쓰고(서버 전용), teacher_* 는 학생이 못 바꾼다.
+create or replace function guard_homework_submission_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is not null then
+    if tg_op = 'INSERT'
+      and (new.ai_verdict is not null or new.ai_confidence is not null or new.ai_reason is not null) then
+      raise exception 'ai_fields_are_server_set';
+    end if;
+    if tg_op = 'UPDATE'
+      and (new.ai_verdict is distinct from old.ai_verdict
+        or new.ai_confidence is distinct from old.ai_confidence
+        or new.ai_reason is distinct from old.ai_reason) then
+      raise exception 'ai_fields_are_server_set';
+    end if;
+  end if;
+  if tg_op = 'UPDATE' and auth.uid() = new.student_id then
+    if new.teacher_status is distinct from old.teacher_status
+      or new.teacher_comment is distinct from old.teacher_comment
+      or new.resubmit_requested is distinct from old.resubmit_requested then
+      raise exception 'teacher_fields_not_student_editable';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists guard_homework_submission_fields_trigger on homework_submissions;
+create trigger guard_homework_submission_fields_trigger
+  before insert or update on homework_submissions
+  for each row execute function guard_homework_submission_fields();
+
 -- ============================================================================
 -- 5. 공부 세션(타이머) + 집중 모드(졸음=메타데이터만, 영상 미저장)
 -- ============================================================================
@@ -758,6 +824,8 @@ create policy push_self on push_tokens for all
 create index on todos (student_id, status);
 create index on todos (connection_id);
 create index on homework_submissions (student_id, teacher_status);
+create index if not exists homework_submissions_student_submitted_idx on homework_submissions (student_id, submitted_at desc);
+create index if not exists homework_submissions_todo_submitted_idx on homework_submissions (todo_id, submitted_at desc);
 create index on study_sessions (student_id, started_at);
 create index if not exists sessions_student_active_timer_idx on study_sessions (student_id, timer_state, started_at) where ended_at is null;
 create index if not exists focus_checks_session_checked_at_idx on focus_checks (session_id, checked_at);

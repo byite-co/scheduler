@@ -973,6 +973,34 @@ export type Database = {
       }
     }
     Functions: {
+      apply_homework_ai_verdict: {
+        Args: {
+          p_confidence: number
+          p_reason: string
+          p_submission_id: string
+          p_verdict: Database["public"]["Enums"]["submission_verdict"]
+        }
+        Returns: {
+          ai_confidence: number | null
+          ai_reason: string | null
+          ai_verdict: Database["public"]["Enums"]["submission_verdict"] | null
+          created_at: string
+          id: string
+          photo_paths: string[]
+          resubmit_requested: boolean
+          student_id: string
+          submitted_at: string
+          teacher_comment: string | null
+          teacher_status: Database["public"]["Enums"]["review_status"]
+          todo_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "homework_submissions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       can_teacher_read_focus_check: {
         Args: { p_session: string; p_teacher: string }
         Returns: boolean
