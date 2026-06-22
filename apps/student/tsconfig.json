@@ -14,7 +14,8 @@
       "@ssamplanner/shared/*": [
         "../../packages/shared/src/*"
       ]
-    }
+    },
+    "moduleSuffixes": [".ios", ".android", ".native", ".web", ""]
   },
   "include": [
     "app/**/*.ts",
