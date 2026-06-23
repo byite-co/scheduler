@@ -127,3 +127,34 @@
 ### 다음 / 막힌 점
 - 다음: M8(폴리시 & QA — 접근성·카피·E2E).
 - 막힌 점 없음.
+
+---
+
+## M8 — 폴리시 & QA  ✅ 구현·검증 완료
+브랜치: `codex/m8-polish-qa`
+
+### 무엇을
+- **접근성(WCAG AA)**: `getContrastRatio`/`meetsAA` 유틸 + 토큰 대비 테스트(`a11y.test.ts`).
+- **디자인 토큰 준수**: 승인된 시맨틱 틴트(`tints`) 추가 + `approvedColorValues`. `token-guard.test.ts`가 앱 화면(.tsx)의 모든 hex가 승인 팔레트에 속하는지 강제(임의색 0).
+- **E2E 스캐폴딩**: 과외쌤 Playwright(`apps/teacher/e2e/report-share.e2e.ts` + config, `test:e2e`), 학생 Maestro(`apps/student/e2e/timer-focus.flow.yaml`, `test:e2e`).
+
+### 실제 동작 vs mock
+- **실제**: 대비 계산·가드 테스트는 실제로 실행되어 토큰을 검증.
+- **스캐폴딩(미실행)**: E2E는 브라우저/에뮬레이터 + 실행 서버가 필요해 헤드리스 자율 실행 대상 아님 → CI에서 `pnpm --filter <app> test:e2e`로 실행하도록 스캐폴딩.
+
+### 검증 결과 / 접근성 발견
+- `lint`/`typecheck`/`test`/`build` 모두 green (shared 91 + design-tokens 10 + student 2 + teacher 2).
+- 접근성 발견: 흰 글씨는 **브랜드 위(5.13:1)만** 일반 텍스트 AA 충족, danger 위는 굵은 버튼(라지 3.0)만 충족. **flame/warning 위 흰 글씨는 AA 미달(2.83/2.27)** → 이 색들은 항상 ink/스트롱 텍스트로만 사용(테스트가 규칙을 강제·문서화).
+- 토큰 가드: 앱 화면 내 임의색 0(모든 hex가 colors/tints 소속).
+
+### 다음 / 막힌 점
+- 막힌 점: (1) E2E는 실행 환경(브라우저/에뮬레이터) 필요 — 사람/CI 실행. (2) `docs/ui-catalog` PNG 미제공(AGENTS §9 TODO) → 화면-카탈로그 1:1 대조는 자산 도착 후. 둘 다 자율 빌드의 블로커 아님.
+
+---
+
+## 전체 요약 (M4~M8, 이 세션)
+- M3 2-B(PR #5) squash merge 완료(배포 노트: focus 마이그레이션 순서).
+- M4 AI 완료검사, M5 추천·리포트·학부모 공유, M6 수익화(mock), M7 알림·계정·시스템, M8 폴리시·QA — 각 마일스톤 브랜치→검증→main squash merge 완료.
+- 모든 DB 마이그레이션은 링크된 Supabase(`khssgcagudjimrezebxq`)에 push + 타입 재생성 완료. 핵심 프라이버시/접근 규칙은 원격 RLS 통합 테스트로 증명(졸음 메타데이터 무업로드, AI 판정 서버권위, 사진 공개범위, 학부모 토큰 전용, 과금 격리, 회원탈퇴 cascade).
+- **사람 승인 대기(블로커 아님)**: Edge Function 프로덕션 배포(ai-homework-check / billing-stripe / iap-webhook), 실제 결제·AI 키 연동, E2E 실행, ui-catalog 대조. 자세한 항목은 STOP-NEEDS-HUMAN.md.
+- `gh` 미설치로 GitHub PR 객체는 생성하지 못함 → 각 마일스톤은 브랜치 push 후 main에 squash merge(커밋 메시지에 요약/배포 노트). 사람이 원하면 PR을 따로 열 수 있음.

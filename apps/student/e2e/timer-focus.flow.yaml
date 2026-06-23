@@ -1,0 +1,11 @@
+# Maestro E2E 스캐폴딩 — CI에서 `pnpm --filter student test:e2e`(maestro test)로 실행.
+# 헤드리스 자율 실행 대상 아님(에뮬레이터/디바이스 필요).
+# 핵심 플로우: 타이머 시작 → 집중 모드 진입 → "영상은 기기를 떠나지 않아요" 노출 확인.
+appId: com.ssamplanner.student
+---
+- launchApp
+- assertVisible: "타이머"
+- tapOn: "집중 모드"
+- assertVisible: "영상은 기기를 떠나지 않아요"
+- back
+- assertVisible: "타이머"

@@ -9,7 +9,8 @@
     "build": "expo export --platform web --output-dir dist",
     "lint": "eslint app src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "maestro test e2e"
   },
   "dependencies": {
     "@expo/metro-runtime": "56.0.15",

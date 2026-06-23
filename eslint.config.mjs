@@ -10,6 +10,8 @@ export default [
       "**/coverage/**",
       "**/dist/**",
       "**/node_modules/**",
+      "**/e2e/**",
+      "**/playwright.config.*",
       "docs/_*.html",
       "docs/ui-catalog/**",
       "samplanner_*.html",
