@@ -24,17 +24,6 @@ const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
 );
 
-const navItems = [
-  { href: "/", label: "대시보드" },
-  { href: "/login", label: "로그인" },
-  { href: "/signup", label: "회원가입" },
-  { href: "/onboarding/profile", label: "프로필" },
-  { href: "/onboarding/first-student", label: "첫 학생" },
-  { href: "/students/invite", label: "초대 코드" },
-  { href: "/students/requests", label: "연결 요청" },
-  { href: "/students/demo/settings", label: "학생별 설정" }
-];
-
 const subjectOptions: Array<{ label: string; value: SubjectCode }> = [
   { label: "수학", value: "math" },
   { label: "영어", value: "english" },
@@ -105,7 +94,7 @@ function useTeacherData() {
       setSettings([]);
     }
 
-    setMessage("라이브 데이터 동기화 완료");
+    setMessage("");
     setLoading(false);
   }, []);
 
@@ -172,7 +161,7 @@ export function TeacherDashboardContent() {
               ["이메일", data.session ? "로그인됨" : "가입/로그인 필요"],
               ["프로필", data.profile?.onboarded ? "저장 완료" : "프로필 저장 필요"],
               ["초대 코드", data.inviteCodes[0]?.code ? formatInviteCode(data.inviteCodes[0].code) : "미발급"],
-              ["요청 처리", "pending 요청을 수락 또는 거절"]
+              ["요청 처리", "연결 요청을 수락하거나 거절"]
             ]}
           />
         </Panel>
@@ -188,7 +177,7 @@ export function TeacherLoginContent() {
     <TeacherShell
       active="/login"
       title="이메일로 로그인"
-      subtitle="Supabase Auth 세션으로 로그인하고, 이메일 인증이 필요한 경우 기본 Supabase 메일 링크를 사용합니다."
+      subtitle="이메일로 로그인해요. 인증이 필요하면 메일의 링크를 눌러 주세요."
       data={data}
     >
       <AuthForm mode="login" data={data} />
@@ -218,7 +207,7 @@ export function TeacherResetContent() {
     <TeacherShell
       active="/reset"
       title="비밀번호 재설정"
-      subtitle="Supabase Auth 재설정 메일을 보냅니다."
+      subtitle="가입한 이메일로 비밀번호 재설정 링크를 보내요."
       data={data}
     >
       <ResetPasswordPanel data={data} />
@@ -293,7 +282,7 @@ export function TeacherFirstStudentContent() {
     <TeacherShell
       active="/onboarding/first-student"
       title="첫 학생 연결"
-      subtitle="초대 코드를 만든 뒤 학생이 앱에서 입력하면 connections에 pending 요청이 생성됩니다."
+      subtitle="초대 코드를 만들고 학생에게 알려주세요. 학생이 코드를 입력하면 연결 요청이 도착해요."
       data={data}
     >
       <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
@@ -313,7 +302,7 @@ export function TeacherInviteContent() {
     <TeacherShell
       active="/students/invite"
       title="초대 코드 발급"
-      subtitle="코드는 invite_codes에 저장되고, 학생의 RPC 요청이 이 코드를 검증해 pending 연결을 만듭니다."
+      subtitle="발급한 코드를 학생에게 전달하세요. 학생이 입력하면 연결 요청이 만들어져요."
       data={data}
     >
       <div className="grid gap-4 lg:grid-cols-2">
@@ -384,13 +373,12 @@ export function TeacherStudentSettingsContent() {
 }
 
 function TeacherShell({
-  active,
   title,
   subtitle,
   data,
   children
 }: {
-  active: string;
+  active?: string;
   title: string;
   subtitle: string;
   data: TeacherData;
@@ -398,59 +386,34 @@ function TeacherShell({
 }) {
   async function signOut() {
     await supabase.auth.signOut();
-    data.setMessage("로그아웃했습니다.");
+    data.setMessage("로그아웃했어요.");
     await data.refresh(null);
   }
 
   return (
     <main className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-5 md:grid-cols-[220px_1fr] md:px-8">
-        <aside className="rounded-card border border-line bg-surface p-4">
-          <a href="/" className="block text-lg font-extrabold text-brand">
-            쌤플래너
-          </a>
-          <nav className="mt-6 flex flex-row gap-2 overflow-x-auto md:flex-col md:overflow-visible">
-            {navItems.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className={`whitespace-nowrap rounded-control px-3 py-2 text-sm font-bold ${
-                  active === item.href
-                    ? "bg-brand text-white"
-                    : "text-muted hover:bg-canvas hover:text-ink"
-                }`}
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
-        </aside>
-
-        <section className="flex min-w-0 flex-col gap-5">
-          <header className="flex flex-col gap-3 border-b border-line pb-5 md:flex-row md:items-end md:justify-between">
-            <div>
-              <p className="text-sm font-extrabold text-brand">M1 라이브 Supabase</p>
-              <h1 className="mt-2 text-2xl font-extrabold tracking-normal md:text-4xl">
-                {title}
-              </h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted md:text-base">
-                {subtitle}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusPill tone={data.session ? "success" : "warning"}>
-                {data.session ? "로그인됨" : "로그인 필요"}
-              </StatusPill>
-              {data.session ? (
-                <button className="rounded-control border border-line px-3 py-2 text-xs font-extrabold" onClick={signOut}>
-                  로그아웃
-                </button>
-              ) : null}
-            </div>
-          </header>
-          <LiveMessage loading={data.loading} message={data.message} />
-          {children}
-        </section>
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 md:px-8">
+        <header className="flex flex-col gap-3 border-b border-line pb-5 md:flex-row md:items-end md:justify-between">
+          <div>
+            <a href="/" className="text-sm font-extrabold text-brand">
+              쌤플래너
+            </a>
+            <h1 className="mt-2 text-2xl font-extrabold tracking-normal md:text-3xl">{title}</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted md:text-base">{subtitle}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone={data.session ? "success" : "warning"}>
+              {data.session ? "로그인됨" : "로그인 필요"}
+            </StatusPill>
+            {data.session ? (
+              <button className="rounded-control border border-line px-3 py-2 text-xs font-extrabold" onClick={signOut}>
+                로그아웃
+              </button>
+            ) : null}
+          </div>
+        </header>
+        <LiveMessage loading={data.loading} message={data.message} />
+        {children}
       </div>
     </main>
   );
@@ -476,7 +439,7 @@ function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData 
         ? result.error.message
         : mode === "login"
           ? "로그인했습니다."
-          : "가입 요청을 보냈습니다. Supabase 기본 인증 메일을 확인해 주세요."
+          : "가입 요청을 보냈어요. 인증 메일을 확인해 주세요."
     );
     await data.refresh(result.data.session ?? undefined);
   }
@@ -556,7 +519,7 @@ function InviteCodePanel({ data }: { data: TeacherData }) {
         {latest ? formatInviteCode(latest.code) : "------"}
       </div>
       <p className="text-sm leading-6 text-muted">
-        학생이 이 코드를 입력하면 RPC가 invite_codes를 검증하고 connections에 pending 요청을 만듭니다.
+        학생이 이 코드를 입력하면 연결 요청이 도착해요. 요청을 수락하면 연결이 시작돼요.
       </p>
       <button
         className="inline-flex min-h-11 items-center justify-center rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white"
@@ -714,6 +677,7 @@ function SubjectPicker({ selected, onChange }: { selected: SubjectCode[]; onChan
 }
 
 function LiveMessage({ loading, message }: { loading: boolean; message: string }) {
+  if (!loading && !message) return null;
   return (
     <div className="rounded-control border border-line bg-surface px-4 py-3 text-sm font-bold text-muted">
       {loading ? "불러오는 중..." : message}

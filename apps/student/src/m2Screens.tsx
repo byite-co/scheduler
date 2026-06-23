@@ -13,7 +13,7 @@ import {
   View
 } from "react-native";
 
-import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
+import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
   PEER_RANKING_MIN_COHORT,
   SUBJECT_LABELS,
@@ -47,6 +47,7 @@ const supabase = createClient<Database>(
 
 const subjectOptions = Object.keys(SUBJECT_LABELS) as SubjectCode[];
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const AVATAR_COLORS = [colors.brand, colors.success, colors.warning, colors.muted] as const;
 const activityLabels: Record<ActivityType, string> = {
   school: "학교",
   academy: "학원",
@@ -130,7 +131,7 @@ function useStudentM2Data() {
       timetableResult.error ??
       sessionsResult.error ??
       peerResult.error;
-    setMessage(firstError?.message ?? "Supabase와 동기화됐어요.");
+    setMessage(firstError?.message ?? "");
     setLoading(false);
   }, []);
 
@@ -188,49 +189,56 @@ export function StudentTodayM2Screen() {
     return <AuthGate message={data.message} />;
   }
 
+  const studentName = data.profile?.name?.trim() || "학생";
+  const greeting =
+    variant === "tutored" ? "오늘도 화이팅!" : variant === "self_study" ? "혼자서도 꾸준히" : "환영해요 👋";
+
   return (
     <AppShell
       activeTab="today"
       loading={data.loading}
       message={data.message}
-      subtitle={variant === "tutored" ? "과외쌤과 연결됨" : variant === "self_study" ? "혼자쓰기 모드" : "첫 공부를 기다리는 중"}
-      title={variant === "self_study" ? "혼자쓰기 학생" : "오늘"}
+      header={
+        <HomeHeader
+          dateLabel={formatKoreanDate(new Date())}
+          greeting={greeting}
+          name={studentName}
+          streakCount={streak.count}
+        />
+      }
     >
+      {variant === "self_study" ? <ConnectNudge /> : null}
+
       <HeroCard
         activeSession={activeSession}
         goalSeconds={todayGoalSeconds}
-        streakMessage={streak.message}
-        streakCount={streak.count}
         studySeconds={todayStudySeconds}
         variant={variant}
       />
 
       {variant === "zero" ? (
-        <ZeroHomeState />
+        <ZeroTodoCard />
       ) : (
         <>
-          <TodoPanel
-            emptyText="오늘 직접 만든 할 일이 아직 없어요."
+          <TodoCard
+            emptyText="오늘 만든 할 일이 아직 없어요."
             onToggleStatus={toggleTodoStatus}
-            title="오늘 할 일"
+            title="내 할 일"
             todos={ownTodos}
           />
 
           {shouldShowTeacherHomework(variant) ? (
-            <TodoPanel
-              emptyText="오늘 마감인 선생님 숙제는 없어요."
-              onToggleStatus={toggleTodoStatus}
-              title="선생님 숙제"
-              todos={teacherTodos}
-            />
+            <TeacherHomeworkCard onToggleStatus={toggleTodoStatus} todos={teacherTodos} />
           ) : null}
 
-          {shouldShowPeerRanking(variant) ? (
-            <PeerRankingCard ranking={data.peerRanking} />
-          ) : null}
+          {shouldShowPeerRanking(variant) ? <PeerRankingCard ranking={data.peerRanking} /> : null}
 
           {variant === "tutored" ? (
-            <ClassCard activeConnections={activeConnections.length} doneCount={doneCount} totalCount={todaysTodos.length} />
+            <ClassCard
+              activeConnections={activeConnections.length}
+              doneCount={doneCount}
+              totalCount={todaysTodos.length}
+            />
           ) : null}
         </>
       )}
@@ -591,54 +599,154 @@ function CalendarPlanner({ data }: { data: ReturnType<typeof useStudentM2Data> }
 function HeroCard({
   activeSession,
   goalSeconds,
-  streakCount,
-  streakMessage,
   studySeconds,
   variant
 }: {
   activeSession?: StudySessionRow;
   goalSeconds: number;
-  streakCount: number;
-  streakMessage: string;
   studySeconds: number;
   variant: "tutored" | "self_study" | "zero";
 }) {
-  const progress = goalSeconds > 0 ? Math.min(100, Math.round((studySeconds / goalSeconds) * 100)) : 0;
+  const hasGoal = goalSeconds > 0;
+  const progress = hasGoal ? Math.min(100, Math.round((studySeconds / goalSeconds) * 100)) : 0;
+  const remaining = Math.max(0, goalSeconds - studySeconds);
+  const isZero = variant === "zero";
 
   return (
     <View style={styles.hero}>
-      <View style={styles.heroTop}>
-        <Chip tone="flame">연속 {streakCount}일</Chip>
-        <Chip tone={variant === "tutored" ? "success" : "brand"}>
-          {variant === "tutored" ? "연결형" : variant === "self_study" ? "개인형" : "첫 시작"}
-        </Chip>
+      <View style={styles.heroRow}>
+        <View style={styles.ring}>
+          <Text style={styles.ringValue}>{formatClock(studySeconds)}</Text>
+          <Text style={styles.ringLabel}>{hasGoal ? formatHourLabel(goalSeconds) : "오늘"}</Text>
+        </View>
+        <View style={styles.heroInfo}>
+          {isZero ? (
+            <>
+              <Text style={styles.heroTitle}>오늘 공부를 시작해볼까요?</Text>
+              <Text style={styles.heroBody}>타이머를 켜면 공부 시간이 자동으로 쌓여요.</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.heroEyebrow}>목표까지</Text>
+              <Text style={styles.heroTitle}>{hasGoal ? formatDuration(remaining) : "목표 미설정"}</Text>
+              <Text style={styles.heroBody}>
+                {hasGoal ? `오늘 목표 · ${progress}% 달성` : "시간표를 넣으면 오늘 목표가 생겨요."}
+              </Text>
+            </>
+          )}
+        </View>
       </View>
-      <Text style={styles.heroTitle}>
-        {activeSession ? "지금 공부 중이에요" : variant === "zero" ? "첫 공부를 가볍게 시작해요" : "오늘도 한 번만 시작해요"}
-      </Text>
-      <Text style={styles.heroBody}>{streakMessage}</Text>
-      <View style={styles.metricRow}>
-        <Metric label="오늘 공부" value={formatDuration(studySeconds)} />
-        <Metric label="목표" value={goalSeconds > 0 ? formatDuration(goalSeconds) : "미설정"} />
-        <Metric label="달성" value={goalSeconds > 0 ? `${progress}%` : "-"} />
-      </View>
-      <View style={styles.inlineActions}>
+
+      <View style={styles.heroActions}>
         <Link href={"/timer" as Href} asChild>
-          <Pressable style={StyleSheet.flatten([styles.actionButton, styles.flameButton])}>
-            <Text style={styles.actionButtonPrimaryText}>{activeSession ? "타이머 열기" : "공부 시작"}</Text>
+          <Pressable style={StyleSheet.flatten([styles.heroPrimary, styles.flameButton])}>
+            <Text style={styles.heroPrimaryText}>{activeSession ? "▶ 타이머 열기" : "▶ 공부 시작"}</Text>
           </Pressable>
         </Link>
-        <Link href={(activeSession?.focus_mode ? "/focus/session" : "/focus/intro") as Href} asChild>
-          <Pressable style={StyleSheet.flatten([styles.actionButton, styles.neutralButton])}>
-            <Text style={styles.actionButtonText}>{activeSession?.focus_mode ? "집중 타이머" : "집중 모드"}</Text>
-          </Pressable>
-        </Link>
+        {!isZero ? (
+          <Link href={(activeSession?.focus_mode ? "/focus/session" : "/focus/intro") as Href} asChild>
+            <Pressable style={styles.heroGhost}>
+              <Text style={styles.heroGhostText}>
+                {activeSession?.focus_mode ? "◎ 집중 타이머 이어서" : "◎ 집중 모드로 시작 · 졸음 점검"}
+              </Text>
+            </Pressable>
+          </Link>
+        ) : null}
       </View>
     </View>
   );
 }
 
-function TodoPanel({
+function HomeHeader({
+  dateLabel,
+  greeting,
+  name,
+  streakCount
+}: {
+  dateLabel: string;
+  greeting: string;
+  name: string;
+  streakCount: number;
+}) {
+  return (
+    <View style={styles.homeHeader}>
+      <View style={styles.flex}>
+        <Text style={styles.homeDate}>{dateLabel}</Text>
+        <Text style={styles.homeGreeting}>
+          {name}님, {greeting}
+        </Text>
+      </View>
+      {streakCount > 0 ? (
+        <View style={styles.streakChip}>
+          <Text style={styles.streakChipText}>🔥 {streakCount}일</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ConnectNudge() {
+  return (
+    <Link href={"/onboarding/connect" as Href} asChild>
+      <Pressable style={styles.nudge}>
+        <Text style={styles.nudgeText}>🔥 선생님과 연결하면 숙제·리포트로 함께 관리해요</Text>
+        <Text style={styles.nudgeArrow}>›</Text>
+      </Pressable>
+    </Link>
+  );
+}
+
+function HomeCard({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        {right ? <View style={styles.cardHeaderRight}>{right}</View> : null}
+      </View>
+      <View style={styles.cardBody}>{children}</View>
+    </View>
+  );
+}
+
+function SoftTag({
+  children,
+  tone
+}: {
+  children: ReactNode;
+  tone: "subject" | "brand" | "lock";
+}) {
+  const boxStyle = tone === "brand" ? styles.tagBrand : tone === "lock" ? styles.tagLock : styles.tagSubject;
+  const textStyle = tone === "brand" ? styles.tagBrandText : tone === "lock" ? styles.tagLockText : styles.tagSubjectText;
+  return (
+    <View style={[styles.tag, boxStyle]}>
+      <Text style={[styles.tagText, textStyle]}>{children}</Text>
+    </View>
+  );
+}
+
+function StudyTodoRow({
+  onToggleStatus,
+  todo
+}: {
+  onToggleStatus: (todo: TodoRow) => Promise<void>;
+  todo: TodoRow;
+}) {
+  const done = todo.status === "done";
+  return (
+    <Pressable onPress={() => void onToggleStatus(todo)} style={styles.todoRow}>
+      <View style={[styles.checkbox, done ? styles.checkboxDone : null]}>
+        {done ? <Text style={styles.checkboxMark}>✓</Text> : null}
+      </View>
+      <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
+        {todo.title}
+      </Text>
+      {todo.ai_check_enabled ? <SoftTag tone="brand">AI 검사</SoftTag> : null}
+      <SoftTag tone="subject">{todo.subject ? SUBJECT_LABELS[todo.subject] : "기타"}</SoftTag>
+    </Pressable>
+  );
+}
+
+function TodoCard({
   emptyText,
   onToggleStatus,
   title,
@@ -649,34 +757,67 @@ function TodoPanel({
   title: string;
   todos: TodoRow[];
 }) {
+  const done = todos.filter((todo) => todo.status === "done").length;
   return (
-    <Section title={title} badge={`${todos.filter((todo) => todo.status === "done").length}/${todos.length}`}>
+    <HomeCard
+      title={title}
+      right={todos.length ? <Text style={styles.countBadge}>{`${done}/${todos.length}`}</Text> : undefined}
+    >
       {todos.length ? (
-        todos.slice(0, 4).map((todo) => (
-          <View key={todo.id} style={styles.simpleTodoRow}>
-            <Pressable onPress={() => void onToggleStatus(todo)} style={styles.checkButton}>
-              <Text style={styles.checkText}>{todo.status === "done" ? "완" : "□"}</Text>
-            </Pressable>
-            <View style={styles.flex}>
-              <Text style={styles.itemTitle}>{todo.title}</Text>
-              <Text style={styles.metaText}>
-                {todo.due_date ?? "마감 없음"} · {todo.ai_check_enabled ? "AI 검사" : "기본 완료"}
-              </Text>
-            </View>
-            <Chip tone={todo.source === "teacher" ? "success" : "brand"}>
-              {todo.subject ? SUBJECT_LABELS[todo.subject] : "기타"}
-            </Chip>
-          </View>
-        ))
+        todos.slice(0, 4).map((todo) => <StudyTodoRow key={todo.id} onToggleStatus={onToggleStatus} todo={todo} />)
       ) : (
         <EmptyText>{emptyText}</EmptyText>
       )}
       <Link href={"/planner" as Href} asChild>
         <Pressable style={styles.textLink}>
-          <Text style={styles.textLinkLabel}>플래너에서 관리</Text>
+          <Text style={styles.textLinkLabel}>플래너에서 관리 ›</Text>
         </Pressable>
       </Link>
-    </Section>
+    </HomeCard>
+  );
+}
+
+function TeacherHomeworkCard({
+  onToggleStatus,
+  todos
+}: {
+  onToggleStatus: (todo: TodoRow) => Promise<void>;
+  todos: TodoRow[];
+}) {
+  const done = todos.filter((todo) => todo.status === "done").length;
+  return (
+    <HomeCard
+      title="선생님 숙제"
+      right={
+        <>
+          <SoftTag tone="lock">잠금됨</SoftTag>
+          {todos.length ? <Text style={styles.countBadge}>{`${done}/${todos.length}`}</Text> : null}
+        </>
+      }
+    >
+      {todos.length ? (
+        todos.slice(0, 4).map((todo) => <StudyTodoRow key={todo.id} onToggleStatus={onToggleStatus} todo={todo} />)
+      ) : (
+        <EmptyText>오늘 마감인 선생님 숙제는 없어요.</EmptyText>
+      )}
+    </HomeCard>
+  );
+}
+
+function ZeroTodoCard() {
+  return (
+    <View style={styles.zeroCard}>
+      <View style={styles.zeroIcon}>
+        <Text style={styles.zeroIconText}>🗒️</Text>
+      </View>
+      <Text style={styles.zeroCardTitle}>아직 할 일이 없어요</Text>
+      <Text style={styles.zeroCardBody}>오늘 공부할 것을 추가하고{"\n"}하나씩 체크해 보세요.</Text>
+      <Link href={"/planner" as Href} asChild>
+        <Pressable style={StyleSheet.flatten([styles.zeroButton, styles.brandButton])}>
+          <Text style={styles.actionButtonPrimaryText}>+ 첫 할 일 추가</Text>
+        </Pressable>
+      </Link>
+    </View>
   );
 }
 
@@ -768,26 +909,34 @@ function PeerRankingCard({ ranking }: { ranking: PeerRankingSnapshot | null }) {
   const showRanking = canShowPeerRanking(ranking);
 
   return (
-    <Section title="또래 랭킹" badge="익명 집계">
+    <HomeCard title="지금 공부 중인 또래" right={<Text style={styles.countBadge}>익명</Text>}>
       {ranking && showRanking ? (
-        <View style={styles.metricRow}>
-          <Metric label="내 7일 공부" value={`${ranking.current_user_minutes}분`} />
-          <Metric label="또래 평균" value={`${ranking.peer_average_minutes}분`} />
-          <Metric label="상위" value={`${ranking.rank_percentile}%`} />
-        </View>
-      ) : ranking ? (
         <>
-          <View style={styles.metricRow}>
-            <Metric label="내 7일 공부" value={`${ranking.current_user_minutes}분`} />
-            <Metric label="필요 인원" value={`${ranking.peer_count + 1}/${ranking.min_cohort}명`} />
+          <View style={styles.rankMeRow}>
+            <View style={styles.rankMeBadge}>
+              <Text style={styles.rankMeBadgeText}>나</Text>
+            </View>
+            <Text style={styles.rankMeName}>나의 순위</Text>
+            <Text style={styles.rankMeValue}>상위 {ranking.rank_percentile}%</Text>
           </View>
-          <EmptyText>또래 비교는 같은 학년 친구가 더 모이면 보여드려요.</EmptyText>
+          <View style={styles.rankRow}>
+            <Text style={styles.rankRowLabel}>내 7일 공부</Text>
+            <Text style={styles.rankRowValue}>{ranking.current_user_minutes}분</Text>
+          </View>
+          <View style={styles.rankRow}>
+            <Text style={styles.rankRowLabel}>또래 평균</Text>
+            <Text style={styles.rankRowValue}>{ranking.peer_average_minutes}분</Text>
+          </View>
         </>
+      ) : ranking ? (
+        <EmptyText>
+          또래 비교는 같은 학년 친구가 {ranking.min_cohort}명 이상 모이면 보여드려요. (지금 {ranking.peer_count + 1}명)
+        </EmptyText>
       ) : (
         <EmptyText>같은 학년 집계를 만들 데이터가 아직 없어요.</EmptyText>
       )}
-      <Text style={styles.metaText}>최소 {PEER_RANKING_MIN_COHORT}명 이상일 때만 익명 평균과 백분위를 보여줘요.</Text>
-    </Section>
+      <Text style={styles.privacyNote}>최소 {PEER_RANKING_MIN_COHORT}명 이상 모일 때만 익명 평균·백분위를 보여줘요.</Text>
+    </HomeCard>
   );
 }
 
@@ -800,23 +949,21 @@ function ClassCard({
   doneCount: number;
   totalCount: number;
 }) {
+  const dots = AVATAR_COLORS.slice(0, Math.min(AVATAR_COLORS.length, Math.max(1, activeConnections)));
   return (
-    <Section title={`우리 반 ${activeConnections}명 공부 중`} badge={totalCount ? `${doneCount}/${totalCount}` : "대기"}>
-      <Text style={styles.bodyText}>선생님과 연결된 상태예요. 선생님 숙제와 개인 공부를 같은 플래너에서 관리합니다.</Text>
-    </Section>
-  );
-}
-
-function ZeroHomeState() {
-  return (
-    <Section title="아직 오늘 계획이 없어요" badge="제로">
-      <Text style={styles.bodyText}>대단한 계획보다 첫 한 줄이 더 좋아요. 10분짜리 할 일 하나만 만들어도 오늘 화면이 살아납니다.</Text>
-      <Link href={"/planner" as Href} asChild>
-        <Pressable style={StyleSheet.flatten([styles.actionButton, styles.brandButton])}>
-          <Text style={styles.actionButtonPrimaryText}>첫 할 일 추가</Text>
-        </Pressable>
-      </Link>
-    </Section>
+    <HomeCard
+      title={`우리 반 ${activeConnections}명 공부 중`}
+      right={totalCount ? <Text style={styles.countBadge}>{`${doneCount}/${totalCount}`}</Text> : undefined}
+    >
+      <View style={styles.avatarRow}>
+        <View style={styles.avatarStack}>
+          {dots.map((color) => (
+            <View key={color} style={[styles.avatar, { backgroundColor: color }]} />
+          ))}
+        </View>
+        <Text style={styles.classMeta}>선생님과 같은 플래너로 함께 공부하고 있어요.</Text>
+      </View>
+    </HomeCard>
   );
 }
 
@@ -853,35 +1000,42 @@ function AuthGate({ message }: { message: string }) {
   );
 }
 
+type StudentTab = "today" | "planner" | "class" | "ai" | "records";
+
 function AppShell({
   activeTab,
   children,
+  header,
   loading,
   message,
   subtitle,
   title
 }: {
-  activeTab: "today" | "planner";
+  activeTab: StudentTab;
   children: ReactNode;
+  header?: ReactNode;
   loading: boolean;
   message: string;
-  subtitle: string;
-  title: string;
+  subtitle?: string;
+  title?: string;
 }) {
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.pageHeader}>
-          <View>
-            <Text style={styles.kicker}>쌤플래너</Text>
-            <Text style={styles.pageTitle}>{title}</Text>
-            <Text style={styles.pageSubtitle}>{subtitle}</Text>
+        {header ?? (
+          <View style={styles.pageHeader}>
+            <View style={styles.flex}>
+              <Text style={styles.pageTitle}>{title}</Text>
+              {subtitle ? <Text style={styles.pageSubtitle}>{subtitle}</Text> : null}
+            </View>
+            {loading ? <ActivityIndicator color={colors.brand} /> : null}
           </View>
-          {loading ? <ActivityIndicator color={colors.brand} /> : <Chip tone="success">live</Chip>}
-        </View>
-        <View style={styles.notice}>
-          <Text style={styles.noticeText}>{message}</Text>
-        </View>
+        )}
+        {message ? (
+          <View style={styles.notice}>
+            <Text style={styles.noticeText}>{message}</Text>
+          </View>
+        ) : null}
         {children}
       </ScrollView>
       <BottomNav active={activeTab} />
@@ -889,23 +1043,72 @@ function AppShell({
   );
 }
 
-function BottomNav({ active }: { active: "today" | "planner" }) {
+const STUDENT_TABS: Array<{ tab: StudentTab; href: string; label: string; icon: string }> = [
+  { tab: "today", href: "/today", label: "오늘", icon: "🏠" },
+  { tab: "planner", href: "/planner", label: "플래너", icon: "🗒️" },
+  { tab: "class", href: "/class", label: "또래", icon: "👥" },
+  { tab: "ai", href: "/ai", label: "AI추천", icon: "✨" },
+  { tab: "records", href: "/records", label: "기록", icon: "📊" }
+];
+
+function BottomNav({ active }: { active: StudentTab }) {
   return (
     <View style={styles.bottomNav}>
-      <NavLink active={active === "today"} href="/today" label="오늘" />
-      <NavLink active={active === "planner"} href="/planner" label="플래너" />
-      <NavLink active={false} href="/onboarding/connect/status" label="연결" />
+      {STUDENT_TABS.map((item) => (
+        <NavLink active={active === item.tab} href={item.href} icon={item.icon} key={item.tab} label={item.label} />
+      ))}
     </View>
   );
 }
 
-function NavLink({ active, href, label }: { active: boolean; href: string; label: string }) {
+function NavLink({
+  active,
+  href,
+  icon,
+  label
+}: {
+  active: boolean;
+  href: string;
+  icon: string;
+  label: string;
+}) {
   return (
     <Link href={href as Href} asChild>
-      <Pressable style={StyleSheet.flatten([styles.navItem, active ? styles.navItemActive : null])}>
+      <Pressable style={styles.navItem}>
+        <Text style={[styles.navIcon, active ? styles.navIconActive : null]}>{icon}</Text>
         <Text style={[styles.navText, active ? styles.navTextActive : null]}>{label}</Text>
       </Pressable>
     </Link>
+  );
+}
+
+export function StudentClassScreen() {
+  return <TabPlaceholder activeTab="class" subtitle="과외생은 우리 반, 혼공생은 또래 랭킹을 여기서 봐요." title="또래" />;
+}
+
+export function StudentRecordsScreen() {
+  return <TabPlaceholder activeTab="records" subtitle="공부 시간과 연속 기록을 모아 볼 수 있어요." title="기록" />;
+}
+
+function TabPlaceholder({
+  activeTab,
+  subtitle,
+  title
+}: {
+  activeTab: StudentTab;
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <AppShell activeTab={activeTab} loading={false} message="" subtitle={subtitle} title={title}>
+      <View style={styles.zeroCard}>
+        <View style={styles.zeroIcon}>
+          <Text style={styles.zeroIconText}>🚧</Text>
+        </View>
+        <Text style={styles.zeroCardTitle}>곧 만나요</Text>
+        <Text style={styles.zeroCardBody}>이 화면은 다음 단계에서{"\n"}카탈로그대로 채워질 예정이에요.</Text>
+      </View>
+    </AppShell>
   );
 }
 
@@ -917,15 +1120,6 @@ function Section({ badge, children, title }: { badge?: string; children: ReactNo
         {badge ? <Chip tone="brand">{badge}</Chip> : null}
       </View>
       <View style={styles.sectionBody}>{children}</View>
-    </View>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metric}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
     </View>
   );
 }
@@ -1094,6 +1288,23 @@ function formatDuration(seconds: number): string {
   if (!hours) return `${minutes}분`;
   if (!minutes) return `${hours}시간`;
   return `${hours}시간 ${minutes}분`;
+}
+
+function formatClock(seconds: number): string {
+  const safe = Math.max(0, seconds);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  return `${hours}:${minutes.toString().padStart(2, "0")}`;
+}
+
+function formatHourLabel(seconds: number): string {
+  const hours = Math.round((seconds / 3600) * 10) / 10;
+  return `/ ${hours % 1 === 0 ? hours : hours.toFixed(1)}시간`;
+}
+
+function formatKoreanDate(date: Date): string {
+  const days = ["일", "월", "화", "수", "목", "금", "토"] as const;
+  return `${date.getMonth() + 1}월 ${date.getDate()}일 ${days[date.getDay()]}요일`;
 }
 
 function getTodayGoalSeconds(blocks: TimetableBlockRow[]): number {
@@ -1553,9 +1764,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     flexDirection: "row",
-    justifyContent: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
+    justifyContent: "space-between",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
     borderTopWidth: 1,
@@ -1563,21 +1774,349 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface
   },
   navItem: {
-    minWidth: 88,
+    flex: 1,
     alignItems: "center",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.chip
+    gap: 3,
+    paddingVertical: spacing.xs
   },
-  navItemActive: {
-    backgroundColor: colors.canvas
+  navIcon: {
+    fontSize: 18,
+    opacity: 0.45
+  },
+  navIconActive: {
+    opacity: 1
   },
   navText: {
     color: colors.muted,
-    fontSize: 13,
-    fontWeight: "900"
+    fontSize: 11,
+    fontWeight: "800"
   },
   navTextActive: {
     color: colors.brand
+  },
+  homeHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.md
+  },
+  homeDate: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  homeGreeting: {
+    marginTop: spacing.xs,
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 31
+  },
+  streakChip: {
+    flexShrink: 0,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.chip,
+    backgroundColor: tints.flameSoft
+  },
+  streakChipText: {
+    color: colors.flame,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  nudge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: tints.flameNudgeBorder,
+    borderRadius: radii.control,
+    backgroundColor: tints.flameNudge
+  },
+  nudgeText: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 19
+  },
+  nudgeArrow: {
+    color: colors.flame,
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  heroRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.lg
+  },
+  ring: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    borderWidth: 6,
+    borderColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  ringValue: {
+    color: colors.surface,
+    fontSize: 22,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  ringLabel: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 11,
+    fontWeight: "800"
+  },
+  heroInfo: {
+    flex: 1,
+    gap: spacing.xs
+  },
+  heroEyebrow: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  heroActions: {
+    gap: spacing.sm
+  },
+  heroPrimary: {
+    minHeight: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.button
+  },
+  heroPrimaryText: {
+    color: colors.surface,
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  heroGhost: {
+    alignItems: "center",
+    paddingVertical: spacing.xs
+  },
+  heroGhostText: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  card: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface
+  },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm
+  },
+  cardTitle: {
+    flexShrink: 1,
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900"
+  },
+  cardHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm
+  },
+  cardBody: {
+    gap: spacing.sm
+  },
+  countBadge: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  tag: {
+    flexShrink: 0,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.chip
+  },
+  tagText: {
+    fontSize: 11,
+    fontWeight: "900"
+  },
+  tagSubject: {
+    backgroundColor: colors.canvas
+  },
+  tagSubjectText: {
+    color: colors.muted
+  },
+  tagBrand: {
+    backgroundColor: tints.brandSoft
+  },
+  tagBrandText: {
+    color: colors.brand
+  },
+  tagLock: {
+    backgroundColor: tints.warningSoft
+  },
+  tagLockText: {
+    color: tints.warningStrong
+  },
+  todoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xs
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.line,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  checkboxDone: {
+    borderColor: colors.success,
+    backgroundColor: colors.success
+  },
+  checkboxMark: {
+    color: colors.surface,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  todoRowTitle: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800"
+  },
+  todoRowTitleDone: {
+    color: colors.muted,
+    textDecorationLine: "line-through"
+  },
+  zeroCard: {
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderStyle: "dashed",
+    borderRadius: radii.card,
+    backgroundColor: colors.surface
+  },
+  zeroIcon: {
+    width: 56,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.control,
+    backgroundColor: tints.brandSoft
+  },
+  zeroIconText: {
+    fontSize: 24
+  },
+  zeroCardTitle: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900"
+  },
+  zeroCardBody: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 21,
+    textAlign: "center"
+  },
+  zeroButton: {
+    marginTop: spacing.sm,
+    minHeight: 48,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.button
+  },
+  rankMeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radii.control,
+    backgroundColor: tints.brandSoft
+  },
+  rankMeBadge: {
+    width: 26,
+    height: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.chip,
+    backgroundColor: colors.brand
+  },
+  rankMeBadgeText: {
+    color: colors.surface,
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  rankMeName: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  rankMeValue: {
+    color: colors.brand,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  rankRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.sm
+  },
+  rankRowLabel: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  rankRowValue: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  privacyNote: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18
+  },
+  avatarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md
+  },
+  avatarStack: {
+    flexDirection: "row"
+  },
+  avatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginRight: -8,
+    borderWidth: 2,
+    borderColor: colors.surface
+  },
+  classMeta: {
+    flex: 1,
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19
   }
 });

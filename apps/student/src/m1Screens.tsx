@@ -76,7 +76,7 @@ function useStudentData() {
       setDisclosures([]);
     }
 
-    setMessage(profileResult.error?.message ?? "라이브 데이터 동기화 완료");
+    setMessage(profileResult.error?.message ?? "");
     setLoading(false);
   }, []);
 
@@ -134,7 +134,7 @@ export function StudentSignupScreen() {
 
   async function signUp() {
     const { data: result, error } = await supabase.auth.signUp({ email, password });
-    data.setMessage(error ? error.message : result.session ? "가입하고 로그인했습니다." : "가입 요청을 보냈습니다. Supabase 기본 인증 메일을 확인해 주세요.");
+    data.setMessage(error ? error.message : result.session ? "가입하고 로그인했어요." : "가입 요청을 보냈어요. 인증 메일을 확인해 주세요.");
     await data.refresh(result.session ?? undefined);
   }
 
@@ -148,7 +148,7 @@ export function StudentSignupScreen() {
     <ScreenFrame
       eyebrow="회원가입"
       title="이메일로 시작"
-      body="Supabase Auth 이메일 가입과 로그인을 실제로 실행합니다."
+      body="이메일로 가입하고 로그인해요."
       primaryHref="/signup/terms"
       primaryLabel="약관으로 이동"
       secondaryHref="/forgot"
@@ -304,7 +304,7 @@ export function StudentConnectScreen() {
     <ScreenFrame
       eyebrow="선생님 연결"
       title="초대 코드 입력"
-      body="코드를 입력하면 connections 행이 pending 상태로 실제 생성됩니다. rejected 이후에도 다시 요청할 수 있습니다."
+      body="코드를 입력하면 선생님께 연결 요청을 보내요. 거절돼도 언제든 다시 요청할 수 있어요."
       primaryHref="/onboarding/connect/status"
       primaryLabel="상태 확인"
       secondaryHref="/onboarding/disclosure"
@@ -414,7 +414,7 @@ export function StudentForgotPasswordScreen() {
     <ScreenFrame
       eyebrow="비밀번호 찾기"
       title="재설정 메일 받기"
-      body="가입한 이메일로 Supabase Auth 재설정 링크를 보냅니다."
+      body="가입한 이메일로 비밀번호 재설정 링크를 보내요."
       primaryHref="/reset"
       primaryLabel="새 비밀번호"
       message={data.message}
