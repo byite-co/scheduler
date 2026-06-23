@@ -500,7 +500,7 @@ function ActionLink({
 }) {
   return (
     <Link href={href} asChild>
-      <Pressable style={[styles.actionButton, variant === "primary" ? styles.primary : styles.secondary]}>
+      <Pressable style={StyleSheet.flatten([styles.actionButton, variant === "primary" ? styles.primary : styles.secondary])}>
         <Text style={variant === "primary" ? styles.primaryText : styles.secondaryText}>{label}</Text>
       </Pressable>
     </Link>

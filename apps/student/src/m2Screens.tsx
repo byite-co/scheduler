@@ -624,12 +624,12 @@ function HeroCard({
       </View>
       <View style={styles.inlineActions}>
         <Link href={"/timer" as Href} asChild>
-          <Pressable style={[styles.actionButton, styles.flameButton]}>
+          <Pressable style={StyleSheet.flatten([styles.actionButton, styles.flameButton])}>
             <Text style={styles.actionButtonPrimaryText}>{activeSession ? "타이머 열기" : "공부 시작"}</Text>
           </Pressable>
         </Link>
         <Link href={(activeSession?.focus_mode ? "/focus/session" : "/focus/intro") as Href} asChild>
-          <Pressable style={[styles.actionButton, styles.neutralButton]}>
+          <Pressable style={StyleSheet.flatten([styles.actionButton, styles.neutralButton])}>
             <Text style={styles.actionButtonText}>{activeSession?.focus_mode ? "집중 타이머" : "집중 모드"}</Text>
           </Pressable>
         </Link>
@@ -812,7 +812,7 @@ function ZeroHomeState() {
     <Section title="아직 오늘 계획이 없어요" badge="제로">
       <Text style={styles.bodyText}>대단한 계획보다 첫 한 줄이 더 좋아요. 10분짜리 할 일 하나만 만들어도 오늘 화면이 살아납니다.</Text>
       <Link href={"/planner" as Href} asChild>
-        <Pressable style={[styles.actionButton, styles.brandButton]}>
+        <Pressable style={StyleSheet.flatten([styles.actionButton, styles.brandButton])}>
           <Text style={styles.actionButtonPrimaryText}>첫 할 일 추가</Text>
         </Pressable>
       </Link>
@@ -838,12 +838,12 @@ function AuthGate({ message }: { message: string }) {
         <Text style={styles.bodyText}>{message}</Text>
         <View style={styles.inlineActions}>
           <Link href={"/signup" as Href} asChild>
-            <Pressable style={[styles.actionButton, styles.brandButton]}>
+            <Pressable style={StyleSheet.flatten([styles.actionButton, styles.brandButton])}>
               <Text style={styles.actionButtonPrimaryText}>가입·로그인</Text>
             </Pressable>
           </Link>
           <Link href={"/forgot" as Href} asChild>
-            <Pressable style={[styles.actionButton, styles.neutralButton]}>
+            <Pressable style={StyleSheet.flatten([styles.actionButton, styles.neutralButton])}>
               <Text style={styles.actionButtonText}>비밀번호 찾기</Text>
             </Pressable>
           </Link>
@@ -902,7 +902,7 @@ function BottomNav({ active }: { active: "today" | "planner" }) {
 function NavLink({ active, href, label }: { active: boolean; href: string; label: string }) {
   return (
     <Link href={href as Href} asChild>
-      <Pressable style={[styles.navItem, active ? styles.navItemActive : null]}>
+      <Pressable style={StyleSheet.flatten([styles.navItem, active ? styles.navItemActive : null])}>
         <Text style={[styles.navText, active ? styles.navTextActive : null]}>{label}</Text>
       </Pressable>
     </Link>

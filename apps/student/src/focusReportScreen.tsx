@@ -102,12 +102,12 @@ export function FocusReportScreen({ mode }: { mode: "summary" | "report" }) {
 
       <View style={styles.actions}>
         <Link href={"/focus/session" as Href} asChild>
-          <Pressable accessibilityRole="button" style={[styles.button, styles.flameButton]}>
+          <Pressable accessibilityRole="button" style={StyleSheet.flatten([styles.button, styles.flameButton])}>
             <Text style={styles.primaryButtonText}>다시 집중하기</Text>
           </Pressable>
         </Link>
         <Link href={"/timer" as Href} asChild>
-          <Pressable accessibilityRole="button" style={[styles.button, styles.neutralButton]}>
+          <Pressable accessibilityRole="button" style={StyleSheet.flatten([styles.button, styles.neutralButton])}>
             <Text style={styles.buttonText}>타이머로 돌아가기</Text>
           </Pressable>
         </Link>

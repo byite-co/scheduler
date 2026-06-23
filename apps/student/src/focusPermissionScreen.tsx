@@ -20,12 +20,12 @@ export function FocusPermissionScreen() {
 
       <View style={styles.actions}>
         <Link href={"/focus/session" as Href} asChild>
-          <Pressable accessibilityRole="button" style={[styles.button, styles.brandButton]}>
+          <Pressable accessibilityRole="button" style={StyleSheet.flatten([styles.button, styles.brandButton])}>
             <Text style={styles.primaryButtonText}>집중 세션으로 가기</Text>
           </Pressable>
         </Link>
         <Link href={"/timer" as Href} asChild>
-          <Pressable accessibilityRole="button" style={[styles.button, styles.neutralButton]}>
+          <Pressable accessibilityRole="button" style={StyleSheet.flatten([styles.button, styles.neutralButton])}>
             <Text style={styles.buttonText}>타이머만 계속 쓰기</Text>
           </Pressable>
         </Link>

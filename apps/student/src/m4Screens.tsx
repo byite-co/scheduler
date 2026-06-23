@@ -177,7 +177,9 @@ export function HomeworkSubmitScreen() {
       {submitState === "check_failed" ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.replace({ pathname: "/homework/[id]/result", params: { id: todoId } })}
+          onPress={() => {
+            if (todoId) router.replace({ pathname: "/homework/[id]/result", params: { id: todoId } });
+          }}
           style={styles.ghostButton}
         >
           <Text style={styles.ghostButtonText}>제출만 두고 나중에 결과 보기</Text>
@@ -231,7 +233,9 @@ export function HomeworkResultScreen() {
       {view.canRequestResubmit ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.replace({ pathname: "/homework/[id]/submit", params: { id: todoId } })}
+          onPress={() => {
+            if (todoId) router.replace({ pathname: "/homework/[id]/submit", params: { id: todoId } });
+          }}
           style={styles.primaryButton}
         >
           <Text style={styles.primaryButtonText}>다시 제출하기</Text>
@@ -259,7 +263,9 @@ export function HomeworkDetailScreen() {
       {!data.submission ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push({ pathname: "/homework/[id]/submit", params: { id: todoId } })}
+          onPress={() => {
+            if (todoId) router.push({ pathname: "/homework/[id]/submit", params: { id: todoId } });
+          }}
           style={styles.primaryButton}
         >
           <Text style={styles.primaryButtonText}>숙제 제출하기</Text>
@@ -269,7 +275,9 @@ export function HomeworkDetailScreen() {
       ) : (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push({ pathname: "/homework/[id]/result", params: { id: todoId } })}
+          onPress={() => {
+            if (todoId) router.push({ pathname: "/homework/[id]/result", params: { id: todoId } });
+          }}
           style={styles.primaryButton}
         >
           <Text style={styles.primaryButtonText}>검사 결과 보기</Text>

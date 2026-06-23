@@ -349,7 +349,7 @@ function FocusIntroCard({ onStart }: { onStart: () => void }) {
       <View style={styles.inlineActions}>
         <ActionButton label="카메라 허용하고 집중 모드 켜기" onPress={onStart} tone="flame" />
         <Link href={"/focus/permission" as Href} asChild>
-          <Pressable style={[styles.actionButton, styles.neutralButton]}>
+          <Pressable style={StyleSheet.flatten([styles.actionButton, styles.neutralButton])}>
             <Text style={styles.actionButtonText}>권한 먼저 보기</Text>
           </Pressable>
         </Link>
@@ -393,7 +393,7 @@ function AuthGate({ message }: { message: string }) {
         <Text style={styles.pageTitle}>로그인이 필요해요</Text>
         <Text style={styles.bodyText}>{message}</Text>
         <Link href={"/signup" as Href} asChild>
-          <Pressable style={[styles.actionButton, styles.brandButton]}>
+          <Pressable style={StyleSheet.flatten([styles.actionButton, styles.brandButton])}>
             <Text style={styles.actionButtonPrimaryText}>가입·로그인</Text>
           </Pressable>
         </Link>
@@ -466,7 +466,7 @@ function BottomNav() {
 function NavLink({ active = false, href, label }: { active?: boolean; href: string; label: string }) {
   return (
     <Link href={href as Href} asChild>
-      <Pressable style={[styles.navItem, active ? styles.navItemActive : null]}>
+      <Pressable style={StyleSheet.flatten([styles.navItem, active ? styles.navItemActive : null])}>
         <Text style={[styles.navText, active ? styles.navTextActive : null]}>{label}</Text>
       </Pressable>
     </Link>
