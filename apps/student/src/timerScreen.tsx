@@ -1,15 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Link, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { createClient, type Session } from "@supabase/supabase-js";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
-} from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
 import {
@@ -134,7 +127,6 @@ export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolea
   const todaySeconds = sumTimerSecondsForDate(sessionsWithLiveTimer, now, now);
   const todayGoalSeconds = getTodayGoalSeconds(data.timetableBlocks);
   const streak = calculateStudyStreak(sessionsWithLiveTimer, now);
-  const weeklyDays = getRecentStudyDays(sessionsWithLiveTimer, now);
   const focusIntent = focusEntry || params.focus === "1";
 
   useEffect(() => {
@@ -238,97 +230,110 @@ export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolea
     return <AuthGate message={data.message} />;
   }
 
+  const isFocus = Boolean(activeTimer?.focus_mode);
+  const running = timerState === "running";
+  const ringColor = isFocus ? colors.flame : colors.brand;
+  const ringSubject = SUBJECT_LABELS[activeTimer?.subject ?? selectedSubject];
+
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.pageHeader}>
-          <View>
-            <Text style={styles.kicker}>쌤플래너</Text>
-            <Text style={styles.pageTitle}>타이머</Text>
-            <Text style={styles.pageSubtitle}>
-              {data.profile?.name ? `${data.profile.name}님의 오늘 공부` : "과목을 고르고 공부 시간을 기록해요"}
-            </Text>
-          </View>
-          {data.loading ? <ActivityIndicator color={colors.brand} /> : <Chip tone="success">live</Chip>}
-        </View>
-
-        <View style={styles.notice}>
-          <Text style={styles.noticeText}>{data.message}</Text>
-        </View>
-
-        <View style={[styles.timerCard, timerState === "running" ? styles.timerCardRunning : null]}>
-          <View style={styles.timerTop}>
-            <Chip tone={activeTimer?.focus_mode ? "flame" : "brand"}>
-              {activeTimer?.focus_mode ? "집중 모드" : `${SUBJECT_LABELS[selectedSubject]} · ${timerState === "paused" ? "일시정지" : "기록"}`}
-            </Chip>
-            {focusIntent && !activeTimer ? <Chip tone="flame">집중 시작 준비</Chip> : null}
-          </View>
-          <Text style={[styles.timerDigits, timerState === "running" ? styles.timerDigitsRunning : null]}>
-            {formatClock(elapsedSeconds)}
-          </Text>
-          <Text style={styles.timerCaption}>
-            {activeTimer
-              ? timerState === "paused"
-                ? "멈춘 구간은 누적하지 않아요."
-                : "타이머가 오늘 누적에 실시간으로 반영돼요."
-              : "과목을 선택하고 시작하면 오늘 기록으로 저장돼요."}
-          </Text>
-
-          <SubjectPicker disabled={Boolean(activeTimer)} value={selectedSubject} onChange={setSelectedSubject} />
-
-          <View style={styles.inlineActions}>
-            {!activeTimer ? (
-              <>
-                <ActionButton label="공부 시작" onPress={() => void startTimer(false)} tone="flame" />
-                <ActionButton label="집중 모드 시작" onPress={() => void startTimer(true)} tone="neutral" />
-              </>
-            ) : timerState === "running" ? (
-              <>
-                <ActionButton label="일시정지" onPress={() => void pauseTimer()} tone="brand" />
-                <ActionButton label="종료" onPress={() => void endTimer()} tone="flame" />
-              </>
+        <View style={styles.topbar}>
+          <Link href={"/today" as Href} asChild>
+            <Pressable style={styles.iconBtn}>
+              <Text style={styles.iconBtnText}>‹</Text>
+            </Pressable>
+          </Link>
+          <View style={styles.topbarCenter}>
+            {isFocus ? (
+              <View style={styles.focusPill}>
+                <Text style={styles.focusPillText}>👁 집중 모드 ON</Text>
+              </View>
             ) : (
-              <>
-                <ActionButton label="다시 시작" onPress={() => void resumeTimer()} tone="flame" />
-                <ActionButton label="종료" onPress={() => void endTimer()} tone="neutral" />
-              </>
+              <Text style={styles.topbarTitle}>집중 타이머</Text>
             )}
           </View>
+          <View style={styles.iconBtn} />
         </View>
 
-        {activeTimer?.focus_mode ? (
+        <SubjectPicker disabled={Boolean(activeTimer)} value={selectedSubject} onChange={setSelectedSubject} />
+
+        <View style={styles.ringWrap}>
+          <View style={[styles.ring, { borderColor: ringColor }]}>
+            <Text style={styles.ringSubject}>{ringSubject}</Text>
+            <Text style={styles.ringTime}>{formatClock(elapsedSeconds)}</Text>
+            <View style={styles.ringStatus}>
+              <View style={[styles.ringDot, { backgroundColor: running ? colors.success : colors.muted }]} />
+              <Text style={styles.ringStatusText}>{running ? "기록 중" : activeTimer ? "일시정지" : "대기"}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.controls}>
+          {!activeTimer ? (
+            <Pressable accessibilityLabel="공부 시작" onPress={() => void startTimer(false)} style={styles.ctrlMain}>
+              <Text style={styles.ctrlMainText}>▶</Text>
+            </Pressable>
+          ) : running ? (
+            <Pressable accessibilityLabel="일시정지" onPress={() => void pauseTimer()} style={styles.ctrlMain}>
+              <Text style={styles.ctrlMainText}>❚❚</Text>
+            </Pressable>
+          ) : (
+            <Pressable accessibilityLabel="다시 시작" onPress={() => void resumeTimer()} style={styles.ctrlMain}>
+              <Text style={styles.ctrlMainText}>▶</Text>
+            </Pressable>
+          )}
+          <Pressable
+            accessibilityLabel="종료"
+            disabled={!activeTimer}
+            onPress={() => void endTimer()}
+            style={[styles.ctrlStop, !activeTimer ? styles.ctrlDisabled : null]}
+          >
+            <Text style={styles.ctrlStopText}>■</Text>
+          </Pressable>
+        </View>
+
+        {isFocus && activeTimer ? (
           <FocusCameraPanel
-            active={timerState === "running"}
+            active={running}
             onFocusCheck={(check) => void saveFocusCheck(check)}
             sessionId={activeTimer.id}
           />
-        ) : focusIntent ? (
+        ) : focusIntent && !activeTimer ? (
           <FocusIntroCard onStart={() => void startTimer(true)} />
-        ) : null}
+        ) : (
+          <FocusModeBanner disabled={Boolean(activeTimer)} onStart={() => void startTimer(true)} />
+        )}
 
-        <View style={styles.metricRow}>
-          <Metric label="오늘 공부" value={formatDuration(todaySeconds)} />
-          <Metric label="목표" value={todayGoalSeconds > 0 ? formatDuration(todayGoalSeconds) : "미설정"} />
-          <Metric label="연속" value={`${streak.count}일`} />
+        <View style={styles.timerStats}>
+          <Text style={styles.timerStatText}>오늘 {formatDuration(todaySeconds)}</Text>
+          <Text style={styles.timerStatDivider}>·</Text>
+          <Text style={styles.timerStatText}>
+            목표 {todayGoalSeconds > 0 ? formatDuration(todayGoalSeconds) : "미설정"}
+          </Text>
+          <Text style={styles.timerStatDivider}>·</Text>
+          <Text style={styles.timerStatText}>연속 {streak.count}일</Text>
         </View>
-
-        <Section title="최근 7일" badge="실제 기록">
-          <View style={styles.weekGrid}>
-            {weeklyDays.map((day) => (
-              <View key={day.dateKey} style={styles.weekItem}>
-                <View style={styles.weekBarTrack}>
-                  <View style={[styles.weekBarFill, { height: `${day.ratio}%` }]} />
-                </View>
-                <Text style={styles.weekLabel}>{day.label}</Text>
-                <Text style={styles.weekMinutes}>{Math.round(day.seconds / 60)}분</Text>
-              </View>
-            ))}
-          </View>
-        </Section>
-
+        <Text style={styles.timerHint}>멈추면 오늘 플래너에 자동 기록돼요</Text>
       </ScrollView>
-      <BottomNav />
     </View>
+  );
+}
+
+function FocusModeBanner({ disabled, onStart }: { disabled: boolean; onStart: () => void }) {
+  return (
+    <Pressable disabled={disabled} onPress={onStart} style={styles.focusBanner}>
+      <View style={styles.focusBannerIcon}>
+        <Text style={styles.focusBannerIconText}>👁</Text>
+      </View>
+      <View style={styles.flex}>
+        <Text style={styles.focusBannerTitle}>집중 모드</Text>
+        <Text style={styles.focusBannerBody}>졸음 점검 · {FOCUS_CAMERA_PRIVACY_COPY}</Text>
+      </View>
+      <View style={[styles.focusToggle, disabled ? styles.focusToggleOff : null]}>
+        <View style={styles.focusToggleKnob} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -402,38 +407,6 @@ function AuthGate({ message }: { message: string }) {
   );
 }
 
-function Section({ badge, children, title }: { badge?: string; children: ReactNode; title: string }) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {badge ? <Chip tone="brand">{badge}</Chip> : null}
-      </View>
-      {children}
-    </View>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metric}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
-    </View>
-  );
-}
-
-function Chip({ children, tone }: { children: ReactNode; tone: "brand" | "success" | "flame" }) {
-  const style = tone === "success" ? styles.chipSuccess : tone === "flame" ? styles.chipFlame : styles.chipBrand;
-  const textStyle = tone === "flame" || tone === "success" ? styles.chipStrongText : styles.chipText;
-
-  return (
-    <View style={[styles.chip, style]}>
-      <Text style={textStyle}>{children}</Text>
-    </View>
-  );
-}
-
 function ActionButton({
   label,
   onPress,
@@ -453,51 +426,11 @@ function ActionButton({
   );
 }
 
-function BottomNav() {
-  return (
-    <View style={styles.bottomNav}>
-      <NavLink href="/today" label="오늘" />
-      <NavLink href="/planner" label="플래너" />
-      <NavLink active href="/timer" label="타이머" />
-    </View>
-  );
-}
-
-function NavLink({ active = false, href, label }: { active?: boolean; href: string; label: string }) {
-  return (
-    <Link href={href as Href} asChild>
-      <Pressable style={StyleSheet.flatten([styles.navItem, active ? styles.navItemActive : null])}>
-        <Text style={[styles.navText, active ? styles.navTextActive : null]}>{label}</Text>
-      </Pressable>
-    </Link>
-  );
-}
-
 function getTodayGoalSeconds(blocks: TimetableBlockRow[]): number {
   const today = new Date().getDay();
   return blocks
     .filter((block) => block.day_of_week === today && (block.type === "self" || block.type === "class"))
     .reduce((total, block) => total + Math.max(0, block.end_min - block.start_min) * 60, 0);
-}
-
-function getRecentStudyDays(sessions: StudySessionRow[], now: Date) {
-  const today = getDateKey(now);
-  const days = Array.from({ length: 7 }, (_value, index) => shiftDate(today, index - 6));
-  const totals = days.map((dateKey) => {
-    const seconds = sumTimerSecondsForDate(sessions, `${dateKey}T12:00:00.000Z`, now);
-    return {
-      dateKey,
-      label: dateKey.slice(5),
-      seconds,
-      ratio: 0
-    };
-  });
-  const maxSeconds = Math.max(...totals.map((day) => day.seconds), 1);
-
-  return totals.map((day) => ({
-    ...day,
-    ratio: Math.max(8, Math.round((day.seconds / maxSeconds) * 100))
-  }));
 }
 
 function formatClock(seconds: number): string {
@@ -528,16 +461,200 @@ function shiftDate(dateKey: string, amount: number): string {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.canvas
+    backgroundColor: colors.ink
   },
   scrollContent: {
-    gap: spacing.lg,
+    gap: spacing.xl,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: 96,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl,
     width: "100%",
-    maxWidth: 920,
+    maxWidth: 560,
     alignSelf: "center"
+  },
+  topbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  topbarCenter: {
+    flex: 1,
+    alignItems: "center"
+  },
+  topbarTitle: {
+    color: colors.surface,
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.chip,
+    backgroundColor: "rgba(255,255,255,0.08)"
+  },
+  iconBtnText: {
+    color: colors.surface,
+    fontSize: 22,
+    fontWeight: "900"
+  },
+  focusPill: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.chip,
+    backgroundColor: "rgba(255,107,61,0.18)"
+  },
+  focusPillText: {
+    color: colors.flame,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  ringWrap: {
+    alignItems: "center",
+    paddingVertical: spacing.md
+  },
+  ring: {
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    borderWidth: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs
+  },
+  ringSubject: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  ringTime: {
+    color: colors.surface,
+    fontSize: 44,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  ringStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs
+  },
+  ringDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4
+  },
+  ringStatusText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  controls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xl
+  },
+  ctrlMain: {
+    width: 76,
+    height: 76,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 38,
+    backgroundColor: colors.surface
+  },
+  ctrlMainText: {
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: "900"
+  },
+  ctrlStop: {
+    width: 60,
+    height: 60,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 30,
+    backgroundColor: colors.flame
+  },
+  ctrlStopText: {
+    color: colors.surface,
+    fontSize: 20,
+    fontWeight: "900"
+  },
+  ctrlDisabled: {
+    opacity: 0.35
+  },
+  focusBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.card,
+    backgroundColor: "rgba(255,255,255,0.06)"
+  },
+  focusBannerIcon: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.control,
+    backgroundColor: "rgba(255,107,61,0.18)"
+  },
+  focusBannerIconText: {
+    fontSize: 18
+  },
+  focusBannerTitle: {
+    color: colors.surface,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  focusBannerBody: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18
+  },
+  focusToggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    padding: 3,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    backgroundColor: colors.flame
+  },
+  focusToggleOff: {
+    alignItems: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.2)"
+  },
+  focusToggleKnob: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.surface
+  },
+  timerStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm
+  },
+  timerStatText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  timerStatDivider: {
+    color: "rgba(255,255,255,0.3)"
+  },
+  timerHint: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center"
+  },
+  flex: {
+    flex: 1
   },
   authContent: {
     flexGrow: 1,
@@ -681,25 +798,26 @@ const styles = StyleSheet.create({
   subjectWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
+    justifyContent: "center",
     gap: spacing.sm
   },
   subjectChip: {
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: "rgba(255,255,255,0.14)",
     borderRadius: radii.chip,
-    backgroundColor: colors.surface
+    backgroundColor: "rgba(255,255,255,0.06)"
   },
   subjectChipActive: {
-    borderColor: colors.flame,
-    backgroundColor: colors.flame
+    borderColor: colors.brand,
+    backgroundColor: colors.brand
   },
   subjectChipDisabled: {
-    opacity: 0.85
+    opacity: 0.6
   },
   subjectChipText: {
-    color: colors.ink,
+    color: "rgba(255,255,255,0.8)",
     fontSize: 13,
     fontWeight: "900"
   },
