@@ -109,6 +109,33 @@ export type Database = {
           },
         ]
       }
+      app_config: {
+        Row: {
+          id: number
+          latest_build: number
+          maintenance: boolean
+          maintenance_message: string | null
+          min_supported_build: number
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          latest_build?: number
+          maintenance?: boolean
+          maintenance_message?: string | null
+          min_supported_build?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          latest_build?: number
+          maintenance?: boolean
+          maintenance_message?: string | null
+          min_supported_build?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       billing_invoices: {
         Row: {
           amount: number
@@ -1013,6 +1040,7 @@ export type Database = {
         Args: { p: Database["public"]["Enums"]["user_role"] }
         Returns: boolean
       }
+      delete_my_account: { Args: never; Returns: undefined }
       generate_teacher_invoice: {
         Args: { p_period: string }
         Returns: {

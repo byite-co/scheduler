@@ -951,6 +951,34 @@ alter table push_tokens enable row level security;
 create policy push_self on push_tokens for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+-- M7: 회원 탈퇴(본인 auth.users 삭제 → 전 테이블 cascade) + 시스템 상태 설정.
+create or replace function delete_my_account()
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null then raise exception 'authentication_required'; end if;
+  delete from auth.users where id = auth.uid();
+end;
+$$;
+revoke all on function delete_my_account() from public;
+grant execute on function delete_my_account() to authenticated;
+
+create table if not exists app_config (
+  id                  smallint primary key default 1,
+  latest_build        integer not null default 1,
+  min_supported_build integer not null default 1,
+  maintenance         boolean not null default false,
+  maintenance_message text,
+  updated_at          timestamptz not null default now(),
+  constraint app_config_singleton check (id = 1)
+);
+alter table app_config enable row level security;
+drop policy if exists app_config_read on app_config;
+create policy app_config_read on app_config for select to anon, authenticated using (true);
+insert into app_config (id, latest_build, min_supported_build, maintenance)
+values (1, 1, 1, false) on conflict (id) do nothing;
+
 -- ---------- 인덱스(자주 쓰는 조회) ----------
 create index on todos (student_id, status);
 create index on todos (connection_id);

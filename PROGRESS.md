@@ -101,3 +101,29 @@
 ### 다음 / 막힌 점
 - 다음: M7(알림·계정·시스템 상태).
 - 막힌 점: 실제 결제/웹훅은 키·사람 승인 필요(설계상 STOP 지점, 블로커 아님 — mock으로 플로우 완성).
+
+---
+
+## M7 — 알림 · 계정 · 시스템 상태  ✅ 구현·검증 완료
+브랜치: `codex/m7-notifications-account`
+
+### 무엇을
+- **회원 탈퇴**: `delete_my_account()` RPC(본인 auth.users 삭제 → 전 테이블 cascade). 다단계 + 본인 확인('삭제' 입력). 마이그레이션 `20260627000000`.
+- **시스템 상태**: `app_config`(공개 읽기) + `getSystemGateState`(강제 업데이트 > 점검 > 정상).
+- **순수 로직**(`m7.ts`): 알림 딥링크 라우팅·미읽음 수, 푸시 프라이밍 상태(거부해도 기능 유지), 탈퇴 확인 검증, 시스템 게이트.
+- **학생 화면**: 알림 센터(`/notifications`), 설정 허브(`/settings`), 프로필 편집(`/settings/profile`), 회원 탈퇴(`/settings/account/delete`), 푸시 프라이밍(`/onboarding/push`), 약관 뷰어(`/legal/[doc]`), 시스템 상태(`/system`).
+- **과외쌤 화면**: 알림 센터(`/notifications`), 회원 탈퇴(`/settings/account/delete`).
+
+### 실제 동작 vs mock
+- **실제**: 회원 탈퇴 cascade, 알림 목록/읽음/딥링크, 시스템 게이트 판정(원격 app_config), 프로필 편집 저장.
+- **MOCK(명시)**: 푸시 토큰 등록 = 모의(`expo-mock-*` 토큰; 실제 expo-notifications 권한/토큰은 실기기 전용). 실제 푸시 발송 없음.
+
+### 검증 결과
+- `lint`/`typecheck`/`test`(91 shared)/`build` 모두 green.
+- 원격 RLS 통합 테스트 ✅ `m7.account.rls.integration.test.ts`: 회원 탈퇴 시 auth.users·profiles·todos cascade 삭제, 본인 알림만 조회, app_config anon 공개 읽기.
+- 프라이버시 grep: 집중 파일 무변경·청정.
+- ⚠️ 플레이크 노트: 통합 테스트를 전부 병렬 실행 시 Supabase auth 사용자 동시 생성으로 간헐적 rate-limit 실패가 한 번 관찰됨(재실행 시 전체 통과). CI에서 재시도/직렬화 권장 — M8에서 보완.
+
+### 다음 / 막힌 점
+- 다음: M8(폴리시 & QA — 접근성·카피·E2E).
+- 막힌 점 없음.
