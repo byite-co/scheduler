@@ -158,4 +158,5 @@
 - M4 AI 완료검사, M5 추천·리포트·학부모 공유, M6 수익화(mock), M7 알림·계정·시스템, M8 폴리시·QA — 각 마일스톤 브랜치→검증→main squash merge 완료.
 - 모든 DB 마이그레이션은 링크된 Supabase(`khssgcagudjimrezebxq`)에 push + 타입 재생성 완료. 핵심 프라이버시/접근 규칙은 원격 RLS 통합 테스트로 증명(졸음 메타데이터 무업로드, AI 판정 서버권위, 사진 공개범위, 학부모 토큰 전용, 과금 격리, 회원탈퇴 cascade).
 - **사람 승인 대기(블로커 아님)**: Edge Function 프로덕션 배포(ai-homework-check / billing-stripe / iap-webhook), 실제 결제·AI 키 연동, E2E 실행, ui-catalog 대조. 자세한 항목은 STOP-NEEDS-HUMAN.md.
+- **⚠️ 임시 개발 설정(출시 전 복원 필수)**: 2026-06-24 테스트 편의로 Supabase `mailer_autoconfirm`을 `true`로 켬(가입 즉시 로그인). **출시 전 반드시 다시 끌 것** → STOP-NEEDS-HUMAN.md §0 참조.
 - `gh` 미설치로 GitHub PR 객체는 생성하지 못함 → 각 마일스톤은 브랜치 push 후 main에 squash merge(커밋 메시지에 요약/배포 노트). 사람이 원하면 PR을 따로 열 수 있음.

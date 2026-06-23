@@ -4,6 +4,18 @@
 > 자율 모드에서 진행하지 않은 것들이다(모두 블로커 아님 — 기능 플로우는 mock으로 완성·검증됨).
 > 작성 시점: 2026-06-24 기준.
 
+## ⚠️ 0. [출시 전 필수 복원] 이메일 autoconfirm 되돌리기 — 임시 개발 설정
+- **2026-06-24, 테스트 편의를 위해 링크된 Supabase 프로젝트의 `mailer_autoconfirm`을 `true`로 켰다.**
+  (가입 직후 이메일 인증 없이 즉시 로그인됨 — 로컬 클릭 테스트용.)
+- **출시(프로덕션) 전에 반드시 다시 `false`로 꺼서 이메일 인증을 복원할 것.** 켜둔 채 배포하면
+  미인증 이메일로 계정이 생성되어 보안/스팸 위험.
+- 끄는 방법(둘 중 하나):
+  - 대시보드: Supabase → Authentication → **Sign In / Providers → Email → "Confirm email" 켜기**
+    (= autoconfirm 끄기). 또는 Authentication → Settings의 이메일 확인 옵션.
+  - Management API:
+    `curl -X PATCH "https://api.supabase.com/v1/projects/<ref>/config/auth" -H "Authorization: Bearer <ACCESS_TOKEN>" -H "Content-Type: application/json" -d '{"mailer_autoconfirm": false}'`
+- 참고: 켜는 동안 테스트로 생성된 `autoconfirm-check-*@example.com` auth 유저가 남아 있을 수 있음 → 대시보드에서 삭제 가능(프로필 행 없음).
+
 ## 1. Edge Function 프로덕션 배포 (production deploy = STOP 조건)
 레포에 구현/스텁이 있으나 **배포는 사람이 실행**해야 한다.
 - `ai-homework-check` (M4): STUB(Anthropic 키 불필요, 결정적 응답). 배포 시 앱의 실시간 AI 검사 활성화.
