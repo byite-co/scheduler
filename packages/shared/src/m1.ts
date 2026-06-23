@@ -211,11 +211,21 @@ export function getTeacherVisibleStudentSections(scope: DisclosureScope): string
   ].filter((section): section is string => Boolean(section));
 }
 
+export function isValidBirthDate(birthDate: string): boolean {
+  return tryParseDateOnly(birthDate) !== null;
+}
+
 export function requiresGuardianConsent(
   birthDate: string,
   asOf: string | Date = new Date()
 ): boolean {
-  const bornAt = parseDateOnly(birthDate);
+  const bornAt = tryParseDateOnly(birthDate);
+  // 생년월일이 아직 비어있거나 형식이 맞지 않으면 나이 판단을 보류한다(동의 미요구).
+  // 유효한 날짜가 입력되면 그때 만 14세 미만 여부를 정상 평가한다.
+  if (!bornAt) {
+    return false;
+  }
+
   const current = typeof asOf === "string" ? parseDateOnly(asOf) : asOf;
   const fourteenthBirthday = addUtcYears(bornAt, 14);
 
@@ -231,6 +241,7 @@ export function getMissingStudentSignupSteps(
     state.termsAccepted ? undefined : "terms",
     state.name.trim() ? undefined : "profile_name",
     state.grade.trim() ? undefined : "profile_grade",
+    isValidBirthDate(state.birthDate) ? undefined : "profile_birth_date",
     requiresGuardianConsent(state.birthDate, asOf) && !state.guardianConsentAccepted
       ? "guardian_consent"
       : undefined
@@ -246,14 +257,34 @@ export function canCompleteStudentSignup(
   return getMissingStudentSignupSteps(state, asOf).length === 0;
 }
 
-function parseDateOnly(value: string): Date {
-  const [year, month, day] = value.split("-").map(Number);
+function tryParseDateOnly(value: string): Date | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
 
-  if (!year || !month || !day) {
+  const [year, month, day] = trimmed.split("-").map(Number);
+  if (!year || !month || !day) return null;
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  // 존재하지 않는 날짜(예: 2013-02-30)는 무효로 처리.
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function parseDateOnly(value: string): Date {
+  const parsed = tryParseDateOnly(value);
+  if (!parsed) {
     throw new Error("Date must use YYYY-MM-DD format");
   }
 
-  return new Date(Date.UTC(year, month - 1, day));
+  return parsed;
 }
 
 function addUtcYears(date: Date, years: number): Date {

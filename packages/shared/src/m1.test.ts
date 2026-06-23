@@ -9,6 +9,7 @@ import {
   formatInviteCode,
   getMissingStudentSignupSteps,
   getTeacherVisibleStudentSections,
+  isValidBirthDate,
   isValidInviteCode,
   requiresGuardianConsent,
   resolveConnectionRequest,
@@ -122,6 +123,43 @@ describe("M1 disclosure and guardian consent", () => {
         { ...underFourteenState, guardianConsentAccepted: true },
         "2026-06-22"
       )
+    ).toBe(true);
+  });
+
+  it("treats an empty or malformed birth date as not-yet-entered instead of throwing", () => {
+    expect(() => requiresGuardianConsent("", "2026-06-22")).not.toThrow();
+    expect(requiresGuardianConsent("", "2026-06-22")).toBe(false);
+    expect(requiresGuardianConsent("not-a-date", "2026-06-22")).toBe(false);
+    expect(requiresGuardianConsent("2013-13-40", "2026-06-22")).toBe(false);
+    expect(requiresGuardianConsent("2013-02-30", "2026-06-22")).toBe(false);
+
+    expect(isValidBirthDate("")).toBe(false);
+    expect(isValidBirthDate("2013-2-3")).toBe(false);
+    expect(isValidBirthDate("2013-06-23")).toBe(true);
+  });
+
+  it("flags a missing/invalid birth date as a signup step without crashing, then re-evaluates once entered", () => {
+    const incomplete = {
+      name: "김학생",
+      birthDate: "",
+      grade: "중1",
+      termsAccepted: true,
+      emailVerified: true,
+      guardianConsentAccepted: false
+    };
+
+    const missing = getMissingStudentSignupSteps(incomplete, "2026-06-22");
+    expect(missing).toContain("profile_birth_date");
+    expect(missing).not.toContain("guardian_consent");
+    expect(canCompleteStudentSignup(incomplete, "2026-06-22")).toBe(false);
+
+    // 유효한 만 14세 미만 생년월일을 입력하면 보호자 동의가 다시 요구된다.
+    const withBirth = { ...incomplete, birthDate: "2013-06-23" };
+    const reEvaluated = getMissingStudentSignupSteps(withBirth, "2026-06-22");
+    expect(reEvaluated).not.toContain("profile_birth_date");
+    expect(reEvaluated).toContain("guardian_consent");
+    expect(
+      canCompleteStudentSignup({ ...withBirth, guardianConsentAccepted: true }, "2026-06-22")
     ).toBe(true);
   });
 });
