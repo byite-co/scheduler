@@ -1288,31 +1288,182 @@ function NavLink({
 }
 
 export function StudentClassScreen() {
-  return <TabPlaceholder activeTab="class" subtitle="과외생은 우리 반, 혼공생은 또래 랭킹을 여기서 봐요." title="또래" />;
+  const data = useStudentM2Data();
+  const activeConnections = data.connections.filter((connection) => connection.status === "active");
+  const variant = getStudentHomeVariant({
+    activeConnectionCount: activeConnections.length,
+    todoCount: data.todos.length,
+    timetableBlockCount: data.timetableBlocks.length,
+    studySessionCount: data.studySessions.length
+  });
+
+  if (!data.session) {
+    return <AuthGate message={data.message} />;
+  }
+
+  const tutored = variant === "tutored";
+
+  return (
+    <AppShell
+      activeTab="class"
+      loading={data.loading}
+      message={data.message}
+      subtitle={tutored ? "선생님과 연결된 친구들과 함께해요." : "같은 학년 친구들과 익명으로 비교해요."}
+      title={tutored ? "우리 반" : "또래"}
+    >
+      {tutored ? (
+        <ClassCard activeConnections={activeConnections.length} doneCount={0} totalCount={0} />
+      ) : null}
+      <PeerRankingCard ranking={data.peerRanking} />
+      <RecentDaysCard sessions={data.studySessions} />
+    </AppShell>
+  );
+}
+
+function RecentDaysCard({ sessions }: { sessions: StudySessionRow[] }) {
+  const todayKey = getDateKey(new Date());
+  const days = Array.from({ length: 14 }, (_value, index) => shiftDate(todayKey, index - 13));
+  const secByDay = new Map<string, number>();
+  for (const session of sessions) {
+    const key = getDateKey(session.started_at);
+    secByDay.set(key, (secByDay.get(key) ?? 0) + Math.max(0, session.duration_sec));
+  }
+  const max = Math.max(1, ...days.map((day) => secByDay.get(day) ?? 0));
+
+  return (
+    <HomeCard title="최근 14일 공부 흐름" right={<Text style={styles.countBadge}>익명</Text>}>
+      <View style={styles.recStrip}>
+        {days.map((day) => {
+          const seconds = secByDay.get(day) ?? 0;
+          const ratio = seconds / max;
+          const level = ratio > 0.66 ? 2 : ratio > 0 ? 1 : 0;
+          return (
+            <View
+              key={day}
+              style={[
+                styles.recBar,
+                level === 1 ? styles.recBarSome : null,
+                level === 2 ? styles.recBarLots : null,
+                day === todayKey ? styles.recBarToday : null
+              ]}
+            />
+          );
+        })}
+      </View>
+      <Text style={styles.privacyNote}>친구 개개인 정보는 보이지 않아요 — 익명 집계만 사용해요.</Text>
+    </HomeCard>
+  );
 }
 
 export function StudentRecordsScreen() {
-  return <TabPlaceholder activeTab="records" subtitle="공부 시간과 연속 기록을 모아 볼 수 있어요." title="기록" />;
-}
+  const data = useStudentM2Data();
+  const [range, setRange] = useState<"day" | "week" | "month">("week");
 
-function TabPlaceholder({
-  activeTab,
-  subtitle,
-  title
-}: {
-  activeTab: StudentTab;
-  subtitle: string;
-  title: string;
-}) {
+  if (!data.session) {
+    return <AuthGate message={data.message} />;
+  }
+
+  const todayKey = getDateKey(new Date());
+  const offsetToMonday = (new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 6) % 7;
+  const monday = shiftDate(todayKey, -offsetToMonday);
+  const weekDays = Array.from({ length: 7 }, (_value, index) => shiftDate(monday, index));
+  const dayLabelsMon = ["월", "화", "수", "목", "금", "토", "일"] as const;
+
+  const secByDay = new Map<string, number>();
+  const secBySubject = new Map<string, number>();
+  for (const session of data.studySessions) {
+    const key = getDateKey(session.started_at);
+    secByDay.set(key, (secByDay.get(key) ?? 0) + Math.max(0, session.duration_sec));
+    if (weekDays.includes(key)) {
+      const subjectKey = session.subject ?? "etc";
+      secBySubject.set(subjectKey, (secBySubject.get(subjectKey) ?? 0) + Math.max(0, session.duration_sec));
+    }
+  }
+
+  const weekTotal = weekDays.reduce((sum, day) => sum + (secByDay.get(day) ?? 0), 0);
+  const prevWeekTotal = Array.from({ length: 7 }, (_value, index) => shiftDate(monday, index - 7)).reduce(
+    (sum, day) => sum + (secByDay.get(day) ?? 0),
+    0
+  );
+  const diff = weekTotal - prevWeekTotal;
+  const streak = calculateStudyStreak(data.studySessions, new Date());
+  const maxDay = Math.max(1, ...weekDays.map((day) => secByDay.get(day) ?? 0));
+  const subjectEntries = [...secBySubject.entries()].filter(([, seconds]) => seconds > 0);
+  const subjectTotal = subjectEntries.reduce((sum, [, seconds]) => sum + seconds, 0);
+
   return (
-    <AppShell activeTab={activeTab} loading={false} message="" subtitle={subtitle} title={title}>
-      <View style={styles.zeroCard}>
-        <View style={styles.zeroIcon}>
-          <Text style={styles.zeroIconText}>🚧</Text>
+    <AppShell activeTab="records" loading={data.loading} message={data.message} title="공부 기록">
+      <SegmentedControl
+        options={[
+          ["day", "일"],
+          ["week", "주"],
+          ["month", "월"]
+        ]}
+        value={range}
+        onChange={setRange}
+      />
+
+      <View style={styles.statRow}>
+        <View style={[styles.statCard, styles.statCardDark]}>
+          <Text style={styles.statLabelInverse}>이번 주 공부시간</Text>
+          <Text style={styles.statValueInverse}>{formatDuration(weekTotal)}</Text>
+          <Text style={styles.statDelta}>
+            지난주 {diff >= 0 ? "+" : "−"}
+            {formatDuration(Math.abs(diff))}
+          </Text>
         </View>
-        <Text style={styles.zeroCardTitle}>곧 만나요</Text>
-        <Text style={styles.zeroCardBody}>이 화면은 다음 단계에서{"\n"}카탈로그대로 채워질 예정이에요.</Text>
+        <View style={[styles.statCard, styles.statCardFlame]}>
+          <Text style={styles.statLabelFlame}>연속 기록</Text>
+          <Text style={styles.statValueFlame}>{streak.count}일</Text>
+          <Text style={styles.statLabel}>꾸준히 이어가요</Text>
+        </View>
       </View>
+
+      <HomeCard title="요일별 공부시간">
+        <View style={styles.barChart}>
+          {weekDays.map((day, index) => {
+            const seconds = secByDay.get(day) ?? 0;
+            const ratio = Math.max(0.06, seconds / maxDay);
+            const isToday = day === todayKey;
+            return (
+              <View key={day} style={styles.barCol}>
+                <View style={styles.barTrack}>
+                  <View
+                    style={[styles.barFill, isToday ? styles.barFillToday : null, { height: `${Math.round(ratio * 100)}%` }]}
+                  />
+                </View>
+                <Text style={[styles.barLabel, isToday ? styles.barLabelToday : null]}>{dayLabelsMon[index]}</Text>
+              </View>
+            );
+          })}
+        </View>
+      </HomeCard>
+
+      <HomeCard title="과목별 비중">
+        <View style={styles.studyBarTrack}>
+          {subjectTotal > 0 ? (
+            subjectEntries.map(([sub, seconds]) => (
+              <View key={sub} style={{ flex: seconds, backgroundColor: getSubjectColor(sub) }} />
+            ))
+          ) : (
+            <View style={[styles.flex, styles.studyBarEmpty]} />
+          )}
+        </View>
+        {subjectEntries.length ? (
+          <View style={styles.studyBarLegend}>
+            {subjectEntries.map(([sub, seconds]) => (
+              <View key={sub} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: getSubjectColor(sub) }]} />
+                <Text style={styles.legendText}>
+                  {SUBJECT_LABELS[sub as SubjectCode] ?? "기타"} {Math.round((seconds / 3600) * 10) / 10}h
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.metaText}>이번 주 기록이 아직 없어요.</Text>
+        )}
+      </HomeCard>
     </AppShell>
   );
 }
@@ -2600,5 +2751,98 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 12,
     fontWeight: "800"
+  },
+  recStrip: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 3,
+    height: 32
+  },
+  recBar: {
+    flex: 1,
+    height: "45%",
+    borderRadius: 3,
+    backgroundColor: colors.canvas
+  },
+  recBarSome: {
+    height: "70%",
+    backgroundColor: tints.brandSoft
+  },
+  recBarLots: {
+    height: "100%",
+    backgroundColor: colors.brand
+  },
+  recBarToday: {
+    backgroundColor: colors.flame
+  },
+  statCardDark: {
+    borderColor: colors.ink,
+    backgroundColor: colors.ink
+  },
+  statCardFlame: {
+    borderColor: tints.flameNudgeBorder,
+    backgroundColor: tints.flameNudge
+  },
+  statLabelInverse: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  statValueInverse: {
+    color: colors.surface,
+    fontSize: 22,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  statDelta: {
+    color: colors.success,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  statLabelFlame: {
+    color: colors.flame,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  statValueFlame: {
+    color: colors.flame,
+    fontSize: 22,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  barChart: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: spacing.sm,
+    height: 132
+  },
+  barCol: {
+    flex: 1,
+    alignItems: "center",
+    gap: spacing.xs
+  },
+  barTrack: {
+    width: "70%",
+    height: 104,
+    justifyContent: "flex-end",
+    borderRadius: radii.control,
+    overflow: "hidden",
+    backgroundColor: colors.canvas
+  },
+  barFill: {
+    width: "100%",
+    borderRadius: radii.control,
+    backgroundColor: tints.brandSoft
+  },
+  barFillToday: {
+    backgroundColor: colors.brand
+  },
+  barLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800"
+  },
+  barLabelToday: {
+    color: colors.brand
   }
 });
