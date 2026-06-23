@@ -13,7 +13,7 @@ import {
   View
 } from "react-native";
 
-import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
+import { colors, meetsAA, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
   PEER_RANKING_MIN_COHORT,
   SUBJECT_LABELS,
@@ -48,12 +48,31 @@ const supabase = createClient<Database>(
 const subjectOptions = Object.keys(SUBJECT_LABELS) as SubjectCode[];
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"] as const;
 const AVATAR_COLORS = [colors.brand, colors.success, colors.warning, colors.muted] as const;
+// 과목별 차트 색(데이터 카테고리용 — 토큰 팔레트, 불꽃 주황 제외).
+const SUBJECT_CHART_COLORS = [colors.brand, colors.success, colors.warning, colors.muted, colors.ink] as const;
+
+function getSubjectColor(code: string): string {
+  const index = subjectOptions.indexOf(code as SubjectCode);
+  return SUBJECT_CHART_COLORS[(index < 0 ? subjectOptions.length : index) % SUBJECT_CHART_COLORS.length];
+}
 const activityLabels: Record<ActivityType, string> = {
   school: "학교",
   academy: "학원",
   self: "자습",
   class: "수업"
 };
+// 활동 유형별 색(토큰 팔레트 — 데이터 카테고리용, 불꽃 주황 제외).
+const activityColors: Record<ActivityType, string> = {
+  school: colors.success,
+  academy: colors.warning,
+  self: colors.brand,
+  class: colors.ink
+};
+
+// 배경색 위 텍스트를 AA(>=4.5) 충족하도록 흰색/잉크 중 선택.
+function onColorText(background: string): string {
+  return meetsAA(colors.surface, background) ? colors.surface : colors.ink;
+}
 
 function useStudentM2Data() {
   const [session, setSession] = useState<Session | null>(null);
@@ -248,21 +267,16 @@ export function StudentTodayM2Screen() {
 
 export function StudentPlannerM2Screen({
   initialView,
-  initialTodoId
+  initialTodoId,
+  composeTodo = false
 }: {
   initialView?: PlannerView;
   initialTodoId?: string;
+  composeTodo?: boolean;
 } = {}) {
   const params = useLocalSearchParams<{ view?: string }>();
   const data = useStudentM2Data();
   const [view, setView] = useState<PlannerView>(initialView ?? parsePlannerView(params.view));
-  const activeConnections = data.connections.filter((connection) => connection.status === "active");
-  const variant = getStudentHomeVariant({
-    activeConnectionCount: activeConnections.length,
-    todoCount: data.todos.length,
-    timetableBlockCount: data.timetableBlocks.length,
-    studySessionCount: data.studySessions.length
-  });
 
   useEffect(() => {
     setView(initialView ?? parsePlannerView(params.view));
@@ -273,15 +287,7 @@ export function StudentPlannerM2Screen({
   }
 
   return (
-    <AppShell
-      activeTab="planner"
-      loading={data.loading}
-      message={data.message}
-      subtitle={variant === "tutored" ? "선생님 숙제와 개인 계획을 함께 정리" : "개인 계획 중심"}
-      title="플래너"
-    >
-      {variant === "zero" ? <PlannerZeroState /> : null}
-
+    <AppShell activeTab="planner" loading={data.loading} message={data.message} title="플래너">
       <SegmentedControl
         options={[
           ["todos", "할 일"],
@@ -293,7 +299,7 @@ export function StudentPlannerM2Screen({
       />
 
       {view === "todos" ? (
-        <TodosPlanner data={data} initialTodoId={initialTodoId} />
+        <TodosPlanner composeTodo={composeTodo} data={data} initialTodoId={initialTodoId} />
       ) : null}
       {view === "timetable" ? <TimetablePlanner data={data} /> : null}
       {view === "calendar" ? <CalendarPlanner data={data} /> : null}
@@ -302,18 +308,22 @@ export function StudentPlannerM2Screen({
 }
 
 function TodosPlanner({
+  composeTodo,
   data,
   initialTodoId
 }: {
+  composeTodo?: boolean;
   data: ReturnType<typeof useStudentM2Data>;
   initialTodoId?: string;
 }) {
+  const [composing, setComposing] = useState(Boolean(composeTodo));
   const [editingId, setEditingId] = useState<string | null>(initialTodoId ?? null);
   const [title, setTitle] = useState("");
   const [subject, setSubject] = useState<SubjectCode>("math");
   const [dueDate, setDueDate] = useState(getDateKey(new Date()));
   const [aiCheckEnabled, setAiCheckEnabled] = useState(false);
   const editingTodo = data.todos.find((todo) => todo.id === editingId);
+  const showForm = composing || Boolean(editingTodo);
 
   useEffect(() => {
     if (!editingTodo) return;
@@ -322,6 +332,13 @@ function TodosPlanner({
     setDueDate(editingTodo.due_date ?? getDateKey(new Date()));
     setAiCheckEnabled(editingTodo.ai_check_enabled);
   }, [editingTodo]);
+
+  function closeForm() {
+    setEditingId(null);
+    setComposing(false);
+    setTitle("");
+    setAiCheckEnabled(false);
+  }
 
   async function saveTodo() {
     if (!data.session) return;
@@ -355,9 +372,7 @@ function TodosPlanner({
 
     data.setMessage(result.error ? result.error.message : editingTodo ? "할 일을 수정했어요." : "할 일을 추가했어요.");
     if (!result.error) {
-      setEditingId(null);
-      setTitle("");
-      setAiCheckEnabled(false);
+      closeForm();
     }
     await data.refresh();
   }
@@ -369,83 +384,194 @@ function TodosPlanner({
     await data.refresh();
   }
 
-  async function toggleAiCheck(todo: TodoRow, enabled: boolean) {
-    if (!canStudentToggleTodoAiCheck(todo)) {
-      data.setMessage("선생님 숙제의 AI 검사 여부는 선생님이 정한 값으로 잠겨 있어요.");
+  async function toggleAiCheck(enabled: boolean) {
+    if (!editingTodo || !canStudentToggleTodoAiCheck(editingTodo)) {
+      setAiCheckEnabled(enabled);
       return;
     }
-
-    const { error } = await supabase.from("todos").update({ ai_check_enabled: enabled }).eq("id", todo.id);
-    data.setMessage(error ? error.message : enabled ? "AI 검사를 켰어요." : "AI 검사를 껐어요.");
-    await data.refresh();
+    setAiCheckEnabled(enabled);
   }
 
-  async function deleteTodo(todo: TodoRow) {
-    if (todo.source === "teacher") {
+  async function deleteTodo() {
+    if (!editingTodo || editingTodo.source === "teacher") {
       data.setMessage("선생님 숙제는 삭제할 수 없어요.");
       return;
     }
-
-    const { error } = await supabase.from("todos").delete().eq("id", todo.id);
+    const { error } = await supabase.from("todos").delete().eq("id", editingTodo.id);
     data.setMessage(error ? error.message : "할 일을 삭제했어요.");
+    if (!error) closeForm();
     await data.refresh();
   }
 
+  if (showForm) {
+    const aiLocked = Boolean(editingTodo && !canStudentToggleTodoAiCheck(editingTodo));
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>{editingTodo ? "할 일 수정" : "새 할 일"}</Text>
+        <View style={styles.cardBody}>
+          <InputRow label="제목" value={title} onChange={setTitle} placeholder="예: 수학 개념 복습 30분" />
+          <InputRow label="마감일" value={dueDate} onChange={setDueDate} placeholder="YYYY-MM-DD" />
+          <ChoiceRow
+            label="과목"
+            options={subjectOptions.map((option) => [option, SUBJECT_LABELS[option]])}
+            value={subject}
+            onChange={setSubject}
+          />
+          <ToggleRow
+            label="AI 완료검사"
+            value={aiCheckEnabled}
+            onValueChange={(value) => void toggleAiCheck(value)}
+            disabled={aiLocked}
+          />
+          <View style={styles.inlineActions}>
+            <ActionButton label={editingTodo ? "수정 저장" : "추가"} onPress={() => void saveTodo()} tone="brand" />
+            <ActionButton label="취소" onPress={closeForm} tone="neutral" />
+            {editingTodo && editingTodo.source === "self" ? (
+              <ActionButton label="삭제" onPress={() => void deleteTodo()} tone="danger" />
+            ) : null}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  const ownTodos = data.todos.filter((todo) => todo.source === "self");
+  const teacherTodos = data.todos.filter((todo) => todo.source === "teacher");
+
   return (
     <>
-      <Section title={editingTodo ? "할 일 수정" : "첫 할 일 추가"} badge={editingTodo ? "수정 중" : "개인"}>
-        <InputRow label="제목" value={title} onChange={setTitle} placeholder="예: 수학 개념 복습 30분" />
-        <InputRow label="마감일" value={dueDate} onChange={setDueDate} placeholder="YYYY-MM-DD" />
-        <ChoiceRow
-          label="과목"
-          options={subjectOptions.map((option) => [option, SUBJECT_LABELS[option]])}
-          value={subject}
-          onChange={setSubject}
-        />
-        <ToggleRow
-          label="AI 완료검사"
-          value={aiCheckEnabled}
-          onValueChange={setAiCheckEnabled}
-          disabled={Boolean(editingTodo && !canStudentToggleTodoAiCheck(editingTodo))}
-        />
-        <View style={styles.inlineActions}>
-          <ActionButton label={editingTodo ? "수정 저장" : "할 일 추가"} onPress={() => void saveTodo()} tone="brand" />
-          {editingTodo ? (
-            <ActionButton
-              label="새로 작성"
-              onPress={() => {
-                setEditingId(null);
-                setTitle("");
-                setAiCheckEnabled(false);
-              }}
-              tone="neutral"
-            />
-          ) : null}
-        </View>
-      </Section>
+      <WeekStrip studySessions={data.studySessions} todos={data.todos} />
+      <StudyTimeBar sessions={data.studySessions} />
 
-      <Section title="할 일 목록" badge={`${data.todos.filter((todo) => todo.status === "todo").length}개 남음`}>
-        {data.todos.length ? (
-          data.todos.map((todo) => (
-            <TodoItem
-              key={todo.id}
-              todo={todo}
-              onDelete={deleteTodo}
-              onEdit={(selected) => setEditingId(selected.id)}
-              onToggleAi={toggleAiCheck}
-              onToggleStatus={toggleTodoStatus}
-            />
+      {teacherTodos.length ? (
+        <HomeCard title="선생님 숙제" right={<SoftTag tone="lock">편집 잠김</SoftTag>}>
+          {teacherTodos.map((todo) => (
+            <PlannerTodoRow key={todo.id} onToggle={toggleTodoStatus} todo={todo} />
+          ))}
+        </HomeCard>
+      ) : null}
+
+      <HomeCard title="내 플래너" right={<SoftTag tone="brand">직접 편집</SoftTag>}>
+        {ownTodos.length ? (
+          ownTodos.map((todo) => (
+            <PlannerTodoRow key={todo.id} onEdit={() => setEditingId(todo.id)} onToggle={toggleTodoStatus} todo={todo} />
           ))
         ) : (
-          <EmptyText>아직 할 일이 없어요. 위에서 첫 할 일을 추가해 보세요.</EmptyText>
+          <EmptyText>아직 내 할 일이 없어요.</EmptyText>
         )}
-      </Section>
+        <Pressable onPress={() => setComposing(true)} style={styles.addRow}>
+          <Text style={styles.addRowText}>+ 할 일 추가</Text>
+        </Pressable>
+      </HomeCard>
     </>
+  );
+}
+
+function PlannerTodoRow({
+  onEdit,
+  onToggle,
+  todo
+}: {
+  onEdit?: () => void;
+  onToggle: (todo: TodoRow) => Promise<void>;
+  todo: TodoRow;
+}) {
+  const done = todo.status === "done";
+  return (
+    <View style={styles.todoRow}>
+      <Pressable
+        accessibilityRole="checkbox"
+        onPress={() => void onToggle(todo)}
+        style={[styles.checkbox, done ? styles.checkboxDone : null]}
+      >
+        {done ? <Text style={styles.checkboxMark}>✓</Text> : null}
+      </Pressable>
+      <Pressable disabled={!onEdit} onPress={() => onEdit?.()} style={styles.flex}>
+        <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
+          {todo.title}
+        </Text>
+      </Pressable>
+      {todo.ai_check_enabled ? <SoftTag tone="brand">AI 검사</SoftTag> : null}
+      <SoftTag tone="subject">{todo.subject ? SUBJECT_LABELS[todo.subject] : "기타"}</SoftTag>
+    </View>
+  );
+}
+
+function WeekStrip({ studySessions, todos }: { studySessions: StudySessionRow[]; todos: TodoRow[] }) {
+  const todayKey = getDateKey(new Date());
+  const offsetToMonday = (new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 6) % 7;
+  const monday = shiftDate(todayKey, -offsetToMonday);
+  const labels = ["월", "화", "수", "목", "금", "토", "일"] as const;
+
+  return (
+    <View style={styles.weekStrip}>
+      {labels.map((label, index) => {
+        const day = shiftDate(monday, index);
+        const isToday = day === todayKey;
+        const hasItem =
+          todos.some((todo) => todo.due_date === day) ||
+          studySessions.some((session) => getDateKey(session.started_at) === day);
+        return (
+          <View key={day} style={styles.weekCol}>
+            <Text style={styles.weekDow}>{label}</Text>
+            <View style={[styles.weekDateBox, isToday ? styles.weekDateToday : null]}>
+              <Text style={[styles.weekDate, isToday ? styles.weekDateTodayText : null]}>{Number(day.slice(8))}</Text>
+            </View>
+            <View style={[styles.weekDot, hasItem ? styles.weekDotOn : null]} />
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function StudyTimeBar({ sessions }: { sessions: StudySessionRow[] }) {
+  const todayKey = getDateKey(new Date());
+  const bySubject = new Map<string, number>();
+  for (const session of sessions) {
+    if (getDateKey(session.started_at) !== todayKey) continue;
+    const key = session.subject ?? "etc";
+    bySubject.set(key, (bySubject.get(key) ?? 0) + Math.max(0, session.duration_sec));
+  }
+  const entries = [...bySubject.entries()].filter(([, seconds]) => seconds > 0);
+  const total = entries.reduce((sum, [, seconds]) => sum + seconds, 0);
+
+  return (
+    <View style={styles.studyBarCard}>
+      <View style={styles.studyBarHeader}>
+        <Text style={styles.studyBarTitle}>🕐 공부 시간</Text>
+        <Text style={styles.studyBarTotal}>{formatDuration(total)}</Text>
+      </View>
+      <View style={styles.studyBarTrack}>
+        {total > 0 ? (
+          entries.map(([sub, seconds]) => (
+            <View key={sub} style={{ flex: seconds, backgroundColor: getSubjectColor(sub) }} />
+          ))
+        ) : (
+          <View style={[styles.flex, styles.studyBarEmpty]} />
+        )}
+      </View>
+      {entries.length ? (
+        <View style={styles.studyBarLegend}>
+          {entries.map(([sub, seconds]) => (
+            <View key={sub} style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: getSubjectColor(sub) }]} />
+              <Text style={styles.legendText}>
+                {(SUBJECT_LABELS[sub as SubjectCode] ?? "기타")} {formatClock(seconds)}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.metaText}>오늘 기록이 아직 없어요.</Text>
+      )}
+    </View>
   );
 }
 
 function TimetablePlanner({ data }: { data: ReturnType<typeof useStudentM2Data> }) {
   const [mode, setMode] = useState<"day" | "week">("day");
+  const [composing, setComposing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dayOfWeek, setDayOfWeek] = useState(new Date().getDay());
   const [type, setType] = useState<ActivityType>("self");
@@ -487,8 +613,7 @@ function TimetablePlanner({ data }: { data: ReturnType<typeof useStudentM2Data> 
 
     data.setMessage(result.error ? result.error.message : editingBlock ? "시간표를 수정했어요." : "시간표를 추가했어요.");
     if (!result.error) {
-      setEditingId(null);
-      setLabel("");
+      closeForm();
     }
     await data.refresh();
   }
@@ -496,103 +621,276 @@ function TimetablePlanner({ data }: { data: ReturnType<typeof useStudentM2Data> 
   async function deleteBlock(block: TimetableBlockRow) {
     const { error } = await supabase.from("timetable_blocks").delete().eq("id", block.id);
     data.setMessage(error ? error.message : "시간표를 삭제했어요.");
+    if (!error) closeForm();
     await data.refresh();
   }
 
-  const visibleBlocks =
+  function closeForm() {
+    setEditingId(null);
+    setComposing(false);
+    setLabel("");
+  }
+
+  const showForm = composing || Boolean(editingBlock);
+  const hasLocked = data.timetableBlocks.some((block) => block.type === "class");
+
+  if (showForm) {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>{editingBlock ? "활동 수정" : "새 활동"}</Text>
+        <View style={styles.cardBody}>
+          <ChoiceRow
+            label="요일"
+            options={dayLabels.map((day, index) => [index, day])}
+            value={dayOfWeek}
+            onChange={setDayOfWeek}
+          />
+          <ChoiceRow
+            label="유형"
+            options={(Object.keys(activityLabels) as ActivityType[]).map((option) => [option, activityLabels[option]])}
+            value={type}
+            onChange={setType}
+          />
+          <InputRow label="이름" value={label} onChange={setLabel} placeholder="예: 수학 학원" />
+          <View style={styles.formGrid}>
+            <InputRow label="시작" value={startTime} onChange={setStartTime} placeholder="17:00" />
+            <InputRow label="종료" value={endTime} onChange={setEndTime} placeholder="18:00" />
+          </View>
+          <View style={styles.inlineActions}>
+            <ActionButton label={editingBlock ? "수정 저장" : "추가"} onPress={() => void saveBlock()} tone="brand" />
+            <ActionButton label="취소" onPress={closeForm} tone="neutral" />
+            {editingBlock ? (
+              <ActionButton label="삭제" onPress={() => void deleteBlock(editingBlock)} tone="danger" />
+            ) : null}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  const visibleBlocks = (
     mode === "day"
       ? data.timetableBlocks.filter((block) => block.day_of_week === dayOfWeek)
-      : data.timetableBlocks;
+      : data.timetableBlocks
+  )
+    .slice()
+    .sort((a, b) => a.day_of_week - b.day_of_week || a.start_min - b.start_min);
 
   return (
     <>
-      <Section title={editingBlock ? "시간표 수정" : "시간표 블록 추가"} badge={mode === "day" ? dayLabels[dayOfWeek] : "주간"}>
-        <SegmentedControl
-          options={[
-            ["day", "일"],
-            ["week", "주"]
-          ]}
-          value={mode}
-          onChange={setMode}
-        />
-        <ChoiceRow
-          label="요일"
-          options={dayLabels.map((day, index) => [index, day])}
-          value={dayOfWeek}
-          onChange={setDayOfWeek}
-        />
-        <ChoiceRow
-          label="유형"
-          options={(Object.keys(activityLabels) as ActivityType[]).map((option) => [option, activityLabels[option]])}
-          value={type}
-          onChange={setType}
-        />
-        <InputRow label="이름" value={label} onChange={setLabel} placeholder="예: 수학 학원" />
-        <View style={styles.formGrid}>
-          <InputRow label="시작" value={startTime} onChange={setStartTime} placeholder="17:00" />
-          <InputRow label="종료" value={endTime} onChange={setEndTime} placeholder="18:00" />
-        </View>
-        <View style={styles.inlineActions}>
-          <ActionButton label={editingBlock ? "수정 저장" : "블록 추가"} onPress={() => void saveBlock()} tone="brand" />
-          {editingBlock ? <ActionButton label="새로 작성" onPress={() => setEditingId(null)} tone="neutral" /> : null}
-        </View>
-      </Section>
+      <View style={styles.activityLegend}>
+        {(Object.keys(activityLabels) as ActivityType[]).map((activity) => (
+          <View key={activity} style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: activityColors[activity] }]} />
+            <Text style={styles.legendText}>{activityLabels[activity]}</Text>
+          </View>
+        ))}
+        <Pressable onPress={() => setComposing(true)} style={styles.legendAdd}>
+          <Text style={styles.legendAddText}>+ 활동 추가</Text>
+        </Pressable>
+      </View>
 
-      <Section title={mode === "day" ? `${dayLabels[dayOfWeek]}요일 시간표` : "주간 시간표"} badge={`${visibleBlocks.length}개`}>
+      {hasLocked ? (
+        <View style={styles.lockBanner}>
+          <Text style={styles.lockBannerText}>🔒 쌤 수업은 자동으로 연결돼요 (직접 수정 불가)</Text>
+        </View>
+      ) : null}
+
+      <SegmentedControl
+        options={[
+          ["day", "일"],
+          ["week", "주"]
+        ]}
+        value={mode}
+        onChange={setMode}
+      />
+
+      {mode === "day" ? (
+        <View style={styles.dayChips}>
+          {dayLabels.map((day, index) => (
+            <Pressable
+              key={day}
+              onPress={() => setDayOfWeek(index)}
+              style={[styles.dayChip, dayOfWeek === index ? styles.dayChipActive : null]}
+            >
+              <Text style={[styles.dayChipText, dayOfWeek === index ? styles.dayChipTextActive : null]}>{day}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <HomeCard
+        title={mode === "day" ? `${dayLabels[dayOfWeek]}요일 시간표` : "주간 시간표"}
+        right={<Text style={styles.countBadge}>{`${visibleBlocks.length}개`}</Text>}
+      >
         {visibleBlocks.length ? (
           visibleBlocks.map((block) => (
-            <TimetableItem
+            <TimetableBlockCard
               block={block}
               key={block.id}
-              onDelete={deleteBlock}
-              onEdit={(selected) => setEditingId(selected.id)}
+              onEdit={block.type === "class" ? undefined : () => setEditingId(block.id)}
+              showDay={mode === "week"}
             />
           ))
         ) : (
-          <EmptyText>아직 시간표 블록이 없어요.</EmptyText>
+          <EmptyText>아직 시간표가 없어요. ‘+ 활동 추가’로 만들어 보세요.</EmptyText>
         )}
-      </Section>
+      </HomeCard>
     </>
   );
 }
 
-function CalendarPlanner({ data }: { data: ReturnType<typeof useStudentM2Data> }) {
-  const days = useMemo(() => {
-    const today = getDateKey(new Date());
-    return Array.from({ length: 7 }, (_value, index) => shiftDate(today, index));
-  }, []);
+function TimetableBlockCard({
+  block,
+  onEdit,
+  showDay
+}: {
+  block: TimetableBlockRow;
+  onEdit?: () => void;
+  showDay?: boolean;
+}) {
+  const background = activityColors[block.type];
+  const textColor = onColorText(background);
+  const locked = block.type === "class";
 
   return (
-    <Section title="7일 캘린더" badge={`${data.todos.length}개 할 일`}>
-      {days.map((day) => {
-        const todos = data.todos.filter((todo) => todo.due_date === day);
-        const sessions = data.studySessions.filter((session) => getDateKey(session.started_at) === day);
-        const blocks = data.timetableBlocks.filter((block) => block.day_of_week === new Date(`${day}T00:00:00.000Z`).getUTCDay());
-        const studySeconds = sessions.reduce((total, session) => total + Math.max(0, session.duration_sec), 0);
+    <Pressable disabled={!onEdit} onPress={() => onEdit?.()} style={[styles.blockCard, { backgroundColor: background }]}>
+      <View style={styles.blockCardRow}>
+        <Text style={[styles.blockCardLabel, { color: textColor }]} numberOfLines={1}>
+          {showDay ? `${dayLabels[block.day_of_week]} · ` : ""}
+          {block.label ?? activityLabels[block.type]}
+        </Text>
+        {locked ? <Text style={[styles.blockCardLock, { color: textColor }]}>🔒</Text> : null}
+      </View>
+      <Text style={[styles.blockCardTime, { color: textColor }]}>
+        {formatMinutes(block.start_min)}–{formatMinutes(block.end_min)}
+      </Text>
+    </Pressable>
+  );
+}
 
-        return (
-          <View key={day} style={styles.calendarDay}>
-            <View style={styles.calendarDate}>
-              <Text style={styles.calendarDayText}>{day.slice(5)}</Text>
-              <Text style={styles.metaText}>{formatDuration(studySeconds)} 기록</Text>
-            </View>
-            <View style={styles.calendarItems}>
-              {todos.slice(0, 3).map((todo) => (
-                <Text key={todo.id} style={styles.calendarItemText}>
-                  {todo.status === "done" ? "완료" : "예정"} · {todo.title}
-                </Text>
-              ))}
-              {blocks.slice(0, 2).map((block) => (
-                <Text key={block.id} style={styles.calendarItemText}>
-                  {formatMinutes(block.start_min)} · {block.label ?? activityLabels[block.type]}
-                </Text>
-              ))}
-              {!todos.length && !blocks.length ? <Text style={styles.metaText}>계획 없음</Text> : null}
-            </View>
+function CalendarPlanner({ data }: { data: ReturnType<typeof useStudentM2Data> }) {
+  const todayKey = getDateKey(new Date());
+  const [selected, setSelected] = useState(todayKey);
+  const cursor = new Date(`${todayKey}T00:00:00.000Z`);
+  const year = cursor.getUTCFullYear();
+  const month = cursor.getUTCMonth();
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+  const secByDay = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const session of data.studySessions) {
+      const key = getDateKey(session.started_at);
+      map.set(key, (map.get(key) ?? 0) + Math.max(0, session.duration_sec));
+    }
+    return map;
+  }, [data.studySessions]);
+
+  const firstDow = new Date(Date.UTC(year, month, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const cells: Array<string | null> = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...Array.from({ length: daysInMonth }, (_value, index) => `${monthPrefix}-${String(index + 1).padStart(2, "0")}`)
+  ];
+  const monthSeconds = [...secByDay.entries()]
+    .filter(([day]) => day.startsWith(monthPrefix))
+    .reduce((sum, [, seconds]) => sum + seconds, 0);
+  const studiedDays = [...secByDay.entries()].filter(([day, seconds]) => day.startsWith(monthPrefix) && seconds > 0).length;
+
+  const selectedTodos = data.todos.filter((todo) => todo.due_date === selected);
+  const selectedBlocks = data.timetableBlocks.filter(
+    (block) => block.day_of_week === new Date(`${selected}T00:00:00.000Z`).getUTCDay()
+  );
+  const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"] as const;
+
+  return (
+    <>
+      <HomeCard
+        title={`${year}년 ${month + 1}월`}
+        right={
+          <View style={styles.calLegend}>
+            <View style={[styles.legendDot, { backgroundColor: colors.flame }]} />
+            <Text style={styles.legendText}>오늘</Text>
           </View>
-        );
-      })}
-    </Section>
+        }
+      >
+        <View style={styles.calWeekHeader}>
+          {weekdayLabels.map((label) => (
+            <Text key={label} style={styles.calWeekHeaderText}>
+              {label}
+            </Text>
+          ))}
+        </View>
+        <View style={styles.calGrid}>
+          {cells.map((day, index) => {
+            if (!day) return <View key={`blank-${index}`} style={styles.calCell} />;
+            const seconds = secByDay.get(day) ?? 0;
+            const intensity = seconds > 3 * 3600 ? 2 : seconds > 0 ? 1 : 0;
+            const isToday = day === todayKey;
+            const isSelected = day === selected;
+            const hasTodo = data.todos.some((todo) => todo.due_date === day);
+            return (
+              <Pressable key={day} onPress={() => setSelected(day)} style={styles.calCell}>
+                <View
+                  style={[
+                    styles.calDay,
+                    intensity === 1 ? styles.calDaySome : null,
+                    intensity === 2 ? styles.calDayLots : null,
+                    isToday ? styles.calDayToday : null,
+                    isSelected ? styles.calDaySelected : null
+                  ]}
+                >
+                  <Text style={[styles.calDayText, intensity === 2 ? styles.calDayTextStrong : null]}>
+                    {Number(day.slice(8))}
+                  </Text>
+                </View>
+                <View style={[styles.calTodoDot, hasTodo ? styles.calTodoDotOn : null]} />
+              </Pressable>
+            );
+          })}
+        </View>
+      </HomeCard>
+
+      <HomeCard
+        title={`${Number(selected.slice(5, 7))}월 ${Number(selected.slice(8))}일${selected === todayKey ? " (오늘)" : ""}`}
+        right={<Text style={styles.countBadge}>🕐 {formatDuration(secByDay.get(selected) ?? 0)}</Text>}
+      >
+        {selectedBlocks.map((block) => (
+          <View key={block.id} style={styles.calRow}>
+            <Text style={styles.calRowTime}>{formatMinutes(block.start_min)}</Text>
+            <Text style={styles.calRowLabel}>{block.label ?? activityLabels[block.type]}</Text>
+          </View>
+        ))}
+        {selectedTodos.map((todo) => (
+          <View key={todo.id} style={styles.calRow}>
+            <View style={[styles.legendDot, { backgroundColor: getSubjectColor(todo.subject ?? "etc") }]} />
+            <Text
+              style={[styles.calRowLabel, todo.status === "done" ? styles.todoRowTitleDone : null]}
+              numberOfLines={1}
+            >
+              {todo.title}
+            </Text>
+          </View>
+        ))}
+        {!selectedBlocks.length && !selectedTodos.length ? <EmptyText>이 날 계획이 없어요.</EmptyText> : null}
+        <Link href={"/todo/new" as Href} asChild>
+          <Pressable style={styles.addRow}>
+            <Text style={styles.addRowText}>+ 이 날 일정·할 일 추가</Text>
+          </Pressable>
+        </Link>
+      </HomeCard>
+
+      <View style={styles.statRow}>
+        <View style={styles.statCard}>
+          <Text style={styles.statValue}>{studiedDays}일</Text>
+          <Text style={styles.statLabel}>이 달 공부한 날</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statValue}>{formatDuration(monthSeconds)}</Text>
+          <Text style={styles.statLabel}>이 달 누적</Text>
+        </View>
+      </View>
+    </>
   );
 }
 
@@ -821,90 +1119,6 @@ function ZeroTodoCard() {
   );
 }
 
-function TodoItem({
-  todo,
-  onDelete,
-  onEdit,
-  onToggleAi,
-  onToggleStatus
-}: {
-  todo: TodoRow;
-  onDelete: (todo: TodoRow) => Promise<void>;
-  onEdit: (todo: TodoRow) => void;
-  onToggleAi: (todo: TodoRow, enabled: boolean) => Promise<void>;
-  onToggleStatus: (todo: TodoRow) => Promise<void>;
-}) {
-  const aiToggleAllowed = canStudentToggleTodoAiCheck(todo);
-
-  return (
-    <View style={styles.todoItem}>
-      <View style={styles.todoMain}>
-        <Pressable onPress={() => void onToggleStatus(todo)} style={styles.checkButton}>
-          <Text style={styles.checkText}>{todo.status === "done" ? "완" : "□"}</Text>
-        </Pressable>
-        <View style={styles.flex}>
-          <View style={styles.itemTitleRow}>
-            <Text style={styles.itemTitle}>{todo.title}</Text>
-            {todo.locked ? <Chip tone="warning">잠금</Chip> : null}
-          </View>
-          <Text style={styles.metaText}>
-            {todo.due_date ?? "마감 없음"} · {todo.source === "teacher" ? "선생님 숙제" : "개인 할 일"}
-          </Text>
-        </View>
-        <Chip tone={todo.source === "teacher" ? "success" : "brand"}>
-          {todo.subject ? SUBJECT_LABELS[todo.subject] : "기타"}
-        </Chip>
-      </View>
-      <View style={styles.todoActions}>
-        <View style={styles.switchRow}>
-          <Text style={[styles.metaText, !aiToggleAllowed ? styles.mutedText : null]}>
-            {aiToggleAllowed ? "AI 검사" : "AI 검사 잠금"}
-          </Text>
-          <Switch
-            disabled={!aiToggleAllowed}
-            onValueChange={(enabled) => void onToggleAi(todo, enabled)}
-            thumbColor={colors.surface}
-            trackColor={{ false: colors.line, true: colors.brand }}
-            value={todo.ai_check_enabled}
-          />
-        </View>
-        <View style={styles.inlineActionsCompact}>
-          {todo.source === "self" ? <ActionButton label="수정" onPress={() => onEdit(todo)} tone="neutral" /> : null}
-          {todo.source === "self" ? <ActionButton label="삭제" onPress={() => void onDelete(todo)} tone="danger" /> : null}
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function TimetableItem({
-  block,
-  onDelete,
-  onEdit
-}: {
-  block: TimetableBlockRow;
-  onDelete: (block: TimetableBlockRow) => Promise<void>;
-  onEdit: (block: TimetableBlockRow) => void;
-}) {
-  return (
-    <View style={styles.simpleTodoRow}>
-      <View style={styles.timeBadge}>
-        <Text style={styles.timeBadgeText}>{dayLabels[block.day_of_week]}</Text>
-      </View>
-      <View style={styles.flex}>
-        <Text style={styles.itemTitle}>{block.label ?? activityLabels[block.type]}</Text>
-        <Text style={styles.metaText}>
-          {formatMinutes(block.start_min)}-{formatMinutes(block.end_min)} · {activityLabels[block.type]}
-        </Text>
-      </View>
-      <View style={styles.inlineActionsCompact}>
-        <ActionButton label="수정" onPress={() => onEdit(block)} tone="neutral" />
-        <ActionButton label="삭제" onPress={() => void onDelete(block)} tone="danger" />
-      </View>
-    </View>
-  );
-}
-
 function PeerRankingCard({ ranking }: { ranking: PeerRankingSnapshot | null }) {
   const showRanking = canShowPeerRanking(ranking);
 
@@ -964,15 +1178,6 @@ function ClassCard({
         <Text style={styles.classMeta}>선생님과 같은 플래너로 함께 공부하고 있어요.</Text>
       </View>
     </HomeCard>
-  );
-}
-
-function PlannerZeroState() {
-  return (
-    <View style={styles.zeroBand}>
-      <Text style={styles.zeroTitle}>첫 플래너를 만드는 중</Text>
-      <Text style={styles.bodyText}>할 일 하나나 시간표 블록 하나를 저장하면 홈이 혼공 상태로 바뀝니다.</Text>
-    </View>
   );
 }
 
@@ -1109,36 +1314,6 @@ function TabPlaceholder({
         <Text style={styles.zeroCardBody}>이 화면은 다음 단계에서{"\n"}카탈로그대로 채워질 예정이에요.</Text>
       </View>
     </AppShell>
-  );
-}
-
-function Section({ badge, children, title }: { badge?: string; children: ReactNode; title: string }) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {badge ? <Chip tone="brand">{badge}</Chip> : null}
-      </View>
-      <View style={styles.sectionBody}>{children}</View>
-    </View>
-  );
-}
-
-function Chip({ children, tone }: { children: ReactNode; tone: "brand" | "success" | "warning" | "flame" }) {
-  const style =
-    tone === "success"
-      ? styles.chipSuccess
-      : tone === "warning"
-        ? styles.chipWarning
-        : tone === "flame"
-          ? styles.chipFlame
-          : styles.chipBrand;
-  const textStyle = tone === "flame" ? styles.chipFlameText : styles.chipText;
-
-  return (
-    <View style={[styles.chip, style]}>
-      <Text style={textStyle}>{children}</Text>
-    </View>
   );
 }
 
@@ -1692,28 +1867,31 @@ const styles = StyleSheet.create({
   },
   segmented: {
     flexDirection: "row",
-    gap: spacing.sm,
+    gap: spacing.xs,
     padding: spacing.xs,
     borderRadius: radii.button,
-    backgroundColor: colors.surface
+    backgroundColor: colors.canvas
   },
   segmentButton: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 40,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.control
   },
   segmentButtonActive: {
-    backgroundColor: colors.brand
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line
   },
   segmentText: {
     color: colors.muted,
     fontSize: 14,
-    fontWeight: "900"
+    fontWeight: "800"
   },
   segmentTextActive: {
-    color: colors.surface
+    color: colors.ink,
+    fontWeight: "900"
   },
   formGrid: {
     flexDirection: "row",
@@ -2118,5 +2296,309 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 19
+  },
+  addRow: {
+    paddingVertical: spacing.sm,
+    alignItems: "center"
+  },
+  addRowText: {
+    color: colors.brand,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  weekStrip: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface
+  },
+  weekCol: {
+    flex: 1,
+    alignItems: "center",
+    gap: 4
+  },
+  weekDow: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800"
+  },
+  weekDateBox: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.chip
+  },
+  weekDateToday: {
+    backgroundColor: colors.brand
+  },
+  weekDate: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  weekDateTodayText: {
+    color: colors.surface
+  },
+  weekDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "transparent"
+  },
+  weekDotOn: {
+    backgroundColor: colors.brand
+  },
+  studyBarCard: {
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface
+  },
+  studyBarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  studyBarTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  studyBarTotal: {
+    color: colors.brand,
+    fontSize: 15,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  studyBarTrack: {
+    flexDirection: "row",
+    height: 12,
+    borderRadius: radii.chip,
+    overflow: "hidden",
+    backgroundColor: colors.canvas
+  },
+  studyBarEmpty: {
+    backgroundColor: colors.line
+  },
+  studyBarLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs
+  },
+  legendDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5
+  },
+  legendText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  activityLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface
+  },
+  legendAdd: {
+    marginLeft: "auto",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
+  },
+  legendAddText: {
+    color: colors.brand,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  lockBanner: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: tints.brandSoft,
+    borderRadius: radii.control,
+    backgroundColor: tints.brandSoft
+  },
+  lockBannerText: {
+    color: colors.brand,
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 19
+  },
+  dayChips: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.xs
+  },
+  dayChip: {
+    flex: 1,
+    minHeight: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.control,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  dayChipActive: {
+    backgroundColor: colors.brand,
+    borderColor: colors.brand
+  },
+  dayChipText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  dayChipTextActive: {
+    color: colors.surface
+  },
+  blockCard: {
+    gap: 2,
+    padding: spacing.md,
+    borderRadius: radii.control
+  },
+  blockCardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm
+  },
+  blockCardLabel: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  blockCardLock: {
+    fontSize: 13
+  },
+  blockCardTime: {
+    fontSize: 12,
+    fontWeight: "800",
+    fontVariant: [typography.numericVariant],
+    opacity: 0.9
+  },
+  calLegend: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs
+  },
+  calWeekHeader: {
+    flexDirection: "row"
+  },
+  calWeekHeaderText: {
+    flex: 1,
+    textAlign: "center",
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  calGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap"
+  },
+  calCell: {
+    width: `${100 / 7}%`,
+    alignItems: "center",
+    paddingVertical: 3,
+    gap: 2
+  },
+  calDay: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.control
+  },
+  calDaySome: {
+    backgroundColor: tints.brandSoft
+  },
+  calDayLots: {
+    backgroundColor: colors.brand
+  },
+  calDayToday: {
+    borderWidth: 2,
+    borderColor: colors.flame
+  },
+  calDaySelected: {
+    borderWidth: 2,
+    borderColor: colors.brand
+  },
+  calDayText: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+    fontVariant: [typography.numericVariant]
+  },
+  calDayTextStrong: {
+    color: colors.surface
+  },
+  calTodoDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "transparent"
+  },
+  calTodoDotOn: {
+    backgroundColor: colors.flame
+  },
+  calRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xs
+  },
+  calRowTime: {
+    width: 44,
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  calRowLabel: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  statRow: {
+    flexDirection: "row",
+    gap: spacing.md
+  },
+  statCard: {
+    flex: 1,
+    gap: spacing.xs,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface
+  },
+  statValue: {
+    color: colors.ink,
+    fontSize: 22,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  statLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800"
   }
 });
