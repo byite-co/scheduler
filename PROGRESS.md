@@ -137,13 +137,14 @@
 - **접근성(WCAG AA)**: `getContrastRatio`/`meetsAA` 유틸 + 토큰 대비 테스트(`a11y.test.ts`).
 - **디자인 토큰 준수**: 승인된 시맨틱 틴트(`tints`) 추가 + `approvedColorValues`. `token-guard.test.ts`가 앱 화면(.tsx)의 모든 hex가 승인 팔레트에 속하는지 강제(임의색 0).
 - **E2E 스캐폴딩**: 과외쌤 Playwright(`apps/teacher/e2e/report-share.e2e.ts` + config, `test:e2e`), 학생 Maestro(`apps/student/e2e/timer-focus.flow.yaml`, `test:e2e`).
+- **통합 테스트 플레이크 보완(M7 관찰분 해결)**: `packages/shared/vitest.config.ts` 신설 — 원격 env가 있어 통합 테스트가 실제로 도는 경우에만 파일을 **직렬 실행(`fileParallelism: false`)** 하여 Supabase auth 동시 `createUser` rate-limit을 제거하고, 일시적 실패는 **재시도(`retry: 2`)** 로 흡수. 단위 테스트만 도는 일반 실행은 병렬 유지(속도). (게이팅은 통합 테스트 `loadTestEnv()`와 동일 조건.)
 
 ### 실제 동작 vs mock
 - **실제**: 대비 계산·가드 테스트는 실제로 실행되어 토큰을 검증.
 - **스캐폴딩(미실행)**: E2E는 브라우저/에뮬레이터 + 실행 서버가 필요해 헤드리스 자율 실행 대상 아님 → CI에서 `pnpm --filter <app> test:e2e`로 실행하도록 스캐폴딩.
 
 ### 검증 결과 / 접근성 발견
-- `lint`/`typecheck`/`test`/`build` 모두 green (shared 91 + design-tokens 10 + student 2 + teacher 2).
+- `lint`/`typecheck`/`test`/`build` 모두 green (shared 91 단위 + design-tokens 8 + student 2 + teacher 2 = 103; 원격 env 동반 시 shared 통합 테스트 7개도 직렬 실행으로 통과).
 - 접근성 발견: 흰 글씨는 **브랜드 위(5.13:1)만** 일반 텍스트 AA 충족, danger 위는 굵은 버튼(라지 3.0)만 충족. **flame/warning 위 흰 글씨는 AA 미달(2.83/2.27)** → 이 색들은 항상 ink/스트롱 텍스트로만 사용(테스트가 규칙을 강제·문서화).
 - 토큰 가드: 앱 화면 내 임의색 0(모든 hex가 colors/tints 소속).
 

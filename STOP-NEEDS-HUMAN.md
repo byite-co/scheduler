@@ -26,4 +26,4 @@
 
 ## 5. 기타
 - `gh` CLI 미설치 → GitHub PR 객체 미생성. 각 마일스톤은 main에 squash merge됨. 필요 시 사람이 PR 생성.
-- 통합 테스트 병렬 실행 시 Supabase auth rate-limit 간헐 실패 가능 → CI에서 재시도 또는 직렬 실행 권장.
+- 통합 테스트 Supabase auth rate-limit 플레이크: **코드로 해결됨**(`packages/shared/vitest.config.ts` — 원격 env 동반 시 파일 직렬화 + 재시도). 추가 사람 조치 불필요.
