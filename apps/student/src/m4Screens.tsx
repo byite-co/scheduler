@@ -14,6 +14,7 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
+import { AppIcon } from "./icons";
 import { supabase } from "./supabaseClient";
 
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
@@ -162,8 +163,9 @@ export function HomeworkSubmitScreen() {
       ) : null}
       {submitState === "idle" ? (
         <View style={styles.infoBanner}>
+          <AppIcon name="ai" size={16} color={colors.brand} />
           <Text style={styles.infoBannerText}>
-            ✨ AI 1차 확인 · 사진이 잘 보여요. {data.isTutored ? "제출하면 선생님이 최종 확인해요." : "제출하면 바로 결과를 보여드려요."}
+            AI 1차 확인 · 사진이 잘 보여요. {data.isTutored ? "제출하면 선생님이 최종 확인해요." : "제출하면 바로 결과를 보여드려요."}
           </Text>
         </View>
       ) : null}
@@ -228,7 +230,9 @@ export function HomeworkResultScreen() {
         : view.verdictTone === "danger"
           ? "다시 한 번 해볼까요"
           : "확인했어요";
-  const ringIcon = view.verdictTone === "success" ? "✓" : "!";
+  const ringIconName = view.verdictTone === "success" ? "check" : "alert";
+  const ringIconColor =
+    view.verdictTone === "success" ? colors.success : view.verdictTone === "danger" ? colors.danger : colors.warning;
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
@@ -236,7 +240,7 @@ export function HomeworkResultScreen() {
 
       <View style={styles.verdictHero}>
         <View style={[styles.verdictRing, verdictRingStyle(view.verdictTone)]}>
-          <Text style={[styles.verdictRingText, badgeTextToneStyle(view.verdictTone)]}>{ringIcon}</Text>
+          <AppIcon name={ringIconName} size={34} color={ringIconColor} />
         </View>
         <Text style={styles.verdictHeadline}>{headline}</Text>
         <Text style={styles.verdictSub}>
@@ -374,7 +378,7 @@ function PhotoSlots({
           onPress={onRemove}
           style={styles.slotFilled}
         >
-          <Text style={styles.slotIcon}>📷</Text>
+          <AppIcon name="camera" size={22} color={colors.muted} />
         </Pressable>
       ))}
       {count < 9 ? (
@@ -555,11 +559,14 @@ const styles = StyleSheet.create({
   },
   slotAddText: { color: colors.muted, fontSize: 13, fontWeight: "900", textAlign: "center", lineHeight: 18 },
   infoBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
     padding: spacing.md,
     borderRadius: radii.control,
     backgroundColor: tints.brandSoft
   },
-  infoBannerText: { color: colors.brand, fontSize: 13, fontWeight: "800", lineHeight: 19 },
+  infoBannerText: { flex: 1, color: colors.brand, fontSize: 13, fontWeight: "800", lineHeight: 19 },
   noteBanner: {
     padding: spacing.md,
     borderRadius: radii.control,

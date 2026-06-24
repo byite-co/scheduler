@@ -19,6 +19,7 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
+import { AppIcon } from "./icons";
 import { supabase } from "./supabaseClient";
 import { AppShell } from "./m2Screens";
 
@@ -97,14 +98,15 @@ function GateNotice({ gate, onWatchAd }: { gate: FeatureGateState; onWatchAd: ()
     <View style={styles.gateWrap}>
       <View style={styles.lockPreview}>
         <View style={styles.lockBadge}>
-          <Text style={styles.lockBadgeText}>🔒</Text>
+          <AppIcon name="lock" size={22} color={colors.muted} />
         </View>
         <Text style={styles.lockTitle}>준비됐어요</Text>
         <Text style={styles.lockHint}>{gate.reason}</Text>
       </View>
       {gate.canUnlockByAd ? (
         <Pressable accessibilityRole="button" onPress={onWatchAd} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>📺 광고 보고 무료로 열기</Text>
+          <AppIcon name="ad" size={18} color={colors.surface} />
+          <Text style={styles.primaryButtonText}>광고 보고 무료로 열기</Text>
         </Pressable>
       ) : null}
       <Link href={"/subscribe" as Href} asChild>
@@ -292,7 +294,7 @@ const styles = StyleSheet.create({
   gateCard: { gap: spacing.md, padding: spacing.lg, borderWidth: 1, borderColor: colors.line, borderRadius: radii.card, backgroundColor: colors.surface },
   gateTitle: { color: colors.ink, fontSize: 16, fontWeight: "900" },
   gateHint: { color: colors.muted, fontSize: 13, fontWeight: "700" },
-  primaryButton: { minHeight: 52, alignItems: "center", justifyContent: "center", borderRadius: radii.button, backgroundColor: colors.brand, paddingHorizontal: spacing.xl },
+  primaryButton: { minHeight: 52, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderRadius: radii.button, backgroundColor: colors.brand, paddingHorizontal: spacing.xl },
   primaryButtonText: { color: colors.surface, fontSize: 15, fontWeight: "900" },
   secondaryButton: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.button, borderWidth: 1, borderColor: colors.brand },
   secondaryButtonText: { color: colors.brand, fontSize: 15, fontWeight: "900" },

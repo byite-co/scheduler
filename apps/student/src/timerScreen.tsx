@@ -21,6 +21,7 @@ import {
 import type { Database, FocusDrowsinessResult, SubjectCode } from "@ssamplanner/shared";
 
 import { FocusCameraPanel } from "./focusCamera";
+import { AppIcon } from "./icons";
 import { supabase } from "./supabaseClient";
 
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
@@ -264,15 +265,15 @@ export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolea
         <View style={styles.controls}>
           {!activeTimer ? (
             <Pressable accessibilityLabel="공부 시작" onPress={() => void startTimer(false)} style={styles.ctrlMain}>
-              <Text style={styles.ctrlMainText}>▶</Text>
+              <AppIcon name="play" size={28} color={colors.ink} />
             </Pressable>
           ) : running ? (
             <Pressable accessibilityLabel="일시정지" onPress={() => void pauseTimer()} style={styles.ctrlMain}>
-              <Text style={styles.ctrlMainText}>❚❚</Text>
+              <AppIcon name="pause" size={28} color={colors.ink} />
             </Pressable>
           ) : (
             <Pressable accessibilityLabel="다시 시작" onPress={() => void resumeTimer()} style={styles.ctrlMain}>
-              <Text style={styles.ctrlMainText}>▶</Text>
+              <AppIcon name="play" size={28} color={colors.ink} />
             </Pressable>
           )}
           <Pressable
@@ -281,7 +282,7 @@ export function StudentTimerScreen({ focusEntry = false }: { focusEntry?: boolea
             onPress={() => void endTimer()}
             style={[styles.ctrlStop, !activeTimer ? styles.ctrlDisabled : null]}
           >
-            <Text style={styles.ctrlStopText}>■</Text>
+            <AppIcon name="stop" size={22} color={colors.surface} />
           </Pressable>
         </View>
 

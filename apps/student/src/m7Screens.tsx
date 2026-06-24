@@ -19,6 +19,7 @@ import {
 } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
+import { AppIcon, type IconName } from "./icons";
 import { supabase } from "./supabaseClient";
 
 type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
@@ -93,27 +94,30 @@ export function NotificationCenterScreen() {
   );
 }
 
-const SETTINGS_SECTIONS: Array<{ title: string; items: Array<{ href: string; label: string; icon: string; danger?: boolean }> }> = [
+const SETTINGS_SECTIONS: Array<{
+  title: string;
+  items: Array<{ href: string; label: string; icon: IconName; danger?: boolean }>;
+}> = [
   {
     title: "계정",
     items: [
-      { href: "/settings/profile", label: "프로필 편집", icon: "👤" },
-      { href: "/onboarding/disclosure", label: "공개 범위", icon: "🔒" },
-      { href: "/settings/subscription", label: "구독 관리", icon: "✨" }
+      { href: "/settings/profile", label: "프로필 편집", icon: "person" },
+      { href: "/onboarding/disclosure", label: "공개 범위", icon: "lock" },
+      { href: "/settings/subscription", label: "구독 관리", icon: "ai" }
     ]
   },
   {
     title: "알림",
     items: [
-      { href: "/onboarding/push", label: "푸시 알림", icon: "🔔" },
-      { href: "/notifications", label: "알림 센터", icon: "📩" }
+      { href: "/onboarding/push", label: "푸시 알림", icon: "bell" },
+      { href: "/notifications", label: "알림 센터", icon: "mail" }
     ]
   },
   {
     title: "기타",
     items: [
-      { href: "/legal/terms", label: "약관·개인정보", icon: "📄" },
-      { href: "/settings/account/delete", label: "회원 탈퇴", icon: "⚠", danger: true }
+      { href: "/legal/terms", label: "약관·개인정보", icon: "doc" },
+      { href: "/settings/account/delete", label: "회원 탈퇴", icon: "alert", danger: true }
     ]
   }
 ];
@@ -125,13 +129,13 @@ export function AccountSettingsScreen() {
       <Link href={"/settings/profile" as never} asChild>
         <Pressable accessibilityRole="button" style={styles.profileHeader}>
           <View style={styles.profileAvatar}>
-            <Text style={styles.profileAvatarText}>👤</Text>
+            <AppIcon name="person" size={22} color={colors.brand} />
           </View>
           <View style={styles.flex}>
             <Text style={styles.profileName}>내 프로필</Text>
             <Text style={styles.profileHint}>이름·학년·목표를 관리해요</Text>
           </View>
-          <Text style={styles.chevron}>›</Text>
+          <AppIcon name="chevron" size={20} color={colors.muted} />
         </Pressable>
       </Link>
 
@@ -145,9 +149,9 @@ export function AccountSettingsScreen() {
                   accessibilityRole="button"
                   style={StyleSheet.flatten([styles.settingItem, index > 0 ? styles.settingItemDivider : null])}
                 >
-                  <Text style={styles.settingIcon}>{item.icon}</Text>
+                  <AppIcon name={item.icon} size={20} color={item.danger ? colors.danger : colors.muted} />
                   <Text style={[styles.settingLabel, item.danger ? styles.dangerText : null]}>{item.label}</Text>
-                  <Text style={styles.chevron}>›</Text>
+                  <AppIcon name="chevron" size={20} color={colors.muted} />
                 </Pressable>
               </Link>
             ))}

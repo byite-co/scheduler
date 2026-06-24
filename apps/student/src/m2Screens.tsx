@@ -30,6 +30,7 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, PeerRankingSnapshot, SubjectCode } from "@ssamplanner/shared";
 
+import { AppIcon, type IconName } from "./icons";
 import { supabase } from "./supabaseClient";
 
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
@@ -479,7 +480,7 @@ function PlannerTodoRow({
         onPress={() => void onToggle(todo)}
         style={[styles.checkbox, done ? styles.checkboxDone : null]}
       >
-        {done ? <Text style={styles.checkboxMark}>✓</Text> : null}
+        {done ? <AppIcon name="check" size={15} color={colors.surface} /> : null}
       </Pressable>
       <Pressable disabled={!onEdit} onPress={() => onEdit?.()} style={styles.flex}>
         <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
@@ -534,7 +535,10 @@ function StudyTimeBar({ sessions }: { sessions: StudySessionRow[] }) {
   return (
     <View style={styles.studyBarCard}>
       <View style={styles.studyBarHeader}>
-        <Text style={styles.studyBarTitle}>🕐 공부 시간</Text>
+        <View style={styles.iconLabelRow}>
+          <AppIcon name="clock" size={16} color={colors.muted} />
+          <Text style={styles.studyBarTitle}>공부 시간</Text>
+        </View>
         <Text style={styles.studyBarTotal}>{formatDuration(total)}</Text>
       </View>
       <View style={styles.studyBarTrack}>
@@ -685,7 +689,8 @@ function TimetablePlanner({ data }: { data: ReturnType<typeof useStudentM2Data> 
 
       {hasLocked ? (
         <View style={styles.lockBanner}>
-          <Text style={styles.lockBannerText}>🔒 쌤 수업은 자동으로 연결돼요 (직접 수정 불가)</Text>
+          <AppIcon name="lock" size={15} color={tints.warningStrong} />
+          <Text style={styles.lockBannerText}>쌤 수업은 자동으로 연결돼요 (직접 수정 불가)</Text>
         </View>
       ) : null}
 
@@ -753,7 +758,7 @@ function TimetableBlockCard({
           {showDay ? `${dayLabels[block.day_of_week]} · ` : ""}
           {block.label ?? activityLabels[block.type]}
         </Text>
-        {locked ? <Text style={[styles.blockCardLock, { color: textColor }]}>🔒</Text> : null}
+        {locked ? <AppIcon name="lock" size={14} color={textColor} /> : null}
       </View>
       <Text style={[styles.blockCardTime, { color: textColor }]}>
         {formatMinutes(block.start_min)}–{formatMinutes(block.end_min)}
@@ -846,7 +851,12 @@ function CalendarPlanner({ data }: { data: ReturnType<typeof useStudentM2Data> }
 
       <HomeCard
         title={`${Number(selected.slice(5, 7))}월 ${Number(selected.slice(8))}일${selected === todayKey ? " (오늘)" : ""}`}
-        right={<Text style={styles.countBadge}>🕐 {formatDuration(secByDay.get(selected) ?? 0)}</Text>}
+        right={
+          <View style={styles.iconLabelRow}>
+            <AppIcon name="clock" size={13} color={colors.muted} />
+            <Text style={styles.countBadge}>{formatDuration(secByDay.get(selected) ?? 0)}</Text>
+          </View>
+        }
       >
         {selectedBlocks.map((block) => (
           <View key={block.id} style={styles.calRow}>
@@ -931,14 +941,16 @@ function HeroCard({
       <View style={styles.heroActions}>
         <Link href={"/timer" as Href} asChild>
           <Pressable style={StyleSheet.flatten([styles.heroPrimary, styles.flameButton])}>
-            <Text style={styles.heroPrimaryText}>{activeSession ? "▶ 타이머 열기" : "▶ 공부 시작"}</Text>
+            <AppIcon name="play" size={18} color={colors.surface} />
+            <Text style={styles.heroPrimaryText}>{activeSession ? "타이머 열기" : "공부 시작"}</Text>
           </Pressable>
         </Link>
         {!isZero ? (
           <Link href={(activeSession?.focus_mode ? "/focus/session" : "/focus/intro") as Href} asChild>
             <Pressable style={styles.heroGhost}>
+              <AppIcon name="focus" size={16} color="rgba(255,255,255,0.72)" />
               <Text style={styles.heroGhostText}>
-                {activeSession?.focus_mode ? "◎ 집중 타이머 이어서" : "◎ 집중 모드로 시작 · 졸음 점검"}
+                {activeSession?.focus_mode ? "집중 타이머 이어서" : "집중 모드로 시작 · 졸음 점검"}
               </Text>
             </Pressable>
           </Link>
@@ -969,7 +981,8 @@ function HomeHeader({
       </View>
       {streakCount > 0 ? (
         <View style={styles.streakChip}>
-          <Text style={styles.streakChipText}>🔥 {streakCount}일</Text>
+          <AppIcon name="flame" size={14} color={colors.flame} />
+          <Text style={styles.streakChipText}>{streakCount}일</Text>
         </View>
       ) : null}
     </View>
@@ -980,8 +993,9 @@ function ConnectNudge() {
   return (
     <Link href={"/onboarding/connect" as Href} asChild>
       <Pressable style={styles.nudge}>
-        <Text style={styles.nudgeText}>🔥 선생님과 연결하면 숙제·리포트로 함께 관리해요</Text>
-        <Text style={styles.nudgeArrow}>›</Text>
+        <AppIcon name="flame" size={18} color={colors.flame} />
+        <Text style={styles.nudgeText}>선생님과 연결하면 숙제·리포트로 함께 관리해요</Text>
+        <AppIcon name="chevron" size={18} color={colors.flame} />
       </Pressable>
     </Link>
   );
@@ -1026,7 +1040,7 @@ function StudyTodoRow({
   return (
     <Pressable onPress={() => void onToggleStatus(todo)} style={styles.todoRow}>
       <View style={[styles.checkbox, done ? styles.checkboxDone : null]}>
-        {done ? <Text style={styles.checkboxMark}>✓</Text> : null}
+        {done ? <AppIcon name="check" size={15} color={colors.surface} /> : null}
       </View>
       <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
         {todo.title}
@@ -1061,7 +1075,8 @@ function TodoCard({
       )}
       <Link href={"/planner" as Href} asChild>
         <Pressable style={styles.textLink}>
-          <Text style={styles.textLinkLabel}>플래너에서 관리 ›</Text>
+          <Text style={styles.textLinkLabel}>플래너에서 관리</Text>
+          <AppIcon name="chevron" size={16} color={colors.brand} />
         </Pressable>
       </Link>
     </HomeCard>
@@ -1094,7 +1109,7 @@ function ZeroTodoCard() {
   return (
     <View style={styles.zeroCard}>
       <View style={styles.zeroIcon}>
-        <Text style={styles.zeroIconText}>🗒️</Text>
+        <AppIcon name="planner" size={26} color={colors.brand} />
       </View>
       <Text style={styles.zeroCardTitle}>아직 할 일이 없어요</Text>
       <Text style={styles.zeroCardBody}>오늘 공부할 것을 추가하고{"\n"}하나씩 체크해 보세요.</Text>
@@ -1245,12 +1260,12 @@ export function AppShell({
   );
 }
 
-const STUDENT_TABS: Array<{ tab: StudentTab; href: string; label: string; icon: string }> = [
-  { tab: "today", href: "/today", label: "오늘", icon: "🏠" },
-  { tab: "planner", href: "/planner", label: "플래너", icon: "🗒️" },
-  { tab: "class", href: "/class", label: "또래", icon: "👥" },
-  { tab: "ai", href: "/ai", label: "AI추천", icon: "✨" },
-  { tab: "records", href: "/records", label: "기록", icon: "📊" }
+const STUDENT_TABS: Array<{ tab: StudentTab; href: string; label: string; icon: IconName }> = [
+  { tab: "today", href: "/today", label: "오늘", icon: "today" },
+  { tab: "planner", href: "/planner", label: "플래너", icon: "planner" },
+  { tab: "class", href: "/class", label: "또래", icon: "peer" },
+  { tab: "ai", href: "/ai", label: "AI추천", icon: "ai" },
+  { tab: "records", href: "/records", label: "기록", icon: "records" }
 ];
 
 function BottomNav({ active }: { active: StudentTab }) {
@@ -1271,13 +1286,13 @@ function NavLink({
 }: {
   active: boolean;
   href: string;
-  icon: string;
+  icon: IconName;
   label: string;
 }) {
   return (
     <Link href={href as Href} asChild>
       <Pressable style={styles.navItem}>
-        <Text style={[styles.navIcon, active ? styles.navIconActive : null]}>{icon}</Text>
+        <AppIcon name={icon} size={24} color={active ? colors.brand : colors.muted} />
         <Text style={[styles.navText, active ? styles.navTextActive : null]}>{label}</Text>
       </Pressable>
     </Link>
@@ -1971,6 +1986,9 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   textLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
     alignSelf: "flex-start",
     paddingVertical: spacing.xs
   },
@@ -2157,6 +2175,9 @@ const styles = StyleSheet.create({
   },
   streakChip: {
     flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radii.chip,
@@ -2229,6 +2250,8 @@ const styles = StyleSheet.create({
   },
   heroPrimary: {
     minHeight: 50,
+    flexDirection: "row",
+    gap: 6,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.button
@@ -2239,7 +2262,10 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   heroGhost: {
+    flexDirection: "row",
+    gap: 6,
     alignItems: "center",
+    justifyContent: "center",
     paddingVertical: spacing.xs
   },
   heroGhostText: {
@@ -2531,6 +2557,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between"
   },
+  iconLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6
+  },
   studyBarTitle: {
     color: colors.ink,
     fontSize: 15,
@@ -2594,6 +2625,9 @@ const styles = StyleSheet.create({
     fontWeight: "900"
   },
   lockBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderWidth: 1,
