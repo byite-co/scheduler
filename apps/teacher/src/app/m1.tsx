@@ -126,6 +126,8 @@ type TeacherData = ReturnType<typeof useTeacherData>;
 export function TeacherDashboardContent() {
   const data = useTeacherData();
   const activeCount = data.connections.filter((connection) => connection.status === "active").length;
+  const pendingCount = data.connections.filter((connection) => connection.status === "pending").length;
+  const rejectedCount = data.connections.filter((connection) => connection.status === "rejected").length;
   const monthlyAmount = getTeacherMonthlySubscriptionAmount(activeCount);
 
   return (
@@ -143,38 +145,118 @@ export function TeacherDashboardContent() {
         </a>
       }
     >
-      <div className="grid gap-4 md:grid-cols-3">
-        <MetricPanel label="active 연결" value={`${activeCount}명`} />
-        <MetricPanel label="이번 달 앱 구독료" value={`${monthlyAmount.toLocaleString("ko-KR")}원`} />
-        <MetricPanel
-          label="학생당 기준"
-          value={`${PRICE_PER_STUDENT_KRW.toLocaleString("ko-KR")}원`}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="담당 학생" value={`${activeCount}명`} hint="active 연결" />
+        <StatCard label="대기 요청" value={`${pendingCount}건`} hint="수락 대기" tone={pendingCount ? "warning" : "muted"} />
+        <StatCard label="거절" value={`${rejectedCount}건`} hint="최근" />
+        <StatCard
+          label="이번 달 구독료"
+          value={`${monthlyAmount.toLocaleString("ko-KR")}원`}
+          hint={`학생당 ${PRICE_PER_STUDENT_KRW.toLocaleString("ko-KR")}원`}
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <Panel title="실제 연결 상태">
-          <StepList
-            steps={[
-              ["대기", `${data.connections.filter((c) => c.status === "pending").length}건`],
-              ["활성", `${activeCount}건`],
-              ["거절", `${data.connections.filter((c) => c.status === "rejected").length}건`],
-              ["월 구독료", `${monthlyAmount.toLocaleString("ko-KR")}원`]
-            ]}
-          />
-        </Panel>
-        <Panel title="다음 작업">
-          <StepList
-            steps={[
-              ["이메일", data.session ? "로그인됨" : "가입/로그인 필요"],
-              ["프로필", data.profile?.onboarded ? "저장 완료" : "프로필 저장 필요"],
-              ["초대 코드", data.inviteCodes[0]?.code ? formatInviteCode(data.inviteCodes[0].code) : "미발급"],
-              ["요청 처리", "연결 요청을 수락하거나 거절"]
-            ]}
-          />
-        </Panel>
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
+        <div className="flex flex-col gap-4">
+          <Panel title="학생 연결 현황">
+            {activeCount ? (
+              <ConnectionList data={data} status="active" />
+            ) : pendingCount ? (
+              <ConnectionList data={data} status="pending" />
+            ) : (
+              <EmptyState>아직 연결된 학생이 없어요. ‘+ 학생 초대’로 코드를 보내보세요.</EmptyState>
+            )}
+          </Panel>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <Panel title="이번 주 회차 · 수업료">
+            <StepList
+              steps={[
+                ["기록된 회차", "수기 입력"],
+                ["수업료", "수기 트래커"]
+              ]}
+            />
+            <p className="text-xs font-bold text-muted">앱 구독료와 수업·수업료는 별개예요.</p>
+          </Panel>
+
+          <a href="/homework/review" className="block rounded-card bg-ink p-5 text-white">
+            <p className="text-sm font-bold text-white/70">숙제 검사 대기</p>
+            <p className="mt-1 text-lg font-extrabold">AI 1차 확인 후 최종 검사</p>
+            <span className="mt-3 inline-block rounded-button bg-brand px-4 py-2 text-sm font-extrabold">
+              검사하러 가기 →
+            </span>
+          </a>
+        </div>
       </div>
     </TeacherShell>
+  );
+}
+
+export function TeacherStudentsContent() {
+  const data = useTeacherData();
+  const pending = data.connections.filter((connection) => connection.status === "pending");
+
+  return (
+    <TeacherShell
+      active="/students"
+      title="학생 관리"
+      subtitle="연결된 학생과 들어온 요청을 관리해요."
+      data={data}
+      actions={
+        <a
+          href="/students/invite"
+          className="rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white"
+        >
+          + 학생 초대
+        </a>
+      }
+    >
+      {pending.length ? (
+        <Panel title={`연결 요청 ${pending.length}건`}>
+          <ConnectionList data={data} status="pending" />
+        </Panel>
+      ) : null}
+      <Panel title="연결된 학생">
+        <ConnectionList data={data} status="active" />
+      </Panel>
+      <div className="flex flex-wrap gap-2">
+        <a
+          href="/students/requests"
+          className="rounded-control border border-line bg-surface px-3 py-2 text-sm font-bold text-muted hover:text-ink"
+        >
+          전체 요청 보기
+        </a>
+        <a
+          href="/students/invite"
+          className="rounded-control border border-line bg-surface px-3 py-2 text-sm font-bold text-muted hover:text-ink"
+        >
+          초대 코드 관리
+        </a>
+      </div>
+    </TeacherShell>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  hint,
+  tone = "muted"
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "muted" | "warning";
+}) {
+  return (
+    <div className="rounded-card border border-line bg-surface p-4">
+      <p className="text-sm font-bold text-muted">{label}</p>
+      <p className={`mt-1 text-2xl font-extrabold tabular-nums ${tone === "warning" ? "text-warning" : "text-ink"}`}>
+        {value}
+      </p>
+      {hint ? <p className="mt-1 text-xs font-bold text-muted">{hint}</p> : null}
+    </div>
   );
 }
 
@@ -789,15 +871,6 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
     <section className="rounded-card border border-line bg-surface p-5 shadow-[0_16px_40px_rgba(22,26,46,0.08)]">
       <h2 className="text-lg font-extrabold">{title}</h2>
       <div className="mt-4 flex flex-col gap-4">{children}</div>
-    </section>
-  );
-}
-
-function MetricPanel({ label, value }: { label: string; value: string }) {
-  return (
-    <section className="rounded-card border border-line bg-surface p-5">
-      <p className="text-sm font-bold text-muted">{label}</p>
-      <p className="mt-3 font-mono text-2xl font-extrabold tabular-nums text-ink">{value}</p>
     </section>
   );
 }
