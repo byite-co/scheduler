@@ -15,6 +15,8 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
+import { TeacherShell, type TeacherShellData } from "./m1";
+
 type SubmissionRow = Database["public"]["Tables"]["homework_submissions"]["Row"];
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
@@ -105,29 +107,32 @@ export function TeacherHomeworkReview() {
     if (!error) await refresh();
   }
 
+  const shellData: TeacherShellData = {
+    session,
+    loading,
+    message,
+    profile: null,
+    setMessage,
+    refresh: async () => {
+      await refresh();
+    }
+  };
+
   return (
-    <main className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-6 md:px-8">
-        <header className="flex flex-col gap-2 border-b border-line pb-5">
-          <p className="text-sm font-extrabold text-brand">숙제 검사</p>
-          <h1 className="text-2xl font-extrabold">AI 완료검사 큐</h1>
-          <p className="text-sm font-bold text-muted">
-            채점이 아니라 “다 했는지” 확인입니다. 학생이 사진을 공개한 제출만 보입니다.
-          </p>
-        </header>
+    <TeacherShell
+      active="/homework/review"
+      title="숙제 검사"
+      subtitle="채점이 아니라 “다 했는지” 확인이에요. 학생이 사진을 공개한 제출만 보입니다."
+      data={shellData}
+    >
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <SummaryCard label="확인 대기" value={summary.awaitingTeacher} tone="warning" />
+        <SummaryCard label="통과" value={summary.pass} tone="success" />
+        <SummaryCard label="미흡" value={summary.insufficient} tone="danger" />
+        <SummaryCard label="애매" value={summary.ambiguous} tone="warning" />
+      </section>
 
-        <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <SummaryCard label="확인 대기" value={summary.awaitingTeacher} tone="warning" />
-          <SummaryCard label="통과" value={summary.pass} tone="success" />
-          <SummaryCard label="미흡" value={summary.insufficient} tone="danger" />
-          <SummaryCard label="애매" value={summary.ambiguous} tone="warning" />
-        </section>
-
-        <p className="text-sm font-bold text-muted" aria-live="polite">
-          {loading ? "불러오는 중…" : message}
-        </p>
-
-        <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4">
           {!loading && items.length === 0 ? (
             <div className="rounded-card border border-line bg-surface p-6 text-sm font-bold text-muted">
               아직 검사할 제출이 없습니다.
@@ -191,13 +196,12 @@ export function TeacherHomeworkReview() {
               </article>
             );
           })}
-        </section>
+      </section>
 
-        {!session && !loading ? (
-          <p className="text-sm font-bold text-muted">로그인 후 연결된 학생의 검사 큐를 볼 수 있습니다.</p>
-        ) : null}
-      </div>
-    </main>
+      {!session && !loading ? (
+        <p className="text-sm font-bold text-muted">로그인 후 연결된 학생의 검사 큐를 볼 수 있습니다.</p>
+      ) : null}
+    </TeacherShell>
   );
 }
 

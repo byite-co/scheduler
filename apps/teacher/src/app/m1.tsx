@@ -474,7 +474,16 @@ function isNavActive(itemHref: string, active?: string): boolean {
   return active === itemHref || active.startsWith(`${itemHref}/`) || active.startsWith(itemHref);
 }
 
-function TeacherShell({
+export type TeacherShellData = {
+  session: Session | null;
+  loading: boolean;
+  message: string;
+  profile?: { name?: string | null } | null;
+  setMessage: (message: string) => void;
+  refresh: (next?: Session | null) => Promise<void>;
+};
+
+export function TeacherShell({
   active,
   title,
   subtitle,
@@ -485,7 +494,7 @@ function TeacherShell({
   active?: string;
   title: string;
   subtitle: string;
-  data: TeacherData;
+  data: TeacherShellData;
   actions?: ReactNode;
   children: ReactNode;
 }) {

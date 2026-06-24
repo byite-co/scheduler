@@ -121,12 +121,25 @@
   - **B3 학생 상세 탭(08~12: 플랜·숙제/기록/약점/리포트)은 미구현** — `/students/[id]` 라우트+탭 컨테이너+공개범위 게이팅 데이터가 큰 작업이라 다음 라운드로.
 - **검증**: lint/typecheck/test/build green(teacher Next build 컴파일). 3000에서 /(대시보드 통계·CTA)·/students 렌더 확인.
 
-## ▶ 다음 이어갈 지점 (RESUME POINT)
-학생 앱 완료 + 과외쌤 G8·G9 완료. 다음 실행은 **G10부터**(+ G9 잔여 B3 학생 상세 탭).
-각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
-⚠️ 과외쌤 Next.js/Tailwind(토큰=Tailwind 클래스, `text-warning` 등 매핑됨). m4~m7 teacher 화면은 자체 레이아웃 → 각 그룹에서 `TeacherShell`(사이드바) 채택.
+## G10 — 과외쌤 숙제 검사(B5) 사이드바 통합 ✅
+- **device**: teacher-desktop (14 B5).
+- **손본 화면**: `apps/teacher/src/app/m4.tsx`(숙제 검사) + `m1.tsx`(`TeacherShell` export).
+  - `TeacherShell` + 최소 데이터 타입 `TeacherShellData` export → m4~m7이 사이드바 IA를 재사용할 수 있게 됨.
+  - 숙제 검사(B5): 독립 `<main>` 레이아웃 → **사이드바 셸로 전환**(active="/homework/review"). 콘텐츠(요약 카드 통과/미흡/애매·검사 큐·확인/다시 제출)는 유지.
+- **기능 유지**: homework_submissions RLS(공개범위 게이팅)·createTeacherReviewPatch·summarizeReviewQueue 그대로. AI 판정 mock 유지.
+- **카탈로그와 남은 차이/범위**: **숙제 출제(B4, 13)** 화면은 미구현(새 라우트 `/students/[id]/homework/new` + todos source=teacher 작성 — 별도). 핸드셰이크/학생별 설정은 G8에서 이미 사이드바 IA 사용 중.
+- **검증**: lint/typecheck/test/build green. 3000에서 /homework/review가 사이드바와 함께 렌더 확인.
 
-- **G10** 과외쌤 숙제 출제(B4, 13) + 숙제 검사(B5, 14) + 연결 요청 핸드셰이크 + 학생별 설정. 파일: `m4.tsx`(검사), `m1.tsx`(요청/설정) 등. + 여력되면 **B3 학생 상세 탭** 착수.
+## ▶ 다음 이어갈 지점 (RESUME POINT)
+학생 앱 완료 + 과외쌤 G8·G9·G10 완료(검사 화면 사이드바 통합). 다음 실행은 **G11부터**.
+각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
+⚠️ 과외쌤 m4 패턴: `import { TeacherShell, TeacherShellData } from "./m1"` 후 `shellData={session,loading,message,profile:null,setMessage,refresh}` 구성해 래핑(m5~m7도 동일 적용 권장).
+
+- **G11** 과외쌤 리포트 빌더(B6 수업/B7 주간, 15·16) + 학부모 공유/히스토리/만료(웹뷰 22/23). 파일: `m5.tsx`(reports), `app/r/[token]`. → m5도 TeacherShell 사이드바 채택.
+- **잔여(다음 라운드 흡수)**: 과외쌤 B4 숙제 출제, B3 학생 상세 탭(08~12).
+- **G12** 구독·결제(앱 구독료 mock)+수업·수업료(수기, 분리 유지)+설정·알림(m6/m7) — TeacherShell 채택.
+- **G13** teacher-mobile/teacher-tablet 반응형.
+- (후속) 학생 F4/F5 집중 요약·리포트.
 - **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
 - **G7** 학생 태블릿(student-tablet 60장): 공용 컴포넌트 device 분기로 2열/넓은 카드 반응형.
 - **G8~G13** 과외쌤(teacher-desktop 36 → teacher-mobile 28/teacher-tablet 18): IA 재구성·인증/온보딩, 대시보드/학생목록/상세, 숙제 출제·검사·핸드셰이크, 리포트 빌더·학부모 공유, 구독·수업료, 반응형.
