@@ -6,6 +6,7 @@ import {
   canShowPeerRanking,
   canStudentToggleTodoAiCheck,
   getStudentHomeVariant,
+  shouldShowConnectNudge,
   shouldShowPeerRanking,
   shouldShowTeacherHomework,
   sumStudySecondsForDate
@@ -47,6 +48,14 @@ describe("M2 student home branching", () => {
         studySessionCount: 0
       })
     ).toBe("zero");
+  });
+
+  it("shows the connect nudge purely by connection status, not by data presence", () => {
+    // 연결 안 됨 → 데이터 유무와 무관하게 항상 노출(제로/혼공 모두).
+    expect(shouldShowConnectNudge(0)).toBe(true);
+    // 연결됨(과외생) → 숨김.
+    expect(shouldShowConnectNudge(1)).toBe(false);
+    expect(shouldShowConnectNudge(2)).toBe(false);
   });
 });
 

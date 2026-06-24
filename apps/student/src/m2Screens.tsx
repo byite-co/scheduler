@@ -23,6 +23,7 @@ import {
   canStudentToggleTodoAiCheck,
   getDateKey,
   getStudentHomeVariant,
+  shouldShowConnectNudge,
   shouldShowPeerRanking,
   shouldShowTeacherHomework,
   sumStudySecondsForDate
@@ -220,7 +221,7 @@ export function StudentTodayM2Screen() {
         />
       }
     >
-      {variant === "self_study" ? <ConnectNudge /> : null}
+      {shouldShowConnectNudge(activeConnections.length) ? <ConnectNudge /> : null}
 
       <HeroCard
         activeSession={activeSession}

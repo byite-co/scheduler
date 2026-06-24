@@ -53,6 +53,12 @@ export function shouldShowPeerRanking(variant: StudentHomeVariant): boolean {
   return variant === "self_study";
 }
 
+// 연결 입구(connect nudge)는 오직 "연결 상태"로만 결정한다 — 공부 데이터 유무와 무관.
+// 연결 안 된 학생(active 연결 0)은 제로/혼공 어느 상태든 항상 노출, 과외생은 숨김.
+export function shouldShowConnectNudge(activeConnectionCount: number): boolean {
+  return activeConnectionCount === 0;
+}
+
 export function canStudentToggleTodoAiCheck(todo: TodoLockState): boolean {
   return todo.source === "self" && !todo.locked;
 }
