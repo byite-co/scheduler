@@ -83,7 +83,7 @@ export function TeacherHomeworkReview() {
         studentName: nameById.get(submission.student_id) ?? "학생"
       }))
     );
-    setMessage(submissionResult.error?.message ?? "검사 큐를 불러왔습니다.");
+    setMessage(submissionResult.error?.message ?? "");
     setLoading(false);
   }, []);
 

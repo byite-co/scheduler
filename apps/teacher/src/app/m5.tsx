@@ -61,7 +61,7 @@ export function TeacherReportBuilder() {
       ? await supabase.from("profiles").select("*").in("id", ids)
       : { data: [] as ProfileRow[] };
     setStudents(profileResult.data ?? []);
-    setMessage(connectionResult.error?.message ?? "연결된 학생을 불러왔습니다.");
+    setMessage(connectionResult.error?.message ?? "");
     setLoading(false);
   }, []);
 

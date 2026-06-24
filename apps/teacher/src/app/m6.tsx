@@ -49,7 +49,7 @@ export function TeacherBilling() {
     setStatus((subResult.data?.status as SubStatus) ?? "none");
     setInvoices(invoiceResult.data ?? []);
     setActiveCount((connectionResult.data ?? []).length);
-    setMessage(invoiceResult.error?.message ?? "결제 정보를 불러왔습니다.");
+    setMessage(invoiceResult.error?.message ?? "");
     setLoading(false);
   }, []);
 
@@ -190,7 +190,7 @@ export function TeacherLessonFees() {
     const profiles = ids.length ? await supabase.from("profiles").select("id, name").in("id", ids) : { data: [] };
     setFees(feeResult.data ?? []);
     setStudents((profiles.data as Array<{ id: string; name: string }>) ?? []);
-    setMessage(feeResult.error?.message ?? "수업료 기록을 불러왔습니다.");
+    setMessage(feeResult.error?.message ?? "");
     setLoading(false);
   }, []);
 

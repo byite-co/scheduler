@@ -465,23 +465,95 @@ export function TeacherProfileContent() {
       subtitle="학생이 초대 요청을 보낼 때 연결될 선생님 계정 정보입니다."
       data={data}
     >
-      <form className="grid gap-4 lg:grid-cols-2" onSubmit={saveProfile}>
+      <form className="grid gap-4" onSubmit={saveProfile}>
         <Panel title="기본 정보">
           <Field label="이름" value={name} onChange={setName} required />
           <Field label="소개" value={bio} onChange={setBio} />
           <SubjectPicker selected={subjects} onChange={setSubjects} />
-        </Panel>
-        <Panel title="저장 상태">
-          <StepList
-            steps={[
-              ["세션", data.session ? "로그인됨" : "로그인 필요"],
-              ["역할", data.profile?.role ?? "미저장"],
-              ["온보딩", data.profile?.onboarded ? "완료" : "대기"]
-            ]}
-          />
           <SubmitButton>프로필 저장</SubmitButton>
         </Panel>
       </form>
+    </TeacherShell>
+  );
+}
+
+export function TeacherSettingsContent() {
+  const data = useTeacherData();
+  useRequireOnboarding(data);
+  const [name, setName] = useState("");
+  const [bio, setBio] = useState("");
+  const [subjects, setSubjects] = useState<SubjectCode[]>(["math", "english"]);
+
+  useEffect(() => {
+    setName(data.profile?.name ?? "");
+    setBio(data.profile?.bio ?? "");
+    setSubjects(data.profile?.subjects?.length ? data.profile.subjects : ["math", "english"]);
+  }, [data.profile]);
+
+  const activeCount = data.connections.filter((connection) => connection.status === "active").length;
+  const monthlyAmount = getTeacherMonthlySubscriptionAmount(activeCount);
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data.session) {
+      data.setMessage("로그인 후 설정을 저장할 수 있습니다.");
+      return;
+    }
+    const { error } = await supabase.from("profiles").upsert({
+      id: data.session.user.id,
+      role: "teacher",
+      name,
+      bio,
+      subjects,
+      onboarded: true
+    });
+    if (error) {
+      data.setMessage(error.message);
+      return;
+    }
+    await data.refresh();
+    data.setMessage("설정을 저장했어요.");
+  }
+
+  return (
+    <TeacherShell active="/settings" title="설정" subtitle="검사 대상·브랜딩·결제를 관리합니다." data={data}>
+      <form className="grid gap-4" onSubmit={saveSettings}>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Panel title="AI 완료검사 대상">
+            <p className="text-sm font-bold text-muted">담당 과목별 검사·리포트에 포함돼요.</p>
+            <SubjectPicker selected={subjects} onChange={setSubjects} />
+          </Panel>
+          <Panel title="브랜딩">
+            <p className="text-sm font-bold text-muted">리포트·공유 링크에 표시돼요.</p>
+            <Field label="표시 이름" value={name} onChange={setName} required />
+            <Field label="소개" value={bio} onChange={setBio} />
+          </Panel>
+        </div>
+        <div>
+          <SubmitButton>설정 저장</SubmitButton>
+        </div>
+      </form>
+
+      <div className="mt-4">
+        <Panel title="구독 · 정산">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-bold text-muted">이번 달 앱 구독료</p>
+              <p className="text-2xl font-extrabold text-ink">{monthlyAmount.toLocaleString("ko-KR")}원</p>
+              <p className="text-xs font-bold text-muted">
+                연동 학생 {activeCount}명 · 학생당 {PRICE_PER_STUDENT_KRW.toLocaleString("ko-KR")}원
+              </p>
+            </div>
+            <a
+              href="/billing"
+              className="inline-flex min-h-11 items-center justify-center rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white"
+            >
+              결제 관리
+            </a>
+          </div>
+          <p className="text-xs font-bold text-muted">앱 구독료와 수업·수업료는 별개예요.</p>
+        </Panel>
+      </div>
     </TeacherShell>
   );
 }

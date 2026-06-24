@@ -34,7 +34,7 @@ export function TeacherNotificationCenter() {
       .order("created_at", { ascending: false })
       .limit(50);
     setNotifications(data ?? []);
-    setMessage(error?.message ?? "알림을 불러왔습니다.");
+    setMessage(error?.message ?? "");
     setLoading(false);
   }, []);
 
