@@ -99,12 +99,23 @@
 - **카탈로그와 남은 차이(의도)**: 카탈로그의 정밀 마조너리(히어로+할일 좌 / 우리반+숙제 우 / 차트 풀폭)는 **순서 기반 2열 wrap**으로 근사(카드가 L-R-L-R 흐름). 플래너 시간표의 좌-목록/우-주간그리드 분할은 단일 컬럼 내 카드로 유지(그리드는 가로 스크롤). 타이머/가입은 기존 중앙 maxWidth로 태블릿 대응.
 - **검증**: lint/typecheck/test/build green. 8081을 768px로 리사이즈해 홈 카드가 2열(좌 x≈24 / 우 x≈392)로 배치됨을 DOM 좌표로 확인.
 
-## ▶ 다음 이어갈 지점 (RESUME POINT)
-**학생 앱(모바일+태블릿) 전 화면 카탈로그화 완료.** 다음 실행은 **G8부터(과외쌤)**.
-각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
-⚠️ `<Link asChild>` 자식 style은 `StyleSheet.flatten`. 과외쌤은 Next.js(Tailwind) — 학생(RN Web)과 다른 스택이니 Slot 함정은 학생 한정.
+## G8 — 과외쌤 IA + 인증/온보딩 ✅
+- **device**: teacher-desktop (01 A1 로그인·05 B1 IA).
+- **손본 화면**: `apps/teacher/src/app/m1.tsx` — `TeacherShell` 재구성 + `TeacherAuthLayout` 신설.
+  - **사이드바 IA 셸**: 좌측 고정 사이드바(브랜드 + 대시보드/학생 관리/숙제 검사/리포트/구독·정산/설정 + 프로필·로그아웃 푸터) + 메인(헤더 title/subtitle/actions + children). `active` 기반 nav 하이라이트(prefix 매칭). 중립 프로 SaaS 톤.
+  - **인증 스플릿 스크린**: 좌 브랜드 패널(인디고, "계획부터 인증까지…" + 1.2만+/94% 지표) + 우 폼. 로그인/가입/재설정이 사용.
+  - **"세션: 있음/없음" 디버그(Auth 상태 StepList) 제거.** AuthForm은 이메일/비번 + 로그인 + 가입↔로그인 토글 + 비밀번호 재설정 링크.
+  - 대시보드 헤더에 "+ 학생 초대" 액션.
+- **기능 유지**: signUp/signInWithPassword/reset 그대로. m1 화면(대시보드·초대·요청·프로필·온보딩)이 새 셸 사용.
+- **카탈로그와 남은 차이(의도)**: 소셜 로그인(카카오/구글/네이버) 생략(OAuth 미연동 + 토큰 외 색). 사이드바 아이콘은 유니코드(아이콘 라이브러리 미도입). 대시보드 **콘텐츠 자체(통계카드·집중관리 테이블·우측레일)는 G9**에서.
+- **검증**: lint/typecheck/test/build green(teacher Next build 컴파일 성공=Tailwind 유효). 3000에서 /login 스플릿·/(대시보드) 사이드바 IA 렌더 확인, 디버그 제거 확인.
 
-- **G8** 과외쌤 IA 재구성 + 인증/온보딩(A1~A4, teacher-desktop). 디버그 사이드바는 이미 제거됨(1단계) — 실제 정보구조 네비(상단/사이드)로 재구성. 파일: `apps/teacher/src/app/*`, `m1.tsx` 등. **중립 프로 SaaS 톤**(Linear/Stripe 결).
+## ▶ 다음 이어갈 지점 (RESUME POINT)
+학생 앱 완료 + 과외쌤 G8(IA 셸·인증) 완료. 다음 실행은 **G9부터**.
+각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
+⚠️ 과외쌤은 Next.js/Tailwind(토큰=Tailwind 클래스). Slot 함정은 학생(RN Web) 한정. m4~m7 teacher 화면은 자체 레이아웃 → 각 그룹에서 `TeacherShell`(사이드바) 채택 권장.
+
+- **G9** 과외쌤 대시보드(B1, 05) 콘텐츠 + 학생 목록/추가·초대(B2, 06·07) + 학생 상세 탭(B3, 08~12). 파일: `m1.tsx`(대시보드/students) 등. 통계 카드·집중관리 테이블·우측 레일.
 - **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
 - **G7** 학생 태블릿(student-tablet 60장): 공용 컴포넌트 device 분기로 2열/넓은 카드 반응형.
 - **G8~G13** 과외쌤(teacher-desktop 36 → teacher-mobile 28/teacher-tablet 18): IA 재구성·인증/온보딩, 대시보드/학생목록/상세, 숙제 출제·검사·핸드셰이크, 리포트 빌더·학부모 공유, 구독·수업료, 반응형.

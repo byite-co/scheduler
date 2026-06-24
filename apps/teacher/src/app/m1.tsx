@@ -131,9 +131,17 @@ export function TeacherDashboardContent() {
   return (
     <TeacherShell
       active="/"
-      title="학생 연결을 시작하는 작업대"
-      subtitle="초대 코드를 만들고, 요청을 확인하고, 학생이 허용한 공개 범위 안에서만 관리 데이터를 봅니다."
+      title="대시보드"
+      subtitle="담당 학생 현황과 오늘의 할 일을 한눈에 봅니다."
       data={data}
+      actions={
+        <a
+          href="/students/invite"
+          className="rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white"
+        >
+          + 학생 초대
+        </a>
+      }
     >
       <div className="grid gap-4 md:grid-cols-3">
         <MetricPanel label="active 연결" value={`${activeCount}명`} />
@@ -174,14 +182,13 @@ export function TeacherLoginContent() {
   const data = useTeacherData();
 
   return (
-    <TeacherShell
-      active="/login"
-      title="이메일로 로그인"
+    <TeacherAuthLayout
+      title="어떻게 시작할까요?"
       subtitle="이메일로 로그인해요. 인증이 필요하면 메일의 링크를 눌러 주세요."
       data={data}
     >
       <AuthForm mode="login" data={data} />
-    </TeacherShell>
+    </TeacherAuthLayout>
   );
 }
 
@@ -189,14 +196,13 @@ export function TeacherSignupContent() {
   const data = useTeacherData();
 
   return (
-    <TeacherShell
-      active="/signup"
+    <TeacherAuthLayout
       title="과외쌤 회원가입"
-      subtitle="가입 후 이메일 인증을 완료하고 로그인하면 프로필 저장과 초대 코드 발급을 진행할 수 있습니다."
+      subtitle="가입 후 이메일 인증을 완료하면 프로필 저장과 학생 초대를 진행할 수 있어요."
       data={data}
     >
       <AuthForm mode="signup" data={data} />
-    </TeacherShell>
+    </TeacherAuthLayout>
   );
 }
 
@@ -204,14 +210,13 @@ export function TeacherResetContent() {
   const data = useTeacherData();
 
   return (
-    <TeacherShell
-      active="/reset"
+    <TeacherAuthLayout
       title="비밀번호 재설정"
       subtitle="가입한 이메일로 비밀번호 재설정 링크를 보내요."
       data={data}
     >
       <ResetPasswordPanel data={data} />
-    </TeacherShell>
+    </TeacherAuthLayout>
   );
 }
 
@@ -372,16 +377,34 @@ export function TeacherStudentSettingsContent() {
   );
 }
 
+const TEACHER_NAV: Array<{ href: string; label: string; icon: string }> = [
+  { href: "/", label: "대시보드", icon: "▦" },
+  { href: "/students", label: "학생 관리", icon: "👥" },
+  { href: "/homework/review", label: "숙제 검사", icon: "✓" },
+  { href: "/reports/weekly", label: "리포트", icon: "📄" },
+  { href: "/billing", label: "구독·정산", icon: "₩" },
+  { href: "/settings", label: "설정", icon: "⚙" }
+];
+
+function isNavActive(itemHref: string, active?: string): boolean {
+  if (!active) return false;
+  if (itemHref === "/") return active === "/";
+  return active === itemHref || active.startsWith(`${itemHref}/`) || active.startsWith(itemHref);
+}
+
 function TeacherShell({
+  active,
   title,
   subtitle,
   data,
+  actions,
   children
 }: {
   active?: string;
   title: string;
   subtitle: string;
   data: TeacherData;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   async function signOut() {
@@ -392,29 +415,102 @@ function TeacherShell({
 
   return (
     <main className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 md:px-8">
-        <header className="flex flex-col gap-3 border-b border-line pb-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <a href="/" className="text-sm font-extrabold text-brand">
-              쌤플래너
-            </a>
-            <h1 className="mt-2 text-2xl font-extrabold tracking-normal md:text-3xl">{title}</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted md:text-base">{subtitle}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusPill tone={data.session ? "success" : "warning"}>
-              {data.session ? "로그인됨" : "로그인 필요"}
-            </StatusPill>
+      <div className="mx-auto flex w-full max-w-7xl">
+        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-surface p-4 md:flex">
+          <a href="/" className="mb-6 flex items-center gap-2 px-2 text-lg font-extrabold text-brand">
+            쌤플래너
+          </a>
+          <nav className="flex flex-1 flex-col gap-1">
+            {TEACHER_NAV.map((item) => {
+              const activeItem = isNavActive(item.href, active);
+              return (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 rounded-control px-3 py-2 text-sm font-bold ${
+                    activeItem ? "bg-canvas text-brand" : "text-muted hover:bg-canvas hover:text-ink"
+                  }`}
+                >
+                  <span className="w-5 text-center">{item.icon}</span>
+                  {item.label}
+                </a>
+              );
+            })}
+          </nav>
+          <div className="mt-4 rounded-control border border-line p-3">
+            <p className="text-sm font-extrabold text-ink">{data.profile?.name ?? "과외쌤"}</p>
+            <p className="text-xs font-bold text-muted">{data.session ? "선생님 계정" : "로그인 필요"}</p>
             {data.session ? (
-              <button className="rounded-control border border-line px-3 py-2 text-xs font-extrabold" onClick={signOut}>
+              <button className="mt-2 text-xs font-extrabold text-muted hover:text-ink" onClick={signOut}>
                 로그아웃
               </button>
             ) : null}
           </div>
-        </header>
-        <LiveMessage loading={data.loading} message={data.message} />
-        {children}
+        </aside>
+
+        <section className="flex min-w-0 flex-1 flex-col gap-5 px-4 py-6 md:px-8">
+          <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h1 className="text-2xl font-extrabold tracking-normal md:text-3xl">{title}</h1>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{subtitle}</p>
+            </div>
+            {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+          </header>
+          <LiveMessage loading={data.loading} message={data.message} />
+          {children}
+        </section>
       </div>
+    </main>
+  );
+}
+
+function TeacherAuthLayout({
+  title,
+  subtitle,
+  data,
+  children
+}: {
+  title: string;
+  subtitle: string;
+  data: TeacherData;
+  children: ReactNode;
+}) {
+  return (
+    <main className="min-h-screen bg-surface text-ink md:grid md:grid-cols-2">
+      <aside className="hidden flex-col justify-between bg-brand p-10 text-white md:flex">
+        <div className="text-lg font-extrabold">쌤플래너</div>
+        <div>
+          <h2 className="text-3xl font-extrabold leading-snug">
+            계획부터 인증까지,
+            <br />
+            입시 공부를 한 곳에서.
+          </h2>
+          <p className="mt-4 max-w-md text-sm leading-6 text-white/80">
+            과외 선생님은 숙제·AI 완료검사·학부모 리포트를, 학생은 타이머·플래너·집중 모드를 따로 또 같이.
+          </p>
+        </div>
+        <div className="flex gap-10">
+          <div>
+            <div className="text-2xl font-extrabold">1.2만+</div>
+            <div className="text-xs font-bold text-white/70">함께 공부하는 학생</div>
+          </div>
+          <div>
+            <div className="text-2xl font-extrabold">94%</div>
+            <div className="text-xs font-bold text-white/70">숙제 이행률</div>
+          </div>
+        </div>
+      </aside>
+
+      <section className="flex min-h-screen flex-col justify-center gap-5 px-6 py-10 md:px-16">
+        <div className="mx-auto w-full max-w-sm">
+          <h1 className="text-2xl font-extrabold">{title}</h1>
+          <p className="mt-1 text-sm leading-6 text-muted">{subtitle}</p>
+          <div className="mt-5">
+            <LiveMessage loading={data.loading} message={data.message} />
+          </div>
+          <div className="mt-3">{children}</div>
+        </div>
+      </section>
     </main>
   );
 }
@@ -445,24 +541,18 @@ function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData 
   }
 
   return (
-    <form className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]" onSubmit={submit}>
-      <Panel title={mode === "login" ? "계정 로그인" : "계정 만들기"}>
-        <Field label="이메일" type="email" value={email} onChange={setEmail} required />
-        <Field label="비밀번호" type="password" value={password} onChange={setPassword} required />
-        <div className="flex flex-wrap gap-2">
-          <SubmitButton>{mode === "login" ? "로그인" : "인증 메일 보내기"}</SubmitButton>
-          <SecondaryLink href="/reset">비밀번호 재설정</SecondaryLink>
-        </div>
-      </Panel>
-      <Panel title="Auth 상태">
-        <StepList
-          steps={[
-            ["세션", data.session ? "있음" : "없음"],
-            ["이메일", data.session?.user.email ?? "미로그인"],
-            ["인증", data.session?.user.email_confirmed_at ? "확인됨" : "메일 확인 필요"]
-          ]}
-        />
-      </Panel>
+    <form className="flex flex-col gap-3" onSubmit={submit}>
+      <Field label="이메일" type="email" value={email} onChange={setEmail} required />
+      <Field label="비밀번호" type="password" value={password} onChange={setPassword} required />
+      <SubmitButton>{mode === "login" ? "로그인" : "인증 메일 보내기"}</SubmitButton>
+      <div className="flex items-center justify-between text-sm">
+        <a href={mode === "login" ? "/signup" : "/login"} className="font-bold text-muted hover:text-ink">
+          {mode === "login" ? "처음이신가요? 회원가입" : "이미 계정이 있나요? 로그인"}
+        </a>
+        <a href="/reset" className="font-bold text-brand">
+          비밀번호 재설정
+        </a>
+      </div>
     </form>
   );
 }
@@ -759,17 +849,6 @@ function SubmitButton({ children }: { children: ReactNode }) {
     <button className="inline-flex min-h-11 items-center justify-center rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white" type="submit">
       {children}
     </button>
-  );
-}
-
-function SecondaryLink({ href, children }: { href: string; children: ReactNode }) {
-  return (
-    <a
-      href={href}
-      className="inline-flex min-h-11 items-center justify-center rounded-button border border-line bg-surface px-4 py-2 text-sm font-extrabold text-ink"
-    >
-      {children}
-    </a>
   );
 }
 
