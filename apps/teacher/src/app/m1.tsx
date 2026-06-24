@@ -3,6 +3,15 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
+import {
+  ClipboardCheck,
+  FileText,
+  LayoutDashboard,
+  Settings,
+  Users,
+  Wallet,
+  type LucideIcon
+} from "lucide-react";
 
 import {
   DEFAULT_TEACHER_STUDENT_SETTINGS,
@@ -658,13 +667,13 @@ export function TeacherStudentSettingsContent() {
   );
 }
 
-const TEACHER_NAV: Array<{ href: string; label: string; short: string; icon: string }> = [
-  { href: "/", label: "대시보드", short: "홈", icon: "▦" },
-  { href: "/students", label: "학생 관리", short: "학생", icon: "👥" },
-  { href: "/homework/review", label: "숙제 검사", short: "검사", icon: "✓" },
-  { href: "/reports/weekly", label: "리포트", short: "리포트", icon: "📄" },
-  { href: "/billing", label: "구독·정산", short: "정산", icon: "₩" },
-  { href: "/settings", label: "설정", short: "설정", icon: "⚙" }
+const TEACHER_NAV: Array<{ href: string; label: string; short: string; icon: LucideIcon }> = [
+  { href: "/", label: "대시보드", short: "홈", icon: LayoutDashboard },
+  { href: "/students", label: "학생 관리", short: "학생", icon: Users },
+  { href: "/homework/review", label: "숙제 검사", short: "검사", icon: ClipboardCheck },
+  { href: "/reports/weekly", label: "리포트", short: "리포트", icon: FileText },
+  { href: "/billing", label: "구독·정산", short: "정산", icon: Wallet },
+  { href: "/settings", label: "설정", short: "설정", icon: Settings }
 ];
 
 function isNavActive(itemHref: string, active?: string): boolean {
@@ -723,6 +732,7 @@ export function TeacherShell({
           <nav className="flex flex-1 flex-col gap-1">
             {TEACHER_NAV.map((item) => {
               const activeItem = isNavActive(item.href, active);
+              const Icon = item.icon;
               return (
                 <a
                   key={item.href}
@@ -731,7 +741,7 @@ export function TeacherShell({
                     activeItem ? "bg-canvas text-brand" : "text-muted hover:bg-canvas hover:text-ink"
                   }`}
                 >
-                  <span className="w-5 text-center">{item.icon}</span>
+                  <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={2} />
                   {item.label}
                 </a>
               );
@@ -767,6 +777,7 @@ export function TeacherShell({
       <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-line bg-surface md:hidden">
         {TEACHER_NAV.map((item) => {
           const activeItem = isNavActive(item.href, active);
+          const Icon = item.icon;
           return (
             <a
               key={item.href}
@@ -775,7 +786,7 @@ export function TeacherShell({
                 activeItem ? "text-brand" : "text-muted"
               }`}
             >
-              <span className="text-base leading-none">{item.icon}</span>
+              <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
               {item.short}
             </a>
           );
