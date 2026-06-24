@@ -566,7 +566,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 30,
-    backgroundColor: colors.flame
+    // 종료는 '지금/시작/긴급'이 아니므로 주황 금지 — 중립 아웃라인으로.
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: colors.line
   },
   ctrlStopText: {
     color: colors.surface,
