@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { createClient, type Session } from "@supabase/supabase-js";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
+import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
   HOMEWORK_CHECK_DISCLAIMER,
   SUBJECT_LABELS,
@@ -133,29 +133,42 @@ export function HomeworkSubmitScreen() {
   if (!data.session) return <CenterCard text="로그인이 필요해요." />;
   if (!data.todo) return <CenterCard text="숙제를 찾을 수 없어요." />;
 
+  const subjectLabel = data.todo.subject ? SUBJECT_LABELS[data.todo.subject as SubjectCode] : "과목 미지정";
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.kicker}>AI 완료검사</Text>
-      <Text style={styles.title}>{data.todo.title}</Text>
-      <Text style={styles.subtitle}>
-        {data.todo.subject ? SUBJECT_LABELS[data.todo.subject as SubjectCode] : "과목 미지정"} · 채점이 아니라 “다 했는지” 확인해요
-      </Text>
+      <BackHeader eyebrow={data.isTutored ? "선생님 숙제" : "AI 완료검사"} title="숙제 제출" />
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>제출 사진</Text>
-        <Text style={styles.cardBody}>풀이를 찍은 사진을 첨부해요. (사진 캡처/업로드는 실기기 전용 — 이 미리보기에서는 장수만 기록)</Text>
-        <View style={styles.stepperRow}>
-          <Stepper label="−" disabled={busy || photoCount <= 0} onPress={() => setPhotoCount((n) => Math.max(0, n - 1))} />
-          <Text style={styles.stepperValue}>{photoCount}장</Text>
-          <Stepper label="+" disabled={busy || photoCount >= 9} onPress={() => setPhotoCount((n) => Math.min(9, n + 1))} />
-        </View>
+      <View style={styles.metaRow}>
+        <SubjectChip label={subjectLabel} />
+        <Text style={styles.metaText}>{data.isTutored ? "쌤 · 마감 오늘" : "스스로 점검"}</Text>
       </View>
+
+      <View style={styles.rangeCard}>
+        <Text style={styles.rangeLabel}>검사 범위</Text>
+        <Text style={styles.rangeValue}>{data.todo.title}</Text>
+      </View>
+
+      <Text style={styles.sectionLabel}>푼 사진을 올려주세요</Text>
+      <PhotoSlots
+        busy={busy}
+        count={photoCount}
+        onAdd={() => setPhotoCount((n) => Math.min(9, n + 1))}
+        onRemove={() => setPhotoCount((n) => Math.max(0, n - 1))}
+      />
 
       {submitState === "upload_failed" ? (
         <StatusBanner tone="danger" title="업로드 실패" body={errorText ?? "다시 시도해 주세요."} />
       ) : null}
       {submitState === "check_failed" ? (
         <StatusBanner tone="warning" title="검사 실패" body={errorText ?? "다시 시도해 주세요."} />
+      ) : null}
+      {submitState === "idle" ? (
+        <View style={styles.infoBanner}>
+          <Text style={styles.infoBannerText}>
+            ✨ AI 1차 확인 · 사진이 잘 보여요. {data.isTutored ? "제출하면 선생님이 최종 확인해요." : "제출하면 바로 결과를 보여드려요."}
+          </Text>
+        </View>
       ) : null}
 
       <Pressable
@@ -170,9 +183,17 @@ export function HomeworkSubmitScreen() {
             <Text style={styles.primaryButtonText}>{submitState === "uploading" ? "제출 중…" : "AI 검사 중…"}</Text>
           </View>
         ) : (
-          <Text style={styles.primaryButtonText}>{submitState === "check_failed" ? "다시 검사" : "제출하고 검사 받기"}</Text>
+          <Text style={styles.primaryButtonText}>
+            {submitState === "check_failed" ? "다시 검사" : "✈ 제출하기"}
+          </Text>
         )}
       </Pressable>
+
+      {data.isTutored && submitState === "idle" ? (
+        <View style={styles.noteBanner}>
+          <Text style={styles.noteBannerText}>⏱ 제출 후 ‘쌤 확인 전’ 상태가 돼요</Text>
+        </View>
+      ) : null}
 
       {submitState === "check_failed" ? (
         <Pressable
@@ -202,33 +223,57 @@ export function HomeworkResultScreen() {
   if (data.loading) return <CenterCard text={data.message} />;
   if (!data.submission || !view) return <CenterCard text="아직 제출 내역이 없어요." />;
 
+  const headline =
+    view.verdictTone === "success"
+      ? "잘했어요!"
+      : view.verdictTone === "warning"
+        ? "조금만 더 보완하면 돼요"
+        : view.verdictTone === "danger"
+          ? "다시 한 번 해볼까요"
+          : "확인했어요";
+  const ringIcon = view.verdictTone === "success" ? "✓" : "!";
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.kicker}>검사 결과</Text>
-      <Text style={styles.title}>{data.todo?.title ?? "숙제"}</Text>
+      <BackHeader eyebrow="검사 결과" title={data.todo?.title ?? "숙제"} />
 
-      <View style={[styles.card, styles.verdictCard]}>
-        <View style={styles.row}>
-          <Badge tone={view.verdictTone} label={view.verdictLabel} />
-          {view.confidencePercent !== null ? (
-            <Text style={styles.confidence}>확신도 {view.confidencePercent}%</Text>
-          ) : null}
+      <View style={styles.verdictHero}>
+        <View style={[styles.verdictRing, verdictRingStyle(view.verdictTone)]}>
+          <Text style={[styles.verdictRingText, badgeTextToneStyle(view.verdictTone)]}>{ringIcon}</Text>
         </View>
-        {view.reason ? <Text style={styles.reason}>{view.reason}</Text> : null}
-        <Text style={styles.disclaimer}>{HOMEWORK_CHECK_DISCLAIMER}</Text>
+        <Text style={styles.verdictHeadline}>{headline}</Text>
+        <Text style={styles.verdictSub}>
+          {(data.todo?.subject ? SUBJECT_LABELS[data.todo.subject as SubjectCode] : "")} · {view.verdictLabel}
+        </Text>
+        {view.confidencePercent !== null ? (
+          <Text style={styles.verdictConfidence}>AI 확신도 {view.confidencePercent}%</Text>
+        ) : null}
       </View>
 
+      {view.reason ? (
+        <View style={[styles.reasonCard, badgeToneStyle(view.verdictTone)]}>
+          <Text style={[styles.reasonCardTitle, badgeTextToneStyle(view.verdictTone)]}>
+            {view.verdictTone === "success" ? "확인됐어요" : "부족한 부분"}
+          </Text>
+          <Text style={styles.reasonCardBody}>{view.reason}</Text>
+        </View>
+      ) : null}
+
       {view.showTeacherSection ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>선생님 확인</Text>
-          <Text style={styles.cardBody}>{view.teacherStatusLabel}</Text>
-          {view.teacherComment ? <Text style={styles.teacherComment}>“{view.teacherComment}”</Text> : null}
+        <View style={styles.teacherCard}>
+          <View style={styles.teacherAvatar}>
+            <Text style={styles.teacherAvatarText}>쌤</Text>
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.teacherCardLabel}>선생님 코멘트</Text>
+            <Text style={styles.teacherCardBody}>{view.teacherComment ? view.teacherComment : view.teacherStatusLabel}</Text>
+          </View>
         </View>
       ) : (
-        <View style={styles.card}>
-          <Text style={styles.cardBody}>혼자 공부 중이라 AI 검사 결과만 보여드려요.</Text>
-        </View>
+        <Text style={styles.aiOnlyNote}>혼자 공부 중이라 AI 검사 결과만 보여드려요.</Text>
       )}
+
+      <Text style={styles.disclaimer}>{HOMEWORK_CHECK_DISCLAIMER}</Text>
 
       {view.canRequestResubmit ? (
         <Pressable
@@ -238,7 +283,7 @@ export function HomeworkResultScreen() {
           }}
           style={styles.primaryButton}
         >
-          <Text style={styles.primaryButtonText}>다시 제출하기</Text>
+          <Text style={styles.primaryButtonText}>↻ 다시 제출하기</Text>
         </Pressable>
       ) : null}
     </ScrollView>
@@ -257,8 +302,7 @@ export function HomeworkDetailScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.kicker}>숙제</Text>
-      <Text style={styles.title}>{data.todo?.title ?? "숙제"}</Text>
+      <BackHeader eyebrow="숙제" title={data.todo?.title ?? "숙제"} />
 
       {!data.submission ? (
         <Pressable
@@ -287,20 +331,75 @@ export function HomeworkDetailScreen() {
   );
 }
 
-function Stepper({ label, disabled, onPress }: { label: string; disabled?: boolean; onPress: () => void }) {
+const PHOTO_SLOT_IDS = ["p1", "p2", "p3"] as const;
+
+function BackHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
-    <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[styles.stepper, disabled ? styles.stepperDisabled : null]}>
-      <Text style={styles.stepperLabel}>{label}</Text>
-    </Pressable>
+    <View style={styles.backHeader}>
+      <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backBtn}>
+        <Text style={styles.backBtnText}>‹</Text>
+      </Pressable>
+      <View style={styles.flex}>
+        <Text style={styles.headerEyebrow}>{eyebrow}</Text>
+        <Text style={styles.headerTitle}>{title}</Text>
+      </View>
+    </View>
   );
 }
 
-function Badge({ tone, label }: { tone: HomeworkVerdictTone; label: string }) {
+function SubjectChip({ label }: { label: string }) {
   return (
-    <View style={[styles.badge, badgeToneStyle(tone)]}>
-      <Text style={[styles.badgeText, badgeTextToneStyle(tone)]}>{label}</Text>
+    <View style={styles.subjectChip}>
+      <Text style={styles.subjectChipText}>{label}</Text>
     </View>
   );
+}
+
+function PhotoSlots({
+  busy,
+  count,
+  onAdd,
+  onRemove
+}: {
+  busy: boolean;
+  count: number;
+  onAdd: () => void;
+  onRemove: () => void;
+}) {
+  const filled = PHOTO_SLOT_IDS.slice(0, Math.min(count, PHOTO_SLOT_IDS.length));
+  return (
+    <View style={styles.slotRow}>
+      {filled.map((id) => (
+        <Pressable
+          accessibilityLabel="사진 빼기"
+          disabled={busy}
+          key={id}
+          onPress={onRemove}
+          style={styles.slotFilled}
+        >
+          <Text style={styles.slotIcon}>📷</Text>
+        </Pressable>
+      ))}
+      {count < 9 ? (
+        <Pressable accessibilityLabel="사진 추가" disabled={busy} onPress={onAdd} style={styles.slotAdd}>
+          <Text style={styles.slotAddText}>＋{"\n"}추가</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function verdictRingStyle(tone: HomeworkVerdictTone) {
+  switch (tone) {
+    case "success":
+      return { backgroundColor: tints.successSoft };
+    case "danger":
+      return { backgroundColor: tints.dangerSoft };
+    case "warning":
+      return { backgroundColor: tints.warningSoft };
+    default:
+      return { backgroundColor: colors.canvas };
+  }
 }
 
 function StatusBanner({ tone, title, body }: { tone: HomeworkVerdictTone; title: string; body: string }) {
@@ -323,11 +422,11 @@ function CenterCard({ text }: { text: string }) {
 function badgeToneStyle(tone: HomeworkVerdictTone) {
   switch (tone) {
     case "success":
-      return { backgroundColor: "#E6F7EF", borderColor: "#BFEFD7" };
+      return { backgroundColor: tints.successSoft, borderColor: tints.successBorder };
     case "danger":
-      return { backgroundColor: "#FDECEA", borderColor: "#F7C7C2" };
+      return { backgroundColor: tints.dangerSoft, borderColor: tints.dangerBorder };
     case "warning":
-      return { backgroundColor: "#FFF6E0", borderColor: "#F4E2A8" };
+      return { backgroundColor: tints.warningSoft, borderColor: tints.warningBorder };
     default:
       return { backgroundColor: colors.canvas, borderColor: colors.line };
   }
@@ -400,5 +499,110 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 14, fontWeight: "900" },
   banner: { gap: spacing.xs, padding: spacing.md, borderRadius: radii.control, borderWidth: 1 },
   bannerTitle: { fontSize: 14, fontWeight: "900" },
-  bannerBody: { color: colors.muted, fontSize: 13, fontWeight: "700", lineHeight: 19 }
+  bannerBody: { color: colors.muted, fontSize: 13, fontWeight: "700", lineHeight: 19 },
+  flex: { flex: 1 },
+  backHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.chip,
+    backgroundColor: colors.canvas
+  },
+  backBtnText: { color: colors.ink, fontSize: 22, fontWeight: "900" },
+  headerEyebrow: { color: colors.muted, fontSize: 12, fontWeight: "800" },
+  headerTitle: { color: colors.ink, fontSize: 22, fontWeight: "900", lineHeight: 28 },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  metaText: { color: colors.muted, fontSize: 13, fontWeight: "800" },
+  subjectChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.chip,
+    backgroundColor: tints.brandSoft
+  },
+  subjectChipText: { color: colors.brand, fontSize: 12, fontWeight: "900" },
+  rangeCard: {
+    gap: spacing.xs,
+    padding: spacing.lg,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  rangeLabel: { color: colors.muted, fontSize: 12, fontWeight: "800" },
+  rangeValue: { color: colors.ink, fontSize: 16, fontWeight: "900", lineHeight: 22 },
+  sectionLabel: { color: colors.ink, fontSize: 15, fontWeight: "900", marginTop: spacing.xs },
+  slotRow: { flexDirection: "row", gap: spacing.sm },
+  slotFilled: {
+    flex: 1,
+    aspectRatio: 1,
+    maxWidth: 110,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.control,
+    backgroundColor: colors.canvas
+  },
+  slotIcon: { fontSize: 26 },
+  slotAdd: {
+    flex: 1,
+    aspectRatio: 1,
+    maxWidth: 110,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.control,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: colors.line,
+    backgroundColor: colors.surface
+  },
+  slotAddText: { color: colors.muted, fontSize: 13, fontWeight: "900", textAlign: "center", lineHeight: 18 },
+  infoBanner: {
+    padding: spacing.md,
+    borderRadius: radii.control,
+    backgroundColor: tints.brandSoft
+  },
+  infoBannerText: { color: colors.brand, fontSize: 13, fontWeight: "800", lineHeight: 19 },
+  noteBanner: {
+    padding: spacing.md,
+    borderRadius: radii.control,
+    backgroundColor: tints.warningSoft
+  },
+  noteBannerText: { color: tints.warningStrong, fontSize: 13, fontWeight: "800" },
+  verdictHero: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.lg },
+  verdictRing: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  verdictRingText: { fontSize: 44, fontWeight: "900" },
+  verdictHeadline: { color: colors.ink, fontSize: 24, fontWeight: "900", textAlign: "center" },
+  verdictSub: { color: colors.muted, fontSize: 14, fontWeight: "800", textAlign: "center" },
+  verdictConfidence: { color: colors.muted, fontSize: 13, fontWeight: "800", fontVariant: [typography.numericVariant] },
+  reasonCard: { gap: spacing.xs, padding: spacing.lg, borderRadius: radii.card, borderWidth: 1 },
+  reasonCardTitle: { fontSize: 14, fontWeight: "900" },
+  reasonCardBody: { color: colors.ink, fontSize: 14, fontWeight: "700", lineHeight: 21 },
+  teacherCard: {
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface
+  },
+  teacherAvatar: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.chip,
+    backgroundColor: tints.brandSoft
+  },
+  teacherAvatarText: { color: colors.brand, fontSize: 14, fontWeight: "900" },
+  teacherCardLabel: { color: colors.muted, fontSize: 12, fontWeight: "800" },
+  teacherCardBody: { color: colors.ink, fontSize: 14, fontWeight: "800", lineHeight: 21 },
+  aiOnlyNote: { color: colors.muted, fontSize: 13, fontWeight: "700", textAlign: "center" }
 });

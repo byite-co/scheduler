@@ -58,13 +58,22 @@
 
 ---
 
+## G4 — 숙제 제출(C4)·결과(J9)·리포트(C8 게이팅) ✅
+- **device**: student-mobile (07·47/48/49·16).
+- **손본 화면**: `apps/student/src/m4Screens.tsx`(숙제 제출/결과/상세), `m5Screens.tsx`(MyReportScreen 게이트).
+  - 제출(C4): BackHeader + 과목 칩 + "검사 범위" 카드 + 사진 슬롯(📷/＋추가) + "✨ AI 1차 확인" 안내 + 제출하기 + "쌤 확인 전" 안내(과외생).
+  - 결과(J9): 중앙 verdict hero(톤별 원형 아이콘·헤드라인) + "부족한 부분" 카드 + 선생님 코멘트(과외생)/AI 단독(혼공) + 다시 제출.
+  - 리포트(C8): 잠금 프리뷰(🔒 준비됐어요) + "광고 보고 무료로 열기"(mock) + "월 구독하고 광고 없이 무제한"(→/subscribe).
+  - 하드코딩 hex(#E6F7EF 등)를 `tints` 토큰으로 교체.
+- **기능 유지**: homework_submissions 제출·ai-homework-check invoke·getHomeworkResultView 분기·ad_unlocks 게이팅 그대로. **AI 판정·광고는 mock 유지(실연동 금지)**.
+- **카탈로그와 남은 차이(의도)**: 사진 캡처/업로드는 실기기 전용→장수 메타만(기존 stub 유지). "다시 제출"·verdict 강조는 토큰 색(불꽃 주황 비-CTA 미사용, 톤 카드는 tints).
+- **검증**: lint/typecheck/test/build green. 8081에서 /report 게이팅·숙제 화면 무크래시 렌더 확인.
+
 ## ▶ 다음 이어갈 지점 (RESUME POINT)
-학생 모바일 핵심(셸·홈·플래너·타이머/집중·또래/기록)이 main에 머지됨. 다음 실행은 **G4부터** 동일 루프로 진행.
+G1~G4 + 버그픽스 main 반영 완료. 다음 실행은 **G5부터** 동일 루프로 진행.
 각 그룹: main에서 브랜치 → 카탈로그 PNG에 맞춰 겉모습/반응형만 → lint·typecheck·test·build green → squash merge → 이 파일에 기록.
 
-- **G4** 숙제 제출(C4, 07)·결과(J9, 47/48/49 — 과외생 쌤코멘트/혼공 AI단독 분기)·다시 제출 / 나의 리포트(C8, 15/16 게이팅).
-  파일: `apps/student/src/m4Screens.tsx`, `m5Screens.tsx`. **AI 판정·광고 언락은 기존 mock 유지(실연동 금지)**, 화면만.
-- **G5** 설정·프로필·알림·구독(페이월 mock)·회원 탈퇴 등 시스템 화면. 파일: `m7Screens.tsx` 등.
+- **G5** 설정·프로필·알림·구독(페이월 mock)·회원 탈퇴 등 시스템 화면. 파일: `m7Screens.tsx`, `m6Screens.tsx`(subscribe) 등.
 - **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
 - **G7** 학생 태블릿(student-tablet 60장): 공용 컴포넌트 device 분기로 2열/넓은 카드 반응형.
 - **G8~G13** 과외쌤(teacher-desktop 36 → teacher-mobile 28/teacher-tablet 18): IA 재구성·인증/온보딩, 대시보드/학생목록/상세, 숙제 출제·검사·핸드셰이크, 리포트 빌더·학부모 공유, 구독·수업료, 반응형.

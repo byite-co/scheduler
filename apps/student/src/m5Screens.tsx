@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Link, type Href } from "expo-router";
 import { createClient, type Session } from "@supabase/supabase-js";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
+import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
   SUBJECT_LABELS,
   aggregateWeeklyStudy,
@@ -94,14 +95,25 @@ function useGatedFeature(feature: UnlockFeature) {
 
 function GateNotice({ gate, onWatchAd }: { gate: FeatureGateState; onWatchAd: () => void }) {
   return (
-    <View style={styles.gateCard}>
-      <Text style={styles.gateTitle}>{gate.reason}</Text>
+    <View style={styles.gateWrap}>
+      <View style={styles.lockPreview}>
+        <View style={styles.lockBadge}>
+          <Text style={styles.lockBadgeText}>🔒</Text>
+        </View>
+        <Text style={styles.lockTitle}>준비됐어요</Text>
+        <Text style={styles.lockHint}>{gate.reason}</Text>
+      </View>
       {gate.canUnlockByAd ? (
         <Pressable accessibilityRole="button" onPress={onWatchAd} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>광고 보고 한 번 열기 (모의)</Text>
+          <Text style={styles.primaryButtonText}>📺 광고 보고 무료로 열기</Text>
         </Pressable>
       ) : null}
-      <Text style={styles.gateHint}>프리미엄(₩2,900/월)이면 광고 없이 무제한이에요.</Text>
+      <Link href={"/subscribe" as Href} asChild>
+        <Pressable accessibilityRole="button" style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>월 구독하고 광고 없이 무제한</Text>
+        </Pressable>
+      </Link>
+      <Text style={styles.gateHint}>광고 없이 매주 받고 싶다면? 월 구독 →</Text>
     </View>
   );
 }
@@ -219,8 +231,8 @@ export function MyReportScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.kicker}>나의 리포트</Text>
-      <Text style={styles.title}>이번 주 공부 요약</Text>
+      <Text style={styles.title}>나의 주간 리포트</Text>
+      <Text style={styles.subtitle}>공부시간 · 약점 · 성적 추이</Text>
 
       {!data.gate.unlocked ? (
         <GateNotice gate={data.gate} onWatchAd={() => void data.watchAdToUnlock()} />
@@ -288,5 +300,25 @@ const styles = StyleSheet.create({
   barLabel: { color: colors.muted, fontSize: 12, fontWeight: "800" },
   subjectRow: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.line },
   subjectName: { color: colors.ink, fontSize: 14, fontWeight: "800" },
-  subjectMinutes: { color: colors.muted, fontSize: 14, fontWeight: "800", fontVariant: [typography.numericVariant] }
+  subjectMinutes: { color: colors.muted, fontSize: 14, fontWeight: "800", fontVariant: [typography.numericVariant] },
+  subtitle: { color: colors.muted, fontSize: 14, fontWeight: "700", lineHeight: 20 },
+  gateWrap: { gap: spacing.md },
+  lockPreview: {
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.xl,
+    borderRadius: radii.card,
+    backgroundColor: tints.brandSoft
+  },
+  lockBadge: {
+    width: 56,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 28,
+    backgroundColor: colors.surface
+  },
+  lockBadgeText: { fontSize: 24 },
+  lockTitle: { color: colors.ink, fontSize: 17, fontWeight: "900" },
+  lockHint: { color: colors.muted, fontSize: 13, fontWeight: "700", textAlign: "center", lineHeight: 19 }
 });
