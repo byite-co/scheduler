@@ -65,40 +65,71 @@ export function FocusReportScreen({ mode }: { mode: "summary" | "report" }) {
         <Text style={styles.body}>{mode === "summary" ? "방금 끝낸 세션의 숫자만 가볍게 확인해요." : "최근 집중 세션의 흐름을 숫자로만 모아봐요."}</Text>
       </View>
 
-      <View style={styles.notice}>
-        {loading ? <ActivityIndicator color={colors.flame} /> : null}
-        <Text style={styles.noticeText}>{message}</Text>
-      </View>
-
-      <View style={styles.metricRow}>
-        <Metric label="집중" value={formatScore(mode === "summary" ? latest?.focus_score : aggregate.focusScore)} tone="flame" />
-        <Metric label="졸음" value={`${mode === "summary" ? latest?.drowsy_count ?? 0 : aggregate.drowsyCount}회`} />
-        <Metric label="점검" value={`${mode === "summary" ? latest?.check_total ?? 0 : aggregate.checkTotal}회`} />
-      </View>
+      {mode === "summary" ? (
+        <View style={styles.summaryHero}>
+          <View style={styles.focusRing}>
+            <Text style={styles.focusRingLabel}>집중</Text>
+            <Text style={styles.focusRingValue}>{formatScore(latest?.focus_score)}</Text>
+          </View>
+          <Text style={styles.summaryHeadline}>
+            {(latest?.focus_score ?? 0) >= 80
+              ? "집중 잘했어요!"
+              : (latest?.focus_score ?? 0) >= 50
+                ? "좋아요, 한 걸음 더!"
+                : "괜찮아요, 다시 해볼까요"}
+          </Text>
+          <Text style={styles.summarySub}>
+            {latest
+              ? `${formatDuration(latest.duration_sec)} 동안 졸음 ${latest.drowsy_count ?? 0}회예요. 이 페이스 그대로 가요!`
+              : "집중 모드를 끝내면 요약이 나와요."}
+          </Text>
+          <View style={styles.metricRow}>
+            <Metric label="공부시간" value={latest ? formatDuration(latest.duration_sec) : "-"} />
+            <Metric label="졸음" value={`${latest?.drowsy_count ?? 0}회`} tone="flame" />
+            <Metric label="점검" value={`${latest?.check_total ?? 0}회`} />
+          </View>
+        </View>
+      ) : (
+        <>
+          <View style={styles.notice}>
+            {loading ? <ActivityIndicator color={colors.flame} /> : null}
+            <Text style={styles.noticeText}>{message}</Text>
+          </View>
+          <View style={styles.metricRow}>
+            <Metric label="집중" value={formatScore(aggregate.focusScore)} tone="flame" />
+            <Metric label="졸음" value={`${aggregate.drowsyCount}회`} />
+            <Metric label="점검" value={`${aggregate.checkTotal}회`} />
+          </View>
+        </>
+      )}
 
       <View style={styles.privacyNotice}>
         <Text style={styles.privacyTitle}>{FOCUS_CAMERA_PRIVACY_COPY}</Text>
         <Text style={styles.privacyBody}>이 화면도 boolean 결과와 숫자 메타데이터만 보여줘요.</Text>
       </View>
 
-      {sessions.length ? (
-        <View style={styles.list}>
-          {sessions.map((session) => (
-            <View key={session.id} style={styles.sessionRow}>
-              <View style={styles.sessionText}>
-                <Text style={styles.sessionTitle}>{formatDate(session.ended_at ?? session.started_at)}</Text>
-                <Text style={styles.sessionBody}>{formatDuration(session.duration_sec)} · 점검 {session.check_total ?? 0}회</Text>
+      {mode === "report" ? (
+        sessions.length ? (
+          <View style={styles.list}>
+            {sessions.map((session) => (
+              <View key={session.id} style={styles.sessionRow}>
+                <View style={styles.sessionText}>
+                  <Text style={styles.sessionTitle}>{formatDate(session.ended_at ?? session.started_at)}</Text>
+                  <Text style={styles.sessionBody}>
+                    {formatDuration(session.duration_sec)} · 점검 {session.check_total ?? 0}회
+                  </Text>
+                </View>
+                <Text style={styles.sessionScore}>{formatScore(session.focus_score)}</Text>
               </View>
-              <Text style={styles.sessionScore}>{formatScore(session.focus_score)}</Text>
-            </View>
-          ))}
-        </View>
-      ) : (
-        <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>아직 집중 기록이 없어요</Text>
-          <Text style={styles.emptyBody}>집중 모드 타이머를 끝내면 여기에 숫자가 쌓여요.</Text>
-        </View>
-      )}
+            ))}
+          </View>
+        ) : (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>아직 집중 기록이 없어요</Text>
+            <Text style={styles.emptyBody}>집중 모드 타이머를 끝내면 여기에 숫자가 쌓여요.</Text>
+          </View>
+        )
+      ) : null}
 
       <View style={styles.actions}>
         <Link href={"/focus/session" as Href} asChild>
@@ -332,5 +363,44 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 15,
     fontWeight: "900"
+  },
+  summaryHero: {
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.lg
+  },
+  focusRing: {
+    width: 168,
+    height: 168,
+    borderRadius: 84,
+    borderWidth: 14,
+    borderColor: colors.flame,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2
+  },
+  focusRingLabel: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  focusRingValue: {
+    color: colors.ink,
+    fontSize: 40,
+    fontWeight: "900",
+    fontVariant: [typography.numericVariant]
+  },
+  summaryHeadline: {
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  summarySub: {
+    color: colors.muted,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 22,
+    textAlign: "center"
   }
 });

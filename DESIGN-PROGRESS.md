@@ -165,8 +165,16 @@
 - 과외쌤 **B3 학생 상세 탭(08~12)**: `/students/[id]` 라우트 + 공개범위 게이팅 데이터 와이어링(큰 작업).
 - 과외쌤 **B4 숙제 출제(13)**: `/students/[id]/homework/new` + todos(source=teacher) 작성 화면.
 - 대시보드 **집중 관리 테이블**(학생 study 데이터 join).
-- 학생 **F4 집중 요약 / F5 집중 리포트** 라이트 화면 다듬기.
+- ~~학생 **F4 집중 요약**~~ ✅ 완료(아래) / F5 집중 리포트(라이트 리스트, 유지).
 - ⚠️ 위는 새 라우트/데이터 와이어링이 필요해 "겉모습만"을 넘어서는 부분 — 진행 시 RLS/공개범위/익명성 규칙 준수.
+
+## (후속) F4 — 학생 집중 요약 ✅
+- **device**: student-mobile (22 F4).
+- **손본 화면**: `apps/student/src/focusReportScreen.tsx`(summary 모드).
+  - 중앙 hero: 집중% 원형 링(주황=집중/focus, 토큰 규칙 부합) + 점수별 헤드라인("집중 잘했어요!" 등) + 부제(공부시간·졸음) + 통계(공부시간/졸음/점검).
+  - report 모드(F5)는 라이트 리스트 유지. **"영상은 기기를 떠나지 않아요" 프라이버시 카피·boolean 메타만 표시 유지.**
+- **기능 유지**: study_sessions(focus_mode) 집계 그대로.
+- **검증**: lint/typecheck/test/build green. 8081에서 /focus/summary hero 렌더·프라이버시 카피 확인.
 각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
 ⚠️ 과외쌤 m4 패턴: `import { TeacherShell, TeacherShellData } from "./m1"` 후 `shellData={session,loading,message,profile:null,setMessage,refresh}` 구성해 래핑(m5~m7도 동일 적용 권장).
 
