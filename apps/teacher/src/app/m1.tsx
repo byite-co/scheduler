@@ -123,12 +123,105 @@ function useTeacherData() {
 
 type TeacherData = ReturnType<typeof useTeacherData>;
 
+type DashboardStudent = { id: string; name: string; minutes: number };
+
+function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] {
+  const [students, setStudents] = useState<DashboardStudent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const ids = connections.filter((c) => c.status === "active").map((c) => c.student_id);
+      if (!ids.length) {
+        if (!cancelled) setStudents([]);
+        return;
+      }
+      const weekStart = new Date();
+      weekStart.setUTCHours(0, 0, 0, 0);
+      weekStart.setUTCDate(weekStart.getUTCDate() - weekStart.getUTCDay());
+      const since = `${weekStart.toISOString().slice(0, 10)}T00:00:00.000Z`;
+
+      // 공개범위 게이팅 뷰(v_teacher_study_sessions)만 읽는다 — RLS/데이터 무변경.
+      const [profilesRes, sessionsRes] = await Promise.all([
+        supabase.from("profiles").select("id, name").in("id", ids),
+        supabase
+          .from("v_teacher_study_sessions")
+          .select("student_id, duration_sec, started_at")
+          .in("student_id", ids)
+          .gte("started_at", since)
+      ]);
+      if (cancelled) return;
+
+      const nameById = new Map((profilesRes.data ?? []).map((p) => [p.id, p.name]));
+      const minutesById = new Map<string, number>();
+      for (const row of sessionsRes.data ?? []) {
+        const sid = row.student_id;
+        if (!sid) continue;
+        const minutes = Math.round(Math.max(0, row.duration_sec ?? 0) / 60);
+        minutesById.set(sid, (minutesById.get(sid) ?? 0) + minutes);
+      }
+
+      setStudents(
+        ids
+          .map((id) => ({ id, name: nameById.get(id) ?? "학생", minutes: minutesById.get(id) ?? 0 }))
+          .sort((a, b) => a.minutes - b.minutes)
+      );
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [connections]);
+
+  return students;
+}
+
+function StudentFocusTable({ students }: { students: DashboardStudent[] }) {
+  if (!students.length) return null;
+  return (
+    <Panel title="집중 관리가 필요한 학생">
+      <div className="flex flex-col gap-1">
+        {students.slice(0, 6).map((student) => {
+          const risk = student.minutes < 60;
+          return (
+            <a
+              key={student.id}
+              href="/students"
+              className="flex items-center justify-between gap-3 rounded-control px-2 py-2 hover:bg-canvas"
+            >
+              <span className="flex items-center gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-chip bg-canvas text-sm font-extrabold text-muted">
+                  {student.name.slice(0, 1)}
+                </span>
+                <span className="text-sm font-bold">{student.name}</span>
+              </span>
+              <span className="flex items-center gap-3">
+                <span className="font-mono text-sm font-bold text-muted">
+                  {Math.floor(student.minutes / 60)}시간 {student.minutes % 60}분
+                </span>
+                <span
+                  className={`rounded-chip px-2 py-0.5 text-xs font-extrabold ${
+                    risk ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
+                  }`}
+                >
+                  {risk ? "주의" : "양호"}
+                </span>
+              </span>
+            </a>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
 export function TeacherDashboardContent() {
   const data = useTeacherData();
   const activeCount = data.connections.filter((connection) => connection.status === "active").length;
   const pendingCount = data.connections.filter((connection) => connection.status === "pending").length;
   const rejectedCount = data.connections.filter((connection) => connection.status === "rejected").length;
   const monthlyAmount = getTeacherMonthlySubscriptionAmount(activeCount);
+  const dashStudents = useDashboardStudents(data.connections);
 
   return (
     <TeacherShell
@@ -158,6 +251,7 @@ export function TeacherDashboardContent() {
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
         <div className="flex flex-col gap-4">
+          <StudentFocusTable students={dashStudents} />
           <Panel title="학생 연결 현황">
             {activeCount ? (
               <ConnectionList data={data} status="active" />
