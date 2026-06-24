@@ -20,6 +20,7 @@ import {
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
 import { supabase } from "./supabaseClient";
+import { AppShell } from "./m2Screens";
 
 type StudySessionRow = Database["public"]["Tables"]["study_sessions"]["Row"];
 type AdUnlockRow = Database["public"]["Tables"]["ad_unlocks"]["Row"];
@@ -158,19 +159,22 @@ export function AiRecommendationScreen() {
     if (!error) setReflected(true);
   }
 
-  if (data.loading) return <Center text={data.message} />;
-  if (!data.gate) return <Center text="로그인이 필요해요." />;
-
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.kicker}>AI 공부량 추천</Text>
-      <Text style={styles.title}>이번 주, 이만큼 어때요?</Text>
-      <Text style={styles.notice}>{data.message}</Text>
-
-      {!data.gate.unlocked ? (
+    <AppShell
+      activeTab="ai"
+      loading={data.loading}
+      message={data.message}
+      title="AI 공부량 추천"
+      subtitle="이번 주, 이만큼 어때요?"
+    >
+      {data.loading ? null : !data.gate ? (
+        <View style={styles.card}>
+          <Text style={styles.cardBody}>로그인이 필요해요.</Text>
+        </View>
+      ) : !data.gate.unlocked ? (
         <GateNotice gate={data.gate} onWatchAd={() => void data.watchAdToUnlock()} />
       ) : (
-        <>
+        <View style={styles.stack}>
           <Pressable accessibilityRole="button" onPress={generate} style={styles.primaryButton}>
             <Text style={styles.primaryButtonText}>추천 받기</Text>
           </Pressable>
@@ -192,9 +196,9 @@ export function AiRecommendationScreen() {
               <Text style={styles.secondaryButtonText}>{reflected ? "반영 완료" : "플래너에 반영"}</Text>
             </Pressable>
           ) : null}
-        </>
+        </View>
       )}
-    </ScrollView>
+    </AppShell>
   );
 }
 
@@ -276,6 +280,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.canvas },
   content: { padding: spacing.lg, gap: spacing.md, width: "100%", maxWidth: 720, alignSelf: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.canvas },
+  stack: { gap: spacing.md },
   centerText: { color: colors.muted, fontSize: 15, fontWeight: "700" },
   kicker: { color: colors.muted, fontSize: 13, fontWeight: "800", letterSpacing: 0.2 },
   title: { color: colors.ink, fontSize: 22, fontWeight: "900", lineHeight: 28 },

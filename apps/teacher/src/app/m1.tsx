@@ -130,6 +130,21 @@ function useTeacherData() {
 
 type TeacherData = ReturnType<typeof useTeacherData>;
 
+// 온보딩(프로필 저장) 미완료 과외쌤을 프로필 작성 화면으로 보낸다.
+// 세션이 있는데 profiles.onboarded=false면 대시보드/초대 등 보호 화면을 막고
+// /onboarding/profile로 유도한다(세션 자체 가드는 TeacherShell이 담당).
+// 호출처는 실제 profile을 읽는(useTeacherData 전체를 쓰는) 화면이어야 한다.
+// 온보딩 화면(/onboarding/*)에서는 호출하지 않는다 — 루프 방지.
+function useRequireOnboarding(data: TeacherData) {
+  const router = useRouter();
+  useEffect(() => {
+    if (data.loading || !data.session) return;
+    if (!data.profile?.onboarded) {
+      router.replace("/onboarding/profile");
+    }
+  }, [data.loading, data.session, data.profile?.onboarded, router]);
+}
+
 type DashboardStudent = { id: string; name: string; minutes: number };
 
 function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] {
@@ -224,6 +239,7 @@ function StudentFocusTable({ students }: { students: DashboardStudent[] }) {
 
 export function TeacherDashboardContent() {
   const data = useTeacherData();
+  useRequireOnboarding(data);
   const activeCount = data.connections.filter((connection) => connection.status === "active").length;
   const pendingCount = data.connections.filter((connection) => connection.status === "pending").length;
   const rejectedCount = data.connections.filter((connection) => connection.status === "rejected").length;
@@ -296,6 +312,7 @@ export function TeacherDashboardContent() {
 
 export function TeacherStudentsContent() {
   const data = useTeacherData();
+  useRequireOnboarding(data);
   const pending = data.connections.filter((connection) => connection.status === "pending");
 
   return (
@@ -491,6 +508,7 @@ export function TeacherFirstStudentContent() {
 
 export function TeacherInviteContent() {
   const data = useTeacherData();
+  useRequireOnboarding(data);
 
   return (
     <TeacherShell
@@ -520,6 +538,7 @@ export function TeacherInviteContent() {
 
 export function TeacherRequestsContent({ status }: { status: M1ConnectionStatus }) {
   const data = useTeacherData();
+  useRequireOnboarding(data);
   const activePath = M1_CONNECTION_STATUS_SCREENS[status].route;
 
   return (
@@ -553,6 +572,7 @@ export function TeacherRequestsContent({ status }: { status: M1ConnectionStatus 
 
 export function TeacherStudentSettingsContent() {
   const data = useTeacherData();
+  useRequireOnboarding(data);
 
   return (
     <TeacherShell

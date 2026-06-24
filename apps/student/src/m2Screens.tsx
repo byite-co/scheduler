@@ -1201,7 +1201,7 @@ function AuthGate({ message }: { message: string }) {
 
 type StudentTab = "today" | "planner" | "class" | "ai" | "records";
 
-function AppShell({
+export function AppShell({
   activeTab,
   children,
   header,
