@@ -186,7 +186,7 @@ function StudentFocusTable({ students }: { students: DashboardStudent[] }) {
           return (
             <a
               key={student.id}
-              href="/students"
+              href={`/students/${student.id}`}
               className="flex items-center justify-between gap-3 rounded-control px-2 py-2 hover:bg-canvas"
             >
               <span className="flex items-center gap-3">
