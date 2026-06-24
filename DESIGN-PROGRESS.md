@@ -163,10 +163,17 @@
 
 ## ▶ 잔여(후속 라운드, 디자인 외 데이터 작업 포함)
 - 과외쌤 **B3 학생 상세 탭(08~12)**: `/students/[id]` 라우트 + 공개범위 게이팅 데이터 와이어링(큰 작업).
-- 과외쌤 **B4 숙제 출제(13)**: `/students/[id]/homework/new` + todos(source=teacher) 작성 화면.
+- ~~과외쌤 **B4 숙제 출제(13)**~~ ✅ 완료(아래, /homework/new).
 - ~~대시보드 **집중 관리 테이블**~~ ✅ 완료(아래).
 - ~~학생 **F4 집중 요약**~~ ✅ 완료(아래) / F5 집중 리포트(라이트 리스트, 유지).
 - ⚠️ 위는 새 라우트/데이터 와이어링이 필요해 "겉모습만"을 넘어서는 부분 — 진행 시 RLS/공개범위/익명성 규칙 준수.
+
+## (후속) B4 — 과외쌤 숙제 출제 ✅
+- **device**: teacher-desktop (13 B4).
+- **손본 화면**: `apps/teacher/src/app/m4.tsx`(`TeacherHomeworkAssign`) + 신규 `app/homework/new/page.tsx` + 검사 화면 "+ 숙제 내기" 액션.
+  - 학생 선택(active 연결) + 제목/과목/마감/AI 완료검사 토글 → teacher-todo insert(source=teacher, locked, connection_id).
+  - **RLS 준수**: `todos_teacher_rw` 정책(active 연결)으로 과외쌤 insert 허용, 학생은 잠금(트리거가 학생 차단). 가격/AI 무관.
+- **검증**: lint/typecheck/test/build green. 3000 /homework/new 사이드바+폼 무크래시 렌더.
 
 ## (후속) 대시보드 집중 관리 테이블 ✅
 - **device**: teacher-desktop (05 B1).
