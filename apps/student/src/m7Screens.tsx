@@ -366,7 +366,7 @@ function Center({ text }: { text: string }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.canvas },
-  content: { padding: spacing.lg, gap: spacing.sm },
+  content: { padding: spacing.lg, gap: spacing.sm, width: "100%", maxWidth: 720, alignSelf: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.sm, backgroundColor: colors.canvas },
   centerText: { color: colors.muted, fontSize: 15, fontWeight: "700" },
   kicker: { color: colors.muted, fontSize: 13, fontWeight: "800", letterSpacing: 0.2 },

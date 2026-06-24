@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Children, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Link, useLocalSearchParams, type Href } from "expo-router";
 import { createClient, type Session } from "@supabase/supabase-js";
@@ -10,7 +10,8 @@ import {
   Switch,
   Text,
   TextInput,
-  View
+  View,
+  useWindowDimensions
 } from "react-native";
 
 import { colors, meetsAA, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
@@ -1224,9 +1225,12 @@ function AppShell({
   subtitle?: string;
   title?: string;
 }) {
+  const { width } = useWindowDimensions();
+  const isTablet = width >= 768;
+
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, isTablet ? styles.scrollContentTablet : null]}>
         {header ?? (
           <View style={styles.pageHeader}>
             <View style={styles.flex}>
@@ -1241,7 +1245,13 @@ function AppShell({
             <Text style={styles.noticeText}>{message}</Text>
           </View>
         ) : null}
-        {children}
+        {isTablet ? (
+          <View style={styles.tabletGrid}>
+            {Children.map(children, (child) => (child ? <View style={styles.tabletCell}>{child}</View> : null))}
+          </View>
+        ) : (
+          children
+        )}
       </ScrollView>
       <BottomNav active={activeTab} />
     </View>
@@ -1673,6 +1683,22 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 920,
     alignSelf: "center"
+  },
+  scrollContentTablet: {
+    maxWidth: 1040,
+    paddingHorizontal: spacing.xl
+  },
+  tabletGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    gap: spacing.lg
+  },
+  tabletCell: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "47%",
+    minWidth: 300
   },
   authContent: {
     flexGrow: 1,

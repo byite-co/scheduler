@@ -90,12 +90,21 @@
 - **카탈로그와 남은 차이(의도)**: 소셜 로그인(카카오/Apple) 버튼 생략 — OAuth 미연동(범위 밖) + 카카오 브랜드 옐로는 토큰 외 색이라 토큰 규칙 우선. 이메일+비번만.
 - **검증**: lint/typecheck/test/build green. 8081에서 /signup·/login 렌더 확인(빈 화면·Slot 함정 없음, 디버그 제거).
 
-## ▶ 다음 이어갈 지점 (RESUME POINT)
-셸+홈·G1~G6 + 버그픽스 main 반영 완료(= 학생 모바일 전 화면 카탈로그화). 다음 실행은 **G7부터**.
-각 그룹: main에서 브랜치 → 카탈로그 PNG에 맞춰 겉모습/반응형만 → lint·typecheck·test·build green → squash merge → 이 파일에 기록.
-⚠️ **주의**: `<Link asChild>` 자식에 style 배열 금지 → 반드시 `StyleSheet.flatten([...])`(Slot 런타임 에러 유발). 화면 작업 후 8081 DOM 검증 권장.
+## G7 — 학생 태블릿 반응형 ✅
+- **device**: student-tablet (01·03·06 등).
+- **손본 화면**: `apps/student/src/m2Screens.tsx`(AppShell), `m4/m5/m6/m7Screens.tsx`(content maxWidth).
+  - **공용 AppShell에 device 분기**(`useWindowDimensions`, width≥768=태블릿): 태블릿에서 카드 children을 **2열 그리드**(`tabletCell` flexBasis 47%)로 배치 + 컨테이너 maxWidth 1040. → 홈·플래너·또래·기록 전 탭에 일괄 반응형(중복 구현 없음).
+  - 플로우 화면(숙제/리포트/구독/설정)은 태블릿에서 과폭 방지 위해 content maxWidth 720 + 중앙 정렬.
+- **기능 유지**: 레이아웃만 분기, 데이터/로직 무변경.
+- **카탈로그와 남은 차이(의도)**: 카탈로그의 정밀 마조너리(히어로+할일 좌 / 우리반+숙제 우 / 차트 풀폭)는 **순서 기반 2열 wrap**으로 근사(카드가 L-R-L-R 흐름). 플래너 시간표의 좌-목록/우-주간그리드 분할은 단일 컬럼 내 카드로 유지(그리드는 가로 스크롤). 타이머/가입은 기존 중앙 maxWidth로 태블릿 대응.
+- **검증**: lint/typecheck/test/build green. 8081을 768px로 리사이즈해 홈 카드가 2열(좌 x≈24 / 우 x≈392)로 배치됨을 DOM 좌표로 확인.
 
-- **G7** 학생 태블릿(student-tablet 60장) 반응형 — G1~G6 화면을 태블릿 레이아웃(2열/넓은 카드). 공용 컴포넌트 device 분기 재사용(중복 최소화). RN Web 반응형: `useWindowDimensions`로 분기.
+## ▶ 다음 이어갈 지점 (RESUME POINT)
+**학생 앱(모바일+태블릿) 전 화면 카탈로그화 완료.** 다음 실행은 **G8부터(과외쌤)**.
+각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
+⚠️ `<Link asChild>` 자식 style은 `StyleSheet.flatten`. 과외쌤은 Next.js(Tailwind) — 학생(RN Web)과 다른 스택이니 Slot 함정은 학생 한정.
+
+- **G8** 과외쌤 IA 재구성 + 인증/온보딩(A1~A4, teacher-desktop). 디버그 사이드바는 이미 제거됨(1단계) — 실제 정보구조 네비(상단/사이드)로 재구성. 파일: `apps/teacher/src/app/*`, `m1.tsx` 등. **중립 프로 SaaS 톤**(Linear/Stripe 결).
 - **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
 - **G7** 학생 태블릿(student-tablet 60장): 공용 컴포넌트 device 분기로 2열/넓은 카드 반응형.
 - **G8~G13** 과외쌤(teacher-desktop 36 → teacher-mobile 28/teacher-tablet 18): IA 재구성·인증/온보딩, 대시보드/학생목록/상세, 숙제 출제·검사·핸드셰이크, 리포트 빌더·학부모 공유, 구독·수업료, 반응형.
