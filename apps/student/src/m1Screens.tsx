@@ -23,8 +23,64 @@ type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
 type DisclosureRow = Database["public"]["Tables"]["disclosure_settings"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 
-// 온보딩 단계 간 동의 상태 전달(약관 화면 → 프로필 화면). 같은 SPA 세션에서 유지된다.
-const onboardingConsent = { termsAccepted: false, privacyAccepted: false };
+// 온보딩 단계 간 동의 상태 전달(약관 화면 → 프로필 화면).
+// 모듈 변수만 쓰면 새로고침·직접 이동·모듈 재평가 시 유실되므로,
+// 웹에서는 localStorage에 함께 보존한다(네이티브는 세션 내 메모리로 충분).
+type SignupConsent = { termsAccepted: boolean; privacyAccepted: boolean };
+
+const SIGNUP_CONSENT_KEY = "ssamplanner.signupConsent";
+let memorySignupConsent: SignupConsent = { termsAccepted: false, privacyAccepted: false };
+
+function getConsentStorage(): Storage | null {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function readSignupConsent(): SignupConsent {
+  const storage = getConsentStorage();
+  if (storage) {
+    try {
+      const raw = storage.getItem(SIGNUP_CONSENT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<SignupConsent>;
+        memorySignupConsent = {
+          termsAccepted: Boolean(parsed.termsAccepted),
+          privacyAccepted: Boolean(parsed.privacyAccepted)
+        };
+      }
+    } catch {
+      // 손상된 값은 무시하고 메모리 값으로 폴백.
+    }
+  }
+  return { ...memorySignupConsent };
+}
+
+function writeSignupConsent(next: SignupConsent): void {
+  memorySignupConsent = { ...next };
+  const storage = getConsentStorage();
+  if (storage) {
+    try {
+      storage.setItem(SIGNUP_CONSENT_KEY, JSON.stringify(next));
+    } catch {
+      // 저장 실패해도 메모리 값은 유지되므로 흐름은 계속된다.
+    }
+  }
+}
+
+function clearSignupConsent(): void {
+  memorySignupConsent = { termsAccepted: false, privacyAccepted: false };
+  const storage = getConsentStorage();
+  if (storage) {
+    try {
+      storage.removeItem(SIGNUP_CONSENT_KEY);
+    } catch {
+      // 무시.
+    }
+  }
+}
 
 // 가입/온보딩/로그인 후 갈 곳을 세션·온보딩 상태로 결정한다.
 async function resolvePostAuthRoute(): Promise<string> {
@@ -162,6 +218,8 @@ export function StudentSignupScreen() {
     }
     await data.refresh(result.session ?? undefined);
     if (result.session) {
+      // 새 가입은 약관 동의를 처음부터 다시 받는다(이전/타인 동의 상태 초기화).
+      clearSignupConsent();
       // 가입 즉시 로그인됨 → 온보딩(약관)으로 자동 이동.
       router.replace("/signup/terms");
     } else {
@@ -222,13 +280,13 @@ export function StudentLoginScreen() {
 export function StudentTermsScreen() {
   const data = useStudentData();
   const router = useRouter();
-  const [termsAccepted, setTermsAccepted] = useState(onboardingConsent.termsAccepted);
-  const [privacyAccepted, setPrivacyAccepted] = useState(onboardingConsent.privacyAccepted);
+  const [termsAccepted, setTermsAccepted] = useState(() => readSignupConsent().termsAccepted);
+  const [privacyAccepted, setPrivacyAccepted] = useState(() => readSignupConsent().privacyAccepted);
   const canContinue = termsAccepted && privacyAccepted;
 
   function continueToProfile() {
-    onboardingConsent.termsAccepted = termsAccepted;
-    onboardingConsent.privacyAccepted = privacyAccepted;
+    // 동의 상태를 보존(새로고침·직접 이동에도 유지)한 뒤 프로필로.
+    writeSignupConsent({ termsAccepted, privacyAccepted });
     router.replace("/signup/profile");
   }
 
@@ -284,12 +342,21 @@ export function StudentProfileScreen() {
       return;
     }
 
+    // 약관 동의는 이전 약관 단계에서 보존된 값(또는 이미 온보딩된 계정)으로 인정.
+    const termsAccepted = readSignupConsent().termsAccepted || Boolean(data.profile?.onboarded);
+
+    // 약관 동의 자체가 없으면(직접 이동 등) 약관 단계로 되돌린다 — 동의 없이 가입 완료 불가.
+    if (!termsAccepted) {
+      data.setMessage("약관 동의가 필요해요. 약관 단계로 이동할게요.");
+      router.replace("/signup/terms");
+      return;
+    }
+
     const signupState = {
       name,
       birthDate,
       grade,
-      // 약관 동의는 이전 약관 단계에서 받았다(이미 동의했거나, 재가입 시 기존 동의 인정).
-      termsAccepted: onboardingConsent.termsAccepted || Boolean(data.profile?.onboarded),
+      termsAccepted,
       emailVerified: Boolean(data.session),
       guardianConsentAccepted
     };
@@ -315,6 +382,8 @@ export function StudentProfileScreen() {
       data.setMessage(error.message);
       return;
     }
+    // 온보딩 완료 → 임시 동의 보존값 정리.
+    clearSignupConsent();
     await data.refresh();
     // 프로필 저장 완료 → 바로 홈으로.
     router.replace("/today");
