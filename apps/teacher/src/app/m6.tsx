@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 
 import {
   PRICE_PER_STUDENT_KRW,
@@ -14,14 +14,10 @@ import {
 import type { Database } from "@ssamplanner/shared";
 
 import { TeacherShell, type TeacherShellData } from "./m1";
+import { supabase } from "./supabaseClient";
 
 type InvoiceRow = Database["public"]["Tables"]["billing_invoices"]["Row"];
 type LessonFeeRow = Database["public"]["Tables"]["lesson_fees"]["Row"];
-
-const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
 
 function currentPeriod(): string {
   const now = new Date();

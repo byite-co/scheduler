@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { router, useLocalSearchParams } from "expo-router";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
@@ -14,14 +14,11 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
+import { supabase } from "./supabaseClient";
+
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
 type SubmissionRow = Database["public"]["Tables"]["homework_submissions"]["Row"];
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
-
-const supabase = createClient<Database>(
-  process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
 
 type SubmitState = "idle" | "uploading" | "checking" | "upload_failed" | "check_failed";
 

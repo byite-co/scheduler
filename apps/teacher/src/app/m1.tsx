@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { createClient, type Session } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
+import type { Session } from "@supabase/supabase-js";
 
 import {
   DEFAULT_TEACHER_STUDENT_SETTINGS,
@@ -12,6 +13,8 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, M1ConnectionStatus } from "@ssamplanner/shared";
 
+import { supabase } from "./supabaseClient";
+
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
 type DisclosureRow = Database["public"]["Tables"]["disclosure_settings"]["Row"];
 type InviteCodeRow = Database["public"]["Tables"]["invite_codes"]["Row"];
@@ -19,10 +22,14 @@ type PerStudentSettingsRow = Database["public"]["Tables"]["per_student_settings"
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type SubjectCode = Database["public"]["Enums"]["subject_code"];
 
-const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
+// 로그인/가입 후 갈 곳을 온보딩 상태로 결정.
+async function resolveTeacherRoute(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user.id;
+  if (!userId) return "/login";
+  const profile = await supabase.from("profiles").select("onboarded").eq("id", userId).maybeSingle();
+  return profile.data?.onboarded ? "/" : "/onboarding/profile";
+}
 
 const subjectOptions: Array<{ label: string; value: SubjectCode }> = [
   { label: "수학", value: "math" },
@@ -398,6 +405,7 @@ export function TeacherResetContent() {
 
 export function TeacherProfileContent() {
   const data = useTeacherData();
+  const router = useRouter();
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [subjects, setSubjects] = useState<SubjectCode[]>(["math", "english"]);
@@ -424,8 +432,13 @@ export function TeacherProfileContent() {
       onboarded: true
     });
 
-    data.setMessage(error ? error.message : "과외쌤 프로필이 저장되었습니다.");
+    if (error) {
+      data.setMessage(error.message);
+      return;
+    }
     await data.refresh();
+    // 프로필 저장 완료 → 대시보드로.
+    router.replace("/");
   }
 
   return (
@@ -592,10 +605,20 @@ export function TeacherShell({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const router = useRouter();
+
+  // 보호 화면: 로딩 끝났는데 세션이 없으면 로그인으로 보낸다(인증 화면은 TeacherShell을 쓰지 않으므로 루프 없음).
+  useEffect(() => {
+    if (!data.loading && !data.session) {
+      router.replace("/login");
+    }
+  }, [data.loading, data.session, router]);
+
   async function signOut() {
     await supabase.auth.signOut();
     data.setMessage("로그아웃했어요.");
     await data.refresh(null);
+    router.replace("/login");
   }
 
   return (
@@ -722,6 +745,7 @@ function TeacherAuthLayout({
 }
 
 function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData }) {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -736,14 +760,23 @@ function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData 
             options: { emailRedirectTo: `${window.location.origin}/login` }
           });
 
-    data.setMessage(
-      result.error
-        ? result.error.message
-        : mode === "login"
-          ? "로그인했습니다."
-          : "가입 요청을 보냈어요. 인증 메일을 확인해 주세요."
-    );
+    if (result.error) {
+      data.setMessage(result.error.message);
+      return;
+    }
     await data.refresh(result.data.session ?? undefined);
+
+    if (mode === "signup") {
+      if (result.data.session) {
+        // 가입 즉시 로그인됨 → 온보딩(프로필)으로.
+        router.replace("/onboarding/profile");
+      } else {
+        data.setMessage("가입 요청을 보냈어요. 인증 메일의 링크를 누른 뒤 로그인해 주세요.");
+      }
+      return;
+    }
+    // 로그인: 온보딩 완료면 대시보드, 아니면 프로필.
+    router.replace(await resolveTeacherRoute());
   }
 
   return (

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Link, router } from "expo-router";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
@@ -19,12 +19,9 @@ import {
 } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
-type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
+import { supabase } from "./supabaseClient";
 
-const supabase = createClient<Database>(
-  process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
+type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
 
 const APP_BUILD = 1;
 

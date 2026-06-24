@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import type { Href } from "expo-router";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
@@ -17,18 +17,23 @@ import {
 } from "@ssamplanner/shared";
 import type { ConnectionStatus, Database } from "@ssamplanner/shared";
 
+import { supabase } from "./supabaseClient";
+
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
 type DisclosureRow = Database["public"]["Tables"]["disclosure_settings"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 
-const supabase = createClient<Database>(
-  process.env.EXPO_PUBLIC_SUPABASE_URL ??
-    process.env.NEXT_PUBLIC_SUPABASE_URL ??
-    "",
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-    ""
-);
+// 온보딩 단계 간 동의 상태 전달(약관 화면 → 프로필 화면). 같은 SPA 세션에서 유지된다.
+const onboardingConsent = { termsAccepted: false, privacyAccepted: false };
+
+// 가입/온보딩/로그인 후 갈 곳을 세션·온보딩 상태로 결정한다.
+async function resolvePostAuthRoute(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user.id;
+  if (!userId) return "/login";
+  const profile = await supabase.from("profiles").select("onboarded").eq("id", userId).maybeSingle();
+  return profile.data?.onboarded ? "/today" : "/signup/profile";
+}
 
 function useStudentData() {
   const [session, setSession] = useState<Session | null>(null);
@@ -101,32 +106,6 @@ function useStudentData() {
   };
 }
 
-export function StudentHomeM1Screen() {
-  const data = useStudentData();
-  const latest = data.connections[0];
-
-  return (
-    <ScreenFrame
-      eyebrow="학생 홈"
-      title="오늘 공부를 시작하기 전"
-      body="가입과 연결 상태를 확인하고, 선생님에게 공개할 범위를 학생이 직접 정합니다."
-      primaryHref="/signup"
-      primaryLabel={data.session ? "계정 확인" : "가입 시작"}
-      message={data.message}
-    >
-      <StatusBand label="현재 연결" value={latest?.status ?? "혼공생"} tone={latest?.status === "pending" ? "warning" : "success"} />
-      <StepList
-        steps={[
-          ["세션", data.session ? "로그인됨" : "로그인 필요"],
-          ["프로필", data.profile?.onboarded ? "완료" : "저장 필요"],
-          ["연결", latest ? `${latest.status} · ${latest.invite_code ?? "-"}` : "초대 코드 입력 가능"],
-          ["공개 범위", data.disclosures.length ? "저장됨" : "기본값"]
-        ]}
-      />
-    </ScreenFrame>
-  );
-}
-
 function AuthFrame({
   title,
   subtitle,
@@ -171,13 +150,23 @@ function AuthFooter({ prompt, label, href }: { prompt: string; label: string; hr
 
 export function StudentSignupScreen() {
   const data = useStudentData();
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   async function signUp() {
     const { data: result, error } = await supabase.auth.signUp({ email, password });
-    data.setMessage(error ? error.message : result.session ? "가입하고 로그인했어요." : "가입 요청을 보냈어요. 인증 메일을 확인해 주세요.");
+    if (error) {
+      data.setMessage(error.message);
+      return;
+    }
     await data.refresh(result.session ?? undefined);
+    if (result.session) {
+      // 가입 즉시 로그인됨 → 온보딩(약관)으로 자동 이동.
+      router.replace("/signup/terms");
+    } else {
+      data.setMessage("가입 요청을 보냈어요. 인증 메일의 링크를 누른 뒤 로그인해 주세요.");
+    }
   }
 
   return (
@@ -190,24 +179,25 @@ export function StudentSignupScreen() {
       <InputRow keyboardType="email-address" onChange={setEmail} placeholder="이메일" value={email} />
       <InputRow onChange={setPassword} placeholder="비밀번호" secure value={password} />
       <ActionButton label="이메일로 가입" onPress={() => void signUp()} variant="primary" />
-      <Link href={"/signup/terms" as Href} asChild>
-        <Pressable accessibilityRole="button" style={styles.textLink}>
-          <Text style={styles.textLinkLabel}>약관 동의하고 계속 →</Text>
-        </Pressable>
-      </Link>
     </AuthFrame>
   );
 }
 
 export function StudentLoginScreen() {
   const data = useStudentData();
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   async function logIn() {
     const { data: result, error } = await supabase.auth.signInWithPassword({ email, password });
-    data.setMessage(error ? error.message : "로그인했어요.");
+    if (error) {
+      data.setMessage(error.message);
+      return;
+    }
     await data.refresh(result.session ?? undefined);
+    // 온보딩 완료면 홈, 아니면 남은 온보딩(프로필)으로 자동 이동.
+    router.replace((await resolvePostAuthRoute()) as Href);
   }
 
   return (
@@ -231,49 +221,62 @@ export function StudentLoginScreen() {
 
 export function StudentTermsScreen() {
   const data = useStudentData();
-  const [termsAccepted, setTermsAccepted] = useState(true);
-  const [privacyAccepted, setPrivacyAccepted] = useState(true);
-  const [guardianAccepted, setGuardianAccepted] = useState(false);
-  const birthDate = data.profile?.birth_date ?? "2013-06-23";
-  const consentRequired = requiresGuardianConsent(birthDate, "2026-06-22");
+  const router = useRouter();
+  const [termsAccepted, setTermsAccepted] = useState(onboardingConsent.termsAccepted);
+  const [privacyAccepted, setPrivacyAccepted] = useState(onboardingConsent.privacyAccepted);
+  const canContinue = termsAccepted && privacyAccepted;
+
+  function continueToProfile() {
+    onboardingConsent.termsAccepted = termsAccepted;
+    onboardingConsent.privacyAccepted = privacyAccepted;
+    router.replace("/signup/profile");
+  }
 
   return (
     <ScreenFrame
-      eyebrow="약관"
-      title="약관과 보호자 동의"
-      body="만 14세 미만이면 프로필 저장 단계에서 보호자 동의가 완료되어야 가입을 끝낼 수 있습니다."
-      primaryHref="/signup/profile"
-      primaryLabel="프로필 입력"
+      eyebrow="약관 동의 · 2/3"
+      title="약관에 동의해 주세요"
+      body="서비스 이용약관과 개인정보 처리방침에 동의하면 프로필 입력으로 넘어가요. (보호자 동의는 생년월일 입력 후 필요한 경우에만)"
       message={data.message}
     >
-      <ToggleRow label="서비스 이용약관" value={termsAccepted} onValueChange={setTermsAccepted} />
-      <ToggleRow label="개인정보 처리방침" value={privacyAccepted} onValueChange={setPrivacyAccepted} />
-      <ToggleRow label="보호자 동의" value={guardianAccepted} onValueChange={setGuardianAccepted} highlight={consentRequired} />
-      <Notice tone={consentRequired && !guardianAccepted ? "warning" : "success"}>
-        {consentRequired && !guardianAccepted
-          ? "생년월일 기준 보호자 동의가 없으면 가입 완료가 막힙니다."
-          : "다음 단계에서 프로필을 저장할 수 있습니다."}
+      <ToggleRow label="서비스 이용약관 (필수)" value={termsAccepted} onValueChange={setTermsAccepted} />
+      <ToggleRow label="개인정보 처리방침 (필수)" value={privacyAccepted} onValueChange={setPrivacyAccepted} />
+      <Notice tone={canContinue ? "success" : "warning"}>
+        {canContinue ? "동의 완료! 다음 단계로 넘어가요." : "필수 약관에 모두 동의해야 계속할 수 있어요."}
       </Notice>
+      <ActionButton
+        label="동의하고 계속"
+        onPress={() => {
+          if (!canContinue) {
+            data.setMessage("필수 약관에 동의해 주세요.");
+            return;
+          }
+          continueToProfile();
+        }}
+        variant="primary"
+      />
     </ScreenFrame>
   );
 }
 
 export function StudentProfileScreen() {
   const data = useStudentData();
+  const router = useRouter();
   const [name, setName] = useState("");
-  const [birthDate, setBirthDate] = useState("2013-06-23");
+  const [birthDate, setBirthDate] = useState("");
   const [grade, setGrade] = useState("중1");
   const [targetUniv, setTargetUniv] = useState("");
-  const [termsAccepted, setTermsAccepted] = useState(true);
   const [guardianConsentAccepted, setGuardianConsentAccepted] = useState(false);
 
   useEffect(() => {
     setName(data.profile?.name ?? "");
-    setBirthDate(data.profile?.birth_date ?? "2013-06-23");
+    setBirthDate(data.profile?.birth_date ?? "");
     setGrade(data.profile?.grade ?? "중1");
     setTargetUniv(data.profile?.target_univ ?? "");
     setGuardianConsentAccepted(Boolean(data.profile?.guardian_consented_at));
   }, [data.profile]);
+
+  const consentRequired = requiresGuardianConsent(birthDate, new Date());
 
   async function saveProfile() {
     if (!data.session) {
@@ -285,13 +288,14 @@ export function StudentProfileScreen() {
       name,
       birthDate,
       grade,
-      termsAccepted,
-      emailVerified: Boolean(data.session.user.email_confirmed_at || data.session),
+      // 약관 동의는 이전 약관 단계에서 받았다(이미 동의했거나, 재가입 시 기존 동의 인정).
+      termsAccepted: onboardingConsent.termsAccepted || Boolean(data.profile?.onboarded),
+      emailVerified: Boolean(data.session),
       guardianConsentAccepted
     };
-    const missing = getMissingStudentSignupSteps(signupState, "2026-06-22");
+    const missing = getMissingStudentSignupSteps(signupState, new Date());
 
-    if (!canCompleteStudentSignup(signupState, "2026-06-22")) {
+    if (!canCompleteStudentSignup(signupState, new Date())) {
       data.setMessage(`가입 완료 불가: ${missing.join(", ")}`);
       return;
     }
@@ -307,31 +311,42 @@ export function StudentProfileScreen() {
       onboarded: true
     });
 
-    data.setMessage(error ? error.message : "학생 프로필을 저장했습니다.");
+    if (error) {
+      data.setMessage(error.message);
+      return;
+    }
     await data.refresh();
+    // 프로필 저장 완료 → 바로 홈으로.
+    router.replace("/today");
   }
 
   return (
     <ScreenFrame
-      eyebrow="프로필"
+      eyebrow="프로필 · 3/3"
       title="공부 기준 입력"
-      body="학년과 목표를 저장하면 혼공생 상태로 먼저 사용할 수 있습니다."
-      primaryHref="/onboarding/connect"
-      primaryLabel="선생님 연결"
+      body="이름·생년월일·학년을 저장하면 바로 홈에서 공부를 시작할 수 있어요."
       message={data.message}
     >
-      <InputRow label="이름" value={name} onChange={setName} />
-      <InputRow label="생년월일" value={birthDate} onChange={setBirthDate} />
+      <InputRow label="이름" value={name} onChange={setName} placeholder="이름" />
+      <InputRow label="생년월일" value={birthDate} onChange={setBirthDate} placeholder="YYYY-MM-DD" />
       <InputRow label="학년" value={grade} onChange={setGrade} />
-      <InputRow label="목표 대학" value={targetUniv} onChange={setTargetUniv} />
-      <ToggleRow label="약관 동의" value={termsAccepted} onValueChange={setTermsAccepted} />
-      <ToggleRow
-        label="보호자 동의"
-        value={guardianConsentAccepted}
-        onValueChange={setGuardianConsentAccepted}
-        highlight={requiresGuardianConsent(birthDate, "2026-06-22")}
-      />
-      <ActionButton label="프로필 저장" onPress={() => void saveProfile()} variant="primary" />
+      <InputRow label="목표 대학(선택)" value={targetUniv} onChange={setTargetUniv} />
+      {consentRequired ? (
+        <>
+          <ToggleRow
+            label="보호자 동의 (만 14세 미만 필수)"
+            value={guardianConsentAccepted}
+            onValueChange={setGuardianConsentAccepted}
+            highlight={!guardianConsentAccepted}
+          />
+          <Notice tone={guardianConsentAccepted ? "success" : "warning"}>
+            {guardianConsentAccepted
+              ? "보호자 동의가 확인됐어요."
+              : "만 14세 미만이라 보호자 동의가 필요해요."}
+          </Notice>
+        </>
+      ) : null}
+      <ActionButton label="프로필 저장하고 시작" onPress={() => void saveProfile()} variant="primary" />
     </ScreenFrame>
   );
 }
@@ -526,8 +541,8 @@ function ScreenFrame({
   eyebrow: string;
   title: string;
   body: string;
-  primaryHref: Href;
-  primaryLabel: string;
+  primaryHref?: Href;
+  primaryLabel?: string;
   secondaryHref?: Href;
   secondaryLabel?: string;
   message: string;
@@ -539,14 +554,16 @@ function ScreenFrame({
         <Text style={styles.eyebrow}>{eyebrow}</Text>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.body}>{body}</Text>
-        <Notice tone="success">{message}</Notice>
+        {message ? <Notice tone="success">{message}</Notice> : null}
         <View style={styles.content}>{children}</View>
-        <View style={styles.actions}>
-          <ActionLink href={primaryHref} label={primaryLabel} variant="primary" />
-          {secondaryHref && secondaryLabel ? (
-            <ActionLink href={secondaryHref} label={secondaryLabel} variant="secondary" />
-          ) : null}
-        </View>
+        {primaryHref && primaryLabel ? (
+          <View style={styles.actions}>
+            <ActionLink href={primaryHref} label={primaryLabel} variant="primary" />
+            {secondaryHref && secondaryLabel ? (
+              <ActionLink href={secondaryHref} label={secondaryLabel} variant="secondary" />
+            ) : null}
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -653,25 +670,6 @@ function StepList({ steps }: { steps: Array<[string, string]> }) {
           <Text style={styles.stepValue}>{value}</Text>
         </View>
       ))}
-    </View>
-  );
-}
-
-function StatusBand({
-  label,
-  value,
-  tone = "success"
-}: {
-  label: string;
-  value: string;
-  tone?: "success" | "warning";
-}) {
-  return (
-    <View style={styles.statusBand}>
-      <Text style={styles.stepLabel}>{label}</Text>
-      <Text style={[styles.statusValue, tone === "warning" ? styles.warningText : styles.successText]}>
-        {value}
-      </Text>
     </View>
   );
 }

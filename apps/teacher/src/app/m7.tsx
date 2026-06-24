@@ -2,19 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 
 import { NOTIF_TYPE_LABELS, unreadCount, validateDeleteConfirmation, type NotifType } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
 import { TeacherShell, type TeacherShellData } from "./m1";
+import { supabase } from "./supabaseClient";
 
 type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
-
-const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
 
 export function TeacherNotificationCenter() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);

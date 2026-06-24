@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Link, useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
@@ -21,20 +21,12 @@ import {
 import type { Database, FocusDrowsinessResult, SubjectCode } from "@ssamplanner/shared";
 
 import { FocusCameraPanel } from "./focusCamera";
+import { supabase } from "./supabaseClient";
 
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type StudySessionRow = Database["public"]["Tables"]["study_sessions"]["Row"];
 type TimetableBlockRow = Database["public"]["Tables"]["timetable_blocks"]["Row"];
 type FocusCheckEvent = FocusDrowsinessResult & { checkedAt: string };
-
-const supabase = createClient<Database>(
-  process.env.EXPO_PUBLIC_SUPABASE_URL ??
-    process.env.NEXT_PUBLIC_SUPABASE_URL ??
-    "",
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-    ""
-);
 
 const subjectOptions = Object.keys(SUBJECT_LABELS) as SubjectCode[];
 

@@ -210,3 +210,17 @@
 - **G8~G13** 과외쌤(teacher-desktop 36 → teacher-mobile 28/teacher-tablet 18): IA 재구성·인증/온보딩, 대시보드/학생목록/상세, 숙제 출제·검사·핸드셰이크, 리포트 빌더·학부모 공유, 구독·수업료, 반응형.
 - **불변(STOP)**: 또래 익명 · focus 영상 미저장·"기기를 떠나지 않아요" · 공개범위 · 가격 상수 · 앱구독료↔수업료 분리 · 실연동(AI/결제/푸시).
 - **후속 다듬기**: G2의 F4 집중요약(22)/F5 집중리포트(24) 라이트 화면.
+
+## (후속) 가입·로그인 플로우 정상화 ✅
+- **문제**: 가입/로그인 성공 후 "성공 메시지만 띄우고 멈춤"(자동 이동 없음), 만14세 보호자 동의가 생년월일 미입력 상태에서도 일반 가입을 막음, 약관 토글이 다음 단계로 전달 안 됨, 과외쌤 미인증 상태에서 대시보드 접근 가능, 모듈마다 Supabase 클라이언트를 따로 생성(GoTrueClient 경고).
+- **A) 가입/로그인 후 자동 이동(양 앱)**: `router.replace` 사용.
+  - 학생(`m1Screens.tsx`): 가입 성공(세션 생성) → `/signup/terms` → 약관 동의 → `/signup/profile` → 프로필 저장 → `/today`. 로그인 성공은 `resolvePostAuthRoute()`(profiles.onboarded 분기)로 온보딩 완료면 `/today`, 미완이면 남은 단계.
+  - 과외쌤(`m1.tsx`): 가입 성공 → `/onboarding/profile` → 프로필 저장 → `/`(대시보드). 로그인은 `resolveTeacherRoute()`로 분기.
+- **B) 만14세 게이팅 비차단화**: 프로필 화면 `birthDate` 기본 빈값, 보호자 동의는 **생년월일 입력 후 만14세 미만일 때만** 노출. 하드코딩 `asOf "2026-06-22"` 제거 → `new Date()`.
+- **C) 약관 단계 정규화**: 약관·개인정보 토글이 실제 상태로 저장돼 프로필로 전달(모듈 레벨 `onboardingConsent`), 프로필에서 약관 재요청 제거. 카탈로그 흐름(가입→약관→프로필) 자동 진행.
+- **D) 과외쌤 가입→온보딩 + 미인증 가드**: 가입 화면이 온보딩으로 자연 연결, 보호 화면(대시보드)은 `TeacherShell`에서 미인증 시 `/login`으로 리다이렉트(인증 화면은 `TeacherAuthLayout`이라 루프 없음).
+- **E) 세션 인식 안정화**: 앱별 단일 공용 클라이언트로 통합 — `apps/student/src/supabaseClient.ts`, `apps/teacher/src/app/supabaseClient.ts` 신설. 학생 m1/m2/m4~m7·timer·focusReport, 과외쌤 m1·m4~m7·r/[token]·students/[id]에서 로컬 `createClient` 제거하고 공용 `supabase` import. (Multiple GoTrueClient 경고 해소)
+- **F) 죽은 코드/디버그 제거**: 미라우팅 `StudentHomeM1Screen`·`StatusBand` 및 학생 홈 "세션: 로그인됨/필요" 디버그 제거.
+- **기능/RLS/데이터/가격 무변경**. 검증: `lint && typecheck && test && build` 전부 green.
+  - **DOM 검증(8081 학생)**: 신규 가입(≥14 생년월일) → 약관 → 프로필 → `/today` 까지 URL 수기 입력 없이 자동 연결, 저장 이름 표시. 만14세 미만 생년월일 입력 시 보호자 동의 토글 노출. 온보딩 완료 계정 로그인 → `/today`.
+  - **DOM 검증(3000 과외쌤)**: 가입 → `/onboarding/profile` → 저장 → `/`, 로그아웃 후 로그인 → `/`, 미인증 `/` 접근 → `/login`(로그인 필요 안내).

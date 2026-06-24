@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 
 import {
   SUBJECT_LABELS,
@@ -12,16 +12,12 @@ import {
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
 import { TeacherShell, type TeacherShellData } from "./m1";
+import { supabase } from "./supabaseClient";
 
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type ReportRow = Database["public"]["Tables"]["reports"]["Row"];
 type TeacherSessionRow = Database["public"]["Views"]["v_teacher_study_sessions"]["Row"];
-
-const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
 
 const subjectOptions = Object.keys(SUBJECT_LABELS) as SubjectCode[];
 

@@ -2,15 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
 
 import { SUBJECT_LABELS, getSharedReportStatusCopy, type SharedReportStatus } from "@ssamplanner/shared";
-import type { Database, SubjectCode } from "@ssamplanner/shared";
+import type { SubjectCode } from "@ssamplanner/shared";
 
-const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
+import { supabase } from "../../supabaseClient";
 
 type SharedReport = {
   id: string;

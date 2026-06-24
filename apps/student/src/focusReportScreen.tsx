@@ -1,23 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Link, type Href } from "expo-router";
-import { createClient } from "@supabase/supabase-js";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
 import { FOCUS_CAMERA_PRIVACY_COPY } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
-type StudySessionRow = Database["public"]["Tables"]["study_sessions"]["Row"];
+import { supabase } from "./supabaseClient";
 
-const supabase = createClient<Database>(
-  process.env.EXPO_PUBLIC_SUPABASE_URL ??
-    process.env.NEXT_PUBLIC_SUPABASE_URL ??
-    "",
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-    ""
-);
+type StudySessionRow = Database["public"]["Tables"]["study_sessions"]["Row"];
 
 export function FocusReportScreen({ mode }: { mode: "summary" | "report" }) {
   const [sessions, setSessions] = useState<StudySessionRow[]>([]);

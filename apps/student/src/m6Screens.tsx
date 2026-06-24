@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { router } from "expo-router";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing } from "@ssamplanner/design-tokens";
 import { PRICE_STUDENT_PREMIUM_KRW, formatKrw, getStudentPremiumState, type SubStatus } from "@ssamplanner/shared";
-import type { Database } from "@ssamplanner/shared";
 
-const supabase = createClient<Database>(
-  process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
+import { supabase } from "./supabaseClient";
 
 function useSubscription() {
   const [session, setSession] = useState<Session | null>(null);

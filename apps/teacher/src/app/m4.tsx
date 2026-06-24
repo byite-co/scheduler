@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 
 import {
   HOMEWORK_REVIEW_STATUS_LABELS,
@@ -16,6 +16,7 @@ import {
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
 import { TeacherShell, type TeacherShellData } from "./m1";
+import { supabase } from "./supabaseClient";
 
 type SubmissionRow = Database["public"]["Tables"]["homework_submissions"]["Row"];
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
@@ -26,11 +27,6 @@ type ReviewItem = SubmissionRow & {
   todoSubject: SubjectCode | null;
   studentName: string;
 };
-
-const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
-);
 
 const VERDICT_TONES: Record<HomeworkVerdict, HomeworkVerdictTone> = {
   pass: "success",

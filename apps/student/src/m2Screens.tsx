@@ -1,7 +1,7 @@
 import { Children, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Link, useLocalSearchParams, type Href } from "expo-router";
-import { createClient, type Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import {
   ActivityIndicator,
   Pressable,
@@ -29,6 +29,8 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, PeerRankingSnapshot, SubjectCode } from "@ssamplanner/shared";
 
+import { supabase } from "./supabaseClient";
+
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type StudySessionRow = Database["public"]["Tables"]["study_sessions"]["Row"];
@@ -36,15 +38,6 @@ type TimetableBlockRow = Database["public"]["Tables"]["timetable_blocks"]["Row"]
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
 type ActivityType = Database["public"]["Enums"]["activity_type"];
 type PlannerView = "todos" | "timetable" | "calendar";
-
-const supabase = createClient<Database>(
-  process.env.EXPO_PUBLIC_SUPABASE_URL ??
-    process.env.NEXT_PUBLIC_SUPABASE_URL ??
-    "",
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-    ""
-);
 
 const subjectOptions = Object.keys(SUBJECT_LABELS) as SubjectCode[];
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"] as const;
