@@ -69,7 +69,8 @@ function useGatedFeature(feature: UnlockFeature) {
         unlocks: ((unlockResult.data as AdUnlockRow[] | null) ?? []).map((u) => ({ feature: u.feature, expires_at: u.expires_at }))
       })
     );
-    setMessage(sessionResult.error?.message ?? "불러왔어요.");
+    // 성공 시에는 안내 문구를 비워 잔여 텍스트가 보이지 않게 한다(에러만 노출).
+    setMessage(sessionResult.error?.message ?? "");
     setLoading(false);
   }, [feature]);
 

@@ -32,7 +32,7 @@ function useSubscription() {
       .maybeSingle();
     setStatus((data?.status as SubStatus) ?? "none");
     setExpiresAt(data?.expires_at ?? null);
-    setMessage(error?.message ?? "구독 정보를 불러왔어요.");
+    setMessage(error?.message ?? "");
     setLoading(false);
   }, []);
 

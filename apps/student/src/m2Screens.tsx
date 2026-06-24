@@ -538,13 +538,11 @@ function StudyTimeBar({ sessions }: { sessions: StudySessionRow[] }) {
         <Text style={styles.studyBarTotal}>{formatDuration(total)}</Text>
       </View>
       <View style={styles.studyBarTrack}>
-        {total > 0 ? (
-          entries.map(([sub, seconds]) => (
-            <View key={sub} style={{ flex: seconds, backgroundColor: getSubjectColor(sub) }} />
-          ))
-        ) : (
-          <View style={[styles.flex, styles.studyBarEmpty]} />
-        )}
+        {total > 0
+          ? entries.map(([sub, seconds]) => (
+              <View key={sub} style={{ flex: seconds, backgroundColor: getSubjectColor(sub) }} />
+            ))
+          : null}
       </View>
       {entries.length ? (
         <View style={styles.studyBarLegend}>
@@ -1081,12 +1079,7 @@ function TeacherHomeworkCard({
   return (
     <HomeCard
       title="선생님 숙제"
-      right={
-        <>
-          <SoftTag tone="lock">잠금됨</SoftTag>
-          {todos.length ? <Text style={styles.countBadge}>{`${done}/${todos.length}`}</Text> : null}
-        </>
-      }
+      right={todos.length ? <Text style={styles.countBadge}>{`${done}/${todos.length}`}</Text> : undefined}
     >
       {todos.length ? (
         todos.slice(0, 4).map((todo) => <StudyTodoRow key={todo.id} onToggleStatus={onToggleStatus} todo={todo} />)
@@ -1340,18 +1333,18 @@ function RecentDaysCard({ sessions }: { sessions: StudySessionRow[] }) {
         {days.map((day) => {
           const seconds = secByDay.get(day) ?? 0;
           const ratio = seconds / max;
-          const level = ratio > 0.66 ? 2 : ratio > 0 ? 1 : 0;
-          return (
-            <View
-              key={day}
-              style={[
-                styles.recBar,
-                level === 1 ? styles.recBarSome : null,
-                level === 2 ? styles.recBarLots : null,
-                day === todayKey ? styles.recBarToday : null
-              ]}
-            />
-          );
+          const isToday = day === todayKey;
+          // 높이는 실제 값에 비례(0이면 바닥의 옅은 stub). 색은 강도별 인디고, 오늘만(데이터 있을 때) 주황.
+          const heightPct = seconds > 0 ? Math.max(24, Math.round(ratio * 100)) : 12;
+          const fill =
+            seconds === 0
+              ? styles.recBarEmpty
+              : isToday
+                ? styles.recBarToday
+                : ratio > 0.5
+                  ? styles.recBarLots
+                  : styles.recBarSome;
+          return <View key={day} style={[styles.recBar, fill, { height: `${heightPct}%` }]} />;
         })}
       </View>
       <Text style={styles.privacyNote}>친구 개개인 정보는 보이지 않아요 — 익명 집계만 사용해요.</Text>
@@ -1427,7 +1420,8 @@ export function StudentRecordsScreen() {
         <View style={styles.barChart}>
           {weekDays.map((day, index) => {
             const seconds = secByDay.get(day) ?? 0;
-            const ratio = Math.max(0.06, seconds / maxDay);
+            // 값이 0이면 빈 막대(높이 0), 값이 있으면 실제 비례(아주 작은 값도 보이게 최소 8%).
+            const ratio = seconds > 0 ? Math.max(0.08, seconds / maxDay) : 0;
             const isToday = day === todayKey;
             return (
               <View key={day} style={styles.barCol}>
@@ -2780,16 +2774,16 @@ const styles = StyleSheet.create({
   },
   recBar: {
     flex: 1,
-    height: "45%",
     borderRadius: 3,
-    backgroundColor: colors.canvas
+    backgroundColor: tints.brandSoft
+  },
+  recBarEmpty: {
+    backgroundColor: colors.line
   },
   recBarSome: {
-    height: "70%",
     backgroundColor: tints.brandSoft
   },
   recBarLots: {
-    height: "100%",
     backgroundColor: colors.brand
   },
   recBarToday: {
