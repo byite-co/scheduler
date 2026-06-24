@@ -79,12 +79,23 @@
 - **카탈로그와 남은 차이(의도)**: 페이월(C9)은 풀스크린 카드(바텀시트 대신). 결제·푸시는 mock 유지.
 - **검증**: lint/typecheck/test/build green. 8081에서 /settings 그룹 렌더 확인(버그 수정 포함).
 
+## G6 — 학생 가입/로그인 분리 ✅
+- **device**: student-mobile (40 J1 가입 등).
+- **손본 화면**: `apps/student/src/m1Screens.tsx` + 신규 `app/login/index.tsx`.
+  - `AuthFrame`(앱 아이콘 히어로 + 제목 + 부제 + 폼 + 푸터) 신설.
+  - **가입(/signup)**: "쌤플래너 시작하기" + 이메일/비번(placeholder) + "이메일로 가입" + "약관 동의하고 계속 →" + "이미 계정이 있나요? 로그인".
+  - **로그인(/login, 신설)**: "다시 만나서 반가워요" + 이메일/비번 + "로그인" + "비밀번호 찾기" + "처음이신가요? 가입".
+  - **"세션: 있음" 디버그 StatusBand 제거.** InputRow에 placeholder/optional label 추가. 하드코딩 #7A5700 → tints.warningStrong.
+- **기능 유지**: supabase signUp/signInWithPassword 그대로. 이메일+비번 유지.
+- **카탈로그와 남은 차이(의도)**: 소셜 로그인(카카오/Apple) 버튼 생략 — OAuth 미연동(범위 밖) + 카카오 브랜드 옐로는 토큰 외 색이라 토큰 규칙 우선. 이메일+비번만.
+- **검증**: lint/typecheck/test/build green. 8081에서 /signup·/login 렌더 확인(빈 화면·Slot 함정 없음, 디버그 제거).
+
 ## ▶ 다음 이어갈 지점 (RESUME POINT)
-G1~G5 + 버그픽스 main 반영 완료. 다음 실행은 **G6부터** 동일 루프로 진행.
+셸+홈·G1~G6 + 버그픽스 main 반영 완료(= 학생 모바일 전 화면 카탈로그화). 다음 실행은 **G7부터**.
 각 그룹: main에서 브랜치 → 카탈로그 PNG에 맞춰 겉모습/반응형만 → lint·typecheck·test·build green → squash merge → 이 파일에 기록.
 ⚠️ **주의**: `<Link asChild>` 자식에 style 배열 금지 → 반드시 `StyleSheet.flatten([...])`(Slot 런타임 에러 유발). 화면 작업 후 8081 DOM 검증 권장.
 
-- **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
+- **G7** 학생 태블릿(student-tablet 60장) 반응형 — G1~G6 화면을 태블릿 레이아웃(2열/넓은 카드). 공용 컴포넌트 device 분기 재사용(중복 최소화). RN Web 반응형: `useWindowDimensions`로 분기.
 - **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
 - **G7** 학생 태블릿(student-tablet 60장): 공용 컴포넌트 device 분기로 2열/넓은 카드 반응형.
 - **G8~G13** 과외쌤(teacher-desktop 36 → teacher-mobile 28/teacher-tablet 18): IA 재구성·인증/온보딩, 대시보드/학생목록/상세, 숙제 출제·검사·핸드셰이크, 리포트 빌더·학부모 공유, 구독·수업료, 반응형.

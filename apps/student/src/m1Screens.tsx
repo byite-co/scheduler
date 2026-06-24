@@ -5,7 +5,7 @@ import type { Href } from "expo-router";
 import { createClient, type Session } from "@supabase/supabase-js";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
-import { colors, radii, spacing } from "@ssamplanner/design-tokens";
+import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
 import {
   DEFAULT_DISCLOSURE_SCOPE,
   canCompleteStudentSignup,
@@ -127,6 +127,48 @@ export function StudentHomeM1Screen() {
   );
 }
 
+function AuthFrame({
+  title,
+  subtitle,
+  message,
+  children,
+  footer
+}: {
+  title: string;
+  subtitle: string;
+  message: string;
+  children: ReactNode;
+  footer: ReactNode;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.authScroll} style={styles.screen}>
+      <View style={styles.authPanel}>
+        <View style={styles.appIcon}>
+          <Text style={styles.appIconText}>쌤</Text>
+        </View>
+        <Text style={styles.authTitle}>{title}</Text>
+        <Text style={styles.authSubtitle}>{subtitle}</Text>
+        <View style={styles.authForm}>{children}</View>
+        {message ? <Notice tone="success">{message}</Notice> : null}
+        {footer}
+      </View>
+    </ScrollView>
+  );
+}
+
+function AuthFooter({ prompt, label, href }: { prompt: string; label: string; href: Href }) {
+  return (
+    <View style={styles.authFooter}>
+      <Text style={styles.authFooterText}>{prompt} </Text>
+      <Link href={href} asChild>
+        <Pressable accessibilityRole="button">
+          <Text style={styles.authFooterLink}>{label}</Text>
+        </Pressable>
+      </Link>
+    </View>
+  );
+}
+
 export function StudentSignupScreen() {
   const data = useStudentData();
   const [email, setEmail] = useState("");
@@ -138,31 +180,52 @@ export function StudentSignupScreen() {
     await data.refresh(result.session ?? undefined);
   }
 
+  return (
+    <AuthFrame
+      title="쌤플래너 시작하기"
+      subtitle="공부 타이머·플래너·집중 모드를 한 곳에서"
+      message={data.message}
+      footer={<AuthFooter href={"/login" as Href} label="로그인" prompt="이미 계정이 있나요?" />}
+    >
+      <InputRow keyboardType="email-address" onChange={setEmail} placeholder="이메일" value={email} />
+      <InputRow onChange={setPassword} placeholder="비밀번호" secure value={password} />
+      <ActionButton label="이메일로 가입" onPress={() => void signUp()} variant="primary" />
+      <Link href={"/signup/terms" as Href} asChild>
+        <Pressable accessibilityRole="button" style={styles.textLink}>
+          <Text style={styles.textLinkLabel}>약관 동의하고 계속 →</Text>
+        </Pressable>
+      </Link>
+    </AuthFrame>
+  );
+}
+
+export function StudentLoginScreen() {
+  const data = useStudentData();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
   async function logIn() {
     const { data: result, error } = await supabase.auth.signInWithPassword({ email, password });
-    data.setMessage(error ? error.message : "로그인했습니다.");
+    data.setMessage(error ? error.message : "로그인했어요.");
     await data.refresh(result.session ?? undefined);
   }
 
   return (
-    <ScreenFrame
-      eyebrow="회원가입"
-      title="이메일로 시작"
-      body="이메일로 가입하고 로그인해요."
-      primaryHref="/signup/terms"
-      primaryLabel="약관으로 이동"
-      secondaryHref="/forgot"
-      secondaryLabel="비밀번호 찾기"
+    <AuthFrame
+      title="다시 만나서 반가워요"
+      subtitle="이메일로 로그인하고 오늘 공부를 이어가요"
       message={data.message}
+      footer={<AuthFooter href={"/signup" as Href} label="가입" prompt="처음이신가요?" />}
     >
-      <InputRow label="이메일" value={email} onChange={setEmail} keyboardType="email-address" />
-      <InputRow label="비밀번호" value={password} onChange={setPassword} secure />
-      <View style={styles.actions}>
-        <ActionButton label="가입 메일 보내기" onPress={() => void signUp()} variant="primary" />
-        <ActionButton label="로그인" onPress={() => void logIn()} variant="secondary" />
-      </View>
-      <StatusBand label="세션" value={data.session ? "있음" : "없음"} />
-    </ScreenFrame>
+      <InputRow keyboardType="email-address" onChange={setEmail} placeholder="이메일" value={email} />
+      <InputRow onChange={setPassword} placeholder="비밀번호" secure value={password} />
+      <ActionButton label="로그인" onPress={() => void logIn()} variant="primary" />
+      <Link href={"/forgot" as Href} asChild>
+        <Pressable accessibilityRole="button" style={styles.textLink}>
+          <Text style={styles.textLinkLabel}>비밀번호 찾기</Text>
+        </Pressable>
+      </Link>
+    </AuthFrame>
   );
 }
 
@@ -529,22 +592,25 @@ function InputRow({
   onChange,
   secure = false,
   keyboardType = "default",
-  autoCapitalize = "none"
+  autoCapitalize = "none",
+  placeholder
 }: {
-  label: string;
+  label?: string;
   value: string;
   onChange: (value: string) => void;
   secure?: boolean;
   keyboardType?: "default" | "email-address";
   autoCapitalize?: "none" | "characters";
+  placeholder?: string;
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
       <TextInput
         autoCapitalize={autoCapitalize}
         keyboardType={keyboardType}
         onChangeText={onChange}
+        placeholder={placeholder}
         placeholderTextColor={colors.muted}
         secureTextEntry={secure}
         style={styles.input}
@@ -786,6 +852,71 @@ const styles = StyleSheet.create({
     color: colors.success
   },
   warningText: {
-    color: "#7A5700"
+    color: tints.warningStrong
+  },
+  authScroll: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: spacing.xl
+  },
+  authPanel: {
+    gap: spacing.md,
+    width: "100%",
+    maxWidth: 480,
+    alignSelf: "center"
+  },
+  appIcon: {
+    width: 64,
+    height: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    backgroundColor: colors.ink,
+    marginBottom: spacing.sm
+  },
+  appIconText: {
+    color: colors.surface,
+    fontSize: 22,
+    fontWeight: "900"
+  },
+  authTitle: {
+    color: colors.ink,
+    fontSize: 28,
+    fontWeight: "900",
+    lineHeight: 34
+  },
+  authSubtitle: {
+    color: colors.muted,
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: spacing.sm
+  },
+  authForm: {
+    gap: spacing.md
+  },
+  authFooter: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: spacing.lg
+  },
+  authFooterText: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  authFooterLink: {
+    color: colors.brand,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  textLink: {
+    alignItems: "center",
+    paddingVertical: spacing.sm
+  },
+  textLinkLabel: {
+    color: colors.brand,
+    fontSize: 14,
+    fontWeight: "800"
   }
 });
