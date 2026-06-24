@@ -69,11 +69,22 @@
 - **카탈로그와 남은 차이(의도)**: 사진 캡처/업로드는 실기기 전용→장수 메타만(기존 stub 유지). "다시 제출"·verdict 강조는 토큰 색(불꽃 주황 비-CTA 미사용, 톤 카드는 tints).
 - **검증**: lint/typecheck/test/build green. 8081에서 /report 게이팅·숙제 화면 무크래시 렌더 확인.
 
-## ▶ 다음 이어갈 지점 (RESUME POINT)
-G1~G4 + 버그픽스 main 반영 완료. 다음 실행은 **G5부터** 동일 루프로 진행.
-각 그룹: main에서 브랜치 → 카탈로그 PNG에 맞춰 겉모습/반응형만 → lint·typecheck·test·build green → squash merge → 이 파일에 기록.
+## G5 — 학생 설정·프로필·알림·구독·회원 탈퇴 ✅
+- **device**: student-mobile (설정/알림/구독/탈퇴 계열).
+- **손본 화면**: `apps/student/src/m7Screens.tsx`(설정 허브·알림·프로필·탈퇴·푸시·약관·시스템), `m6Screens.tsx`(구독), `m5Screens.tsx`(kicker).
+  - 설정 허브: 프로필 헤더 카드 + 섹션 그룹(계정/알림/기타) + 아이콘 행(구분선). 카탈로그 톤.
+  - flame kicker → muted(규칙: 불꽃 주황은 지정 용도만). 하드코딩 hex(#EEF2FF) → `tints.brandSoft`.
+  - **버그 수정**: 설정 허브의 `<Link asChild>` 자식 Pressable에 style 배열 → Slot 에러로 화면이 안 뜨던 것 `StyleSheet.flatten`으로 해결(DOM 검증으로 포착).
+- **기능 유지**: notifications 읽음·딥링크, delete_my_account RPC, push_tokens mock 등록, 구독 mock 전이, 가격 상수(PRICE_STUDENT_PREMIUM_KRW) 그대로.
+- **카탈로그와 남은 차이(의도)**: 페이월(C9)은 풀스크린 카드(바텀시트 대신). 결제·푸시는 mock 유지.
+- **검증**: lint/typecheck/test/build green. 8081에서 /settings 그룹 렌더 확인(버그 수정 포함).
 
-- **G5** 설정·프로필·알림·구독(페이월 mock)·회원 탈퇴 등 시스템 화면. 파일: `m7Screens.tsx`, `m6Screens.tsx`(subscribe) 등.
+## ▶ 다음 이어갈 지점 (RESUME POINT)
+G1~G5 + 버그픽스 main 반영 완료. 다음 실행은 **G6부터** 동일 루프로 진행.
+각 그룹: main에서 브랜치 → 카탈로그 PNG에 맞춰 겉모습/반응형만 → lint·typecheck·test·build green → squash merge → 이 파일에 기록.
+⚠️ **주의**: `<Link asChild>` 자식에 style 배열 금지 → 반드시 `StyleSheet.flatten([...])`(Slot 런타임 에러 유발). 화면 작업 후 8081 DOM 검증 권장.
+
+- **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
 - **G6** 가입/로그인 분리(이메일+비번 유지, 디버그 제거). 파일: `m1Screens.tsx`.
 - **G7** 학생 태블릿(student-tablet 60장): 공용 컴포넌트 device 분기로 2열/넓은 카드 반응형.
 - **G8~G13** 과외쌤(teacher-desktop 36 → teacher-mobile 28/teacher-tablet 18): IA 재구성·인증/온보딩, 대시보드/학생목록/상세, 숙제 출제·검사·핸드셰이크, 리포트 빌더·학부모 공유, 구독·수업료, 반응형.

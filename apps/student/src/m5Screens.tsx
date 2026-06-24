@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.canvas },
   centerText: { color: colors.muted, fontSize: 15, fontWeight: "700" },
-  kicker: { color: colors.flame, fontSize: 13, fontWeight: "900", letterSpacing: 0.4 },
+  kicker: { color: colors.muted, fontSize: 13, fontWeight: "800", letterSpacing: 0.2 },
   title: { color: colors.ink, fontSize: 22, fontWeight: "900", lineHeight: 28 },
   notice: { color: colors.muted, fontSize: 13, fontWeight: "700" },
   card: { gap: spacing.sm, padding: spacing.lg, borderWidth: 1, borderColor: colors.line, borderRadius: radii.card, backgroundColor: colors.surface },

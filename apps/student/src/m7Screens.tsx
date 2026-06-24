@@ -4,7 +4,7 @@ import { Link, router } from "expo-router";
 import { createClient, type Session } from "@supabase/supabase-js";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { colors, radii, spacing } from "@ssamplanner/design-tokens";
+import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
 import {
   ACCOUNT_DELETE_STEPS,
   NOTIF_TYPE_LABELS,
@@ -96,27 +96,66 @@ export function NotificationCenterScreen() {
   );
 }
 
+const SETTINGS_SECTIONS: Array<{ title: string; items: Array<{ href: string; label: string; icon: string; danger?: boolean }> }> = [
+  {
+    title: "계정",
+    items: [
+      { href: "/settings/profile", label: "프로필 편집", icon: "👤" },
+      { href: "/onboarding/disclosure", label: "공개 범위", icon: "🔒" },
+      { href: "/settings/subscription", label: "구독 관리", icon: "✨" }
+    ]
+  },
+  {
+    title: "알림",
+    items: [
+      { href: "/onboarding/push", label: "푸시 알림", icon: "🔔" },
+      { href: "/notifications", label: "알림 센터", icon: "📩" }
+    ]
+  },
+  {
+    title: "기타",
+    items: [
+      { href: "/legal/terms", label: "약관·개인정보", icon: "📄" },
+      { href: "/settings/account/delete", label: "회원 탈퇴", icon: "⚠", danger: true }
+    ]
+  }
+];
+
 export function AccountSettingsScreen() {
-  const items: Array<{ href: string; label: string }> = [
-    { href: "/settings/profile", label: "프로필 편집" },
-    { href: "/onboarding/disclosure", label: "공개 범위" },
-    { href: "/settings/subscription", label: "구독 관리" },
-    { href: "/onboarding/push", label: "푸시 알림" },
-    { href: "/notifications", label: "알림 센터" },
-    { href: "/legal/terms", label: "약관·개인정보" },
-    { href: "/settings/account/delete", label: "회원 탈퇴" }
-  ];
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.kicker}>설정</Text>
       <Text style={styles.title}>계정 · 설정</Text>
-      {items.map((item) => (
-        <Link key={item.href} href={item.href as never} asChild>
-          <Pressable accessibilityRole="button" style={styles.settingRow}>
-            <Text style={[styles.settingLabel, item.href.includes("delete") ? styles.dangerText : null]}>{item.label}</Text>
-            <Text style={styles.chevron}>›</Text>
-          </Pressable>
-        </Link>
+      <Link href={"/settings/profile" as never} asChild>
+        <Pressable accessibilityRole="button" style={styles.profileHeader}>
+          <View style={styles.profileAvatar}>
+            <Text style={styles.profileAvatarText}>👤</Text>
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.profileName}>내 프로필</Text>
+            <Text style={styles.profileHint}>이름·학년·목표를 관리해요</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
+      </Link>
+
+      {SETTINGS_SECTIONS.map((section) => (
+        <View key={section.title} style={styles.settingsGroup}>
+          <Text style={styles.groupLabel}>{section.title}</Text>
+          <View style={styles.groupCard}>
+            {section.items.map((item, index) => (
+              <Link key={item.href} href={item.href as never} asChild>
+                <Pressable
+                  accessibilityRole="button"
+                  style={StyleSheet.flatten([styles.settingItem, index > 0 ? styles.settingItemDivider : null])}
+                >
+                  <Text style={styles.settingIcon}>{item.icon}</Text>
+                  <Text style={[styles.settingLabel, item.danger ? styles.dangerText : null]}>{item.label}</Text>
+                  <Text style={styles.chevron}>›</Text>
+                </Pressable>
+              </Link>
+            ))}
+          </View>
+        </View>
       ))}
     </ScrollView>
   );
@@ -330,7 +369,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.sm },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.sm, backgroundColor: colors.canvas },
   centerText: { color: colors.muted, fontSize: 15, fontWeight: "700" },
-  kicker: { color: colors.flame, fontSize: 13, fontWeight: "900", letterSpacing: 0.4 },
+  kicker: { color: colors.muted, fontSize: 13, fontWeight: "800", letterSpacing: 0.2 },
   title: { color: colors.ink, fontSize: 22, fontWeight: "900", lineHeight: 28 },
   notice: { color: colors.muted, fontSize: 14, fontWeight: "700", textAlign: "center" },
   card: { gap: spacing.xs, padding: spacing.lg, borderWidth: 1, borderColor: colors.line, borderRadius: radii.card, backgroundColor: colors.surface, marginTop: spacing.sm },
@@ -338,7 +377,7 @@ const styles = StyleSheet.create({
   cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "900" },
   cardBody: { color: colors.muted, fontSize: 14, fontWeight: "700", lineHeight: 22 },
   notifRow: { flexDirection: "row", gap: spacing.md, padding: spacing.md, borderWidth: 1, borderColor: colors.line, borderRadius: radii.control, backgroundColor: colors.surface },
-  notifUnread: { borderColor: colors.brand, backgroundColor: "#EEF2FF" },
+  notifUnread: { borderColor: colors.brand, backgroundColor: tints.brandSoft },
   notifBadge: { color: colors.brand, fontSize: 12, fontWeight: "900" },
   notifBody: { flex: 1, gap: 2 },
   notifTitle: { color: colors.ink, fontSize: 15, fontWeight: "800" },
@@ -354,5 +393,40 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: colors.muted, fontSize: 15, fontWeight: "900" },
   dangerButton: { minHeight: 52, alignItems: "center", justifyContent: "center", borderRadius: radii.button, backgroundColor: colors.danger, marginTop: spacing.sm },
   dangerButtonText: { color: colors.surface, fontSize: 15, fontWeight: "900" },
-  disabled: { opacity: 0.5 }
+  disabled: { opacity: 0.5 },
+  flex: { flex: 1 },
+  profileHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radii.card,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    marginTop: spacing.sm
+  },
+  profileAvatar: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 24,
+    backgroundColor: tints.brandSoft
+  },
+  profileAvatarText: { fontSize: 22 },
+  profileName: { color: colors.ink, fontSize: 16, fontWeight: "900" },
+  profileHint: { color: colors.muted, fontSize: 13, fontWeight: "700" },
+  settingsGroup: { gap: spacing.xs, marginTop: spacing.md },
+  groupLabel: { color: colors.muted, fontSize: 12, fontWeight: "800", paddingHorizontal: spacing.xs },
+  groupCard: {
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    overflow: "hidden"
+  },
+  settingItem: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg },
+  settingItemDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  settingIcon: { fontSize: 18, width: 24, textAlign: "center" }
 });

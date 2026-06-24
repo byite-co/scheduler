@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.canvas },
   centerText: { color: colors.muted, fontSize: 15, fontWeight: "700" },
-  kicker: { color: colors.flame, fontSize: 13, fontWeight: "900", letterSpacing: 0.4 },
+  kicker: { color: colors.muted, fontSize: 13, fontWeight: "800", letterSpacing: 0.2 },
   title: { color: colors.ink, fontSize: 24, fontWeight: "900" },
   price: { color: colors.brand, fontSize: 18, fontWeight: "900" },
   notice: { color: colors.muted, fontSize: 13, fontWeight: "700" },
