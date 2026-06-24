@@ -139,8 +139,16 @@
 - **카탈로그와 남은 차이/범위**: 수업 리포트(B6)는 주간(B7)과 동형이라 미분리. 빌더 차트는 토큰 색.
 - **검증**: lint/typecheck/test/build green. 3000에서 /reports/weekly 사이드바 렌더 확인.
 
+## G12 — 과외쌤 구독·결제 + 수업료 + 알림 사이드바 통합 ✅
+- **device**: teacher-desktop (31·32·B11).
+- **손본 화면**: `apps/teacher/src/app/m6.tsx`(앱 구독료·수업료 트래커), `m7.tsx`(알림 센터) → 모두 사이드바 셸 전환.
+  - 앱 구독료(active×단가·던닝·인보이스, mock 전이) / 수업료 트래커(수기, "결제 아님·구독료와 별개" 경고 유지).
+  - 알림 센터(읽음·딥링크). session 상태 추가해 셸 데이터 구성.
+- **기능 유지**: mock_set_teacher_subscription·generate_teacher_invoice·lesson_fees·notifications 그대로. **가격 상수·앱구독료↔수업료 분리 무변경**.
+- **검증**: lint/typecheck/test/build green. 3000에서 /billing(사이드바+분리 카피)·/lesson-fees 렌더 확인.
+
 ## ▶ 다음 이어갈 지점 (RESUME POINT)
-학생 앱 완료 + 과외쌤 G8~G11 완료. 다음 실행은 **G12부터**.
+학생 앱 완료 + 과외쌤 G8~G12 완료(전 화면 사이드바 IA). 다음 실행은 **G13(반응형)**.
 각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
 ⚠️ 과외쌤 m4 패턴: `import { TeacherShell, TeacherShellData } from "./m1"` 후 `shellData={session,loading,message,profile:null,setMessage,refresh}` 구성해 래핑(m5~m7도 동일 적용 권장).
 

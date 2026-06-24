@@ -13,6 +13,8 @@ import {
 } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
+import { TeacherShell, type TeacherShellData } from "./m1";
+
 type InvoiceRow = Database["public"]["Tables"]["billing_invoices"]["Row"];
 type LessonFeeRow = Database["public"]["Tables"]["lesson_fees"]["Row"];
 
@@ -83,19 +85,33 @@ export function TeacherBilling() {
           ? "border-warning text-warning"
           : "border-line text-muted";
 
-  return (
-    <main className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-6 md:px-8">
-        <header className="flex flex-col gap-2 border-b border-line pb-5">
-          <p className="text-sm font-extrabold text-brand">구독 · 결제 (앱 구독료)</p>
-          <h1 className="text-2xl font-extrabold">앱 구독료</h1>
-          <p className="text-sm font-bold text-muted" aria-live="polite">{loading ? "불러오는 중…" : message}</p>
-          <p className="text-xs font-bold text-muted">
-            ※ 이 구독료는 학생이 내는 <a className="underline" href="/lesson-fees">수업·수업료</a>와 완전히 별개입니다.
-          </p>
-        </header>
+  const shellData: TeacherShellData = {
+    session,
+    loading,
+    message,
+    profile: null,
+    setMessage,
+    refresh: async () => {
+      await refresh();
+    }
+  };
 
-        <section className={`grid gap-2 rounded-card border bg-surface p-5 ${toneClass}`}>
+  return (
+    <TeacherShell
+      active="/billing"
+      title="앱 구독료"
+      subtitle="우리에게 내는 앱 구독료예요. 학생이 내는 수업·수업료와는 완전히 별개입니다."
+      data={shellData}
+    >
+      <p className="text-xs font-bold text-muted">
+        ※ 수업·수업료 기록은{" "}
+        <a className="underline" href="/lesson-fees">
+          수업료 트래커
+        </a>
+        에서 따로 관리해요.
+      </p>
+
+      <section className={`grid gap-2 rounded-card border bg-surface p-5 ${toneClass}`}>
           <p className="text-lg font-extrabold">{billing.label}</p>
           <p className="text-sm font-bold text-muted">{billing.reason}</p>
           <p className="font-mono text-sm font-bold text-ink">
@@ -147,9 +163,8 @@ export function TeacherBilling() {
           )}
         </section>
 
-        {!session && !loading ? <p className="text-sm font-bold text-muted">로그인 후 청구 내역을 볼 수 있습니다.</p> : null}
-      </div>
-    </main>
+      {!session && !loading ? <p className="text-sm font-bold text-muted">로그인 후 청구 내역을 볼 수 있습니다.</p> : null}
+    </TeacherShell>
   );
 }
 
@@ -210,19 +225,29 @@ export function TeacherLessonFees() {
     if (!error) await refresh();
   }
 
-  return (
-    <main className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-6 md:px-8">
-        <header className="flex flex-col gap-2 border-b border-line pb-5">
-          <p className="text-sm font-extrabold text-brand">수업 · 수업료</p>
-          <h1 className="text-2xl font-extrabold">수업료 트래커</h1>
-          <p className="rounded-control bg-warning/10 px-3 py-2 text-sm font-bold text-warning">
-            결제 처리가 아니라 수기 기록입니다. 앱 구독료와 별개예요.
-          </p>
-          <p className="text-sm font-bold text-muted" aria-live="polite">{loading ? "불러오는 중…" : message}</p>
-        </header>
+  const shellData: TeacherShellData = {
+    session,
+    loading,
+    message,
+    profile: null,
+    setMessage,
+    refresh: async () => {
+      await refresh();
+    }
+  };
 
-        <section className="grid grid-cols-3 gap-3">
+  return (
+    <TeacherShell
+      active="/billing"
+      title="수업료 트래커"
+      subtitle="학생이 내는 수업료를 수기로 기록해요. (결제 처리 아님 · 앱 구독료와 별개)"
+      data={shellData}
+    >
+      <p className="rounded-control bg-warning/10 px-3 py-2 text-sm font-bold text-warning">
+        결제 처리가 아니라 수기 기록입니다. 앱 구독료와 별개예요.
+      </p>
+
+      <section className="grid grid-cols-3 gap-3">
           <SummaryCard label="합계" value={formatKrw(summary.totalAmount)} />
           <SummaryCard label="받음" value={formatKrw(summary.paidAmount)} />
           <SummaryCard label={`미수금 ${summary.unpaidCount}건`} value={formatKrw(summary.unpaidAmount)} />
@@ -258,8 +283,7 @@ export function TeacherLessonFees() {
             </div>
           ))}
         </section>
-      </div>
-    </main>
+    </TeacherShell>
   );
 }
 

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type Session } from "@supabase/supabase-js";
 
 import { NOTIF_TYPE_LABELS, unreadCount, validateDeleteConfirmation, type NotifType } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
+
+import { TeacherShell, type TeacherShellData } from "./m1";
 
 type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
 
@@ -16,12 +18,14 @@ const supabase = createClient<Database>(
 
 export function TeacherNotificationCenter() {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("세션 확인 중");
 
   const refresh = useCallback(async () => {
     setLoading(true);
     const active = (await supabase.auth.getSession()).data.session;
+    setSession(active);
     if (!active) {
       setMessage("로그인이 필요합니다.");
       setLoading(false);
@@ -47,14 +51,24 @@ export function TeacherNotificationCenter() {
     await refresh();
   }
 
+  const shellData: TeacherShellData = {
+    session,
+    loading,
+    message,
+    profile: null,
+    setMessage,
+    refresh: async () => {
+      await refresh();
+    }
+  };
+
   return (
-    <main className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto grid w-full max-w-3xl gap-4 px-4 py-6 md:px-8">
-        <header className="flex flex-col gap-1 border-b border-line pb-5">
-          <p className="text-sm font-extrabold text-brand">알림 센터</p>
-          <h1 className="text-2xl font-extrabold">알림 {unreadCount(notifications) > 0 ? `· 안 읽음 ${unreadCount(notifications)}` : ""}</h1>
-          <p className="text-sm font-bold text-muted" aria-live="polite">{loading ? "불러오는 중…" : message}</p>
-        </header>
+    <TeacherShell
+      active="/settings"
+      title={`알림${unreadCount(notifications) > 0 ? ` · 안 읽음 ${unreadCount(notifications)}` : ""}`}
+      subtitle="숙제 제출·검사·연결 요청 알림이 모여요."
+      data={shellData}
+    >
         {!loading && notifications.length === 0 ? (
           <div className="rounded-card border border-line bg-surface p-6 text-sm font-bold text-muted">아직 알림이 없습니다.</div>
         ) : null}
@@ -72,8 +86,7 @@ export function TeacherNotificationCenter() {
             </span>
           </button>
         ))}
-      </div>
-    </main>
+    </TeacherShell>
   );
 }
 
