@@ -65,9 +65,9 @@ export default function ParentReportPage() {
     <main className="min-h-screen bg-canvas text-ink">
       <div className="mx-auto grid w-full max-w-2xl gap-5 px-4 py-8">
         <header className="grid gap-1 border-b border-line pb-5">
-          <p className="text-sm font-extrabold text-brand">{copy.title}</p>
-          <h1 className="text-2xl font-extrabold">
-            {report.period_start} ~ {report.period_end}
+          <p className="text-base font-extrabold text-brand">쌤플래너</p>
+          <h1 className="mt-2 text-2xl font-extrabold">
+            {report.period_start} ~ {report.period_end} 주간 리포트
           </h1>
           <p className="text-sm font-bold text-muted">{copy.body}</p>
         </header>

@@ -11,6 +11,8 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
+import { TeacherShell, type TeacherShellData } from "./m1";
+
 type ConnectionRow = Database["public"]["Tables"]["connections"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type ReportRow = Database["public"]["Tables"]["reports"]["Row"];
@@ -138,18 +140,25 @@ export function TeacherReportBuilder() {
     await loadStudent(studentId);
   }
 
-  return (
-    <main className="min-h-screen bg-canvas text-ink">
-      <div className="mx-auto grid w-full max-w-5xl gap-6 px-4 py-6 md:px-8">
-        <header className="flex flex-col gap-2 border-b border-line pb-5">
-          <p className="text-sm font-extrabold text-brand">주간 리포트</p>
-          <h1 className="text-2xl font-extrabold">리포트 빌더 → 학부모 공유</h1>
-          <p className="text-sm font-bold text-muted" aria-live="polite">
-            {loading ? "불러오는 중…" : message}
-          </p>
-        </header>
+  const shellData: TeacherShellData = {
+    session,
+    loading,
+    message,
+    profile: null,
+    setMessage,
+    refresh: async () => {
+      await refresh();
+    }
+  };
 
-        <section className="flex flex-wrap gap-2">
+  return (
+    <TeacherShell
+      active="/reports/weekly"
+      title="주간 리포트"
+      subtitle="이번 주 공부를 모아 학부모에게 보낼 리포트를 만들어요. (공개범위 적용)"
+      data={shellData}
+    >
+      <section className="flex flex-wrap gap-2">
           {students.map((student) => (
             <button
               key={student.id}
@@ -253,7 +262,6 @@ export function TeacherReportBuilder() {
             ))}
           </section>
         ) : null}
-      </div>
-    </main>
+    </TeacherShell>
   );
 }

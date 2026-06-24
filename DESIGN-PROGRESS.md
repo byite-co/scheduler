@@ -130,8 +130,17 @@
 - **카탈로그와 남은 차이/범위**: **숙제 출제(B4, 13)** 화면은 미구현(새 라우트 `/students/[id]/homework/new` + todos source=teacher 작성 — 별도). 핸드셰이크/학생별 설정은 G8에서 이미 사이드바 IA 사용 중.
 - **검증**: lint/typecheck/test/build green. 3000에서 /homework/review가 사이드바와 함께 렌더 확인.
 
+## G11 — 과외쌤 리포트 빌더(B7) + 학부모 웹뷰 ✅
+- **device**: teacher-desktop (16 B7) + 학부모 웹뷰(J16).
+- **손본 화면**: `apps/teacher/src/app/m5.tsx`(리포트 빌더 → 사이드바 셸 전환, active="/reports/weekly"), `app/r/[token]/page.tsx`(브랜드 워드마크 추가).
+  - 리포트 빌더: 학생 선택 → 주간 공부(공개범위 적용) → AI 초안(mock) → 담을 과목·코멘트 → 저장+공유 링크 발급 → 히스토리/만료. 콘텐츠 유지, 셸만 사이드바화.
+  - 학부모 웹뷰: 인증 없이 토큰 전용 열람(만료/조회기록 RPC) 그대로 + "쌤플래너" 브랜드.
+- **기능 유지**: create_report_share·get_shared_report·공개범위(v_teacher_study_sessions) RLS 무변경. AI 초안 mock.
+- **카탈로그와 남은 차이/범위**: 수업 리포트(B6)는 주간(B7)과 동형이라 미분리. 빌더 차트는 토큰 색.
+- **검증**: lint/typecheck/test/build green. 3000에서 /reports/weekly 사이드바 렌더 확인.
+
 ## ▶ 다음 이어갈 지점 (RESUME POINT)
-학생 앱 완료 + 과외쌤 G8·G9·G10 완료(검사 화면 사이드바 통합). 다음 실행은 **G11부터**.
+학생 앱 완료 + 과외쌤 G8~G11 완료. 다음 실행은 **G12부터**.
 각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
 ⚠️ 과외쌤 m4 패턴: `import { TeacherShell, TeacherShellData } from "./m1"` 후 `shellData={session,loading,message,profile:null,setMessage,refresh}` 구성해 래핑(m5~m7도 동일 적용 권장).
 
