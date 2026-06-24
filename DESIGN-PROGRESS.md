@@ -147,8 +147,26 @@
 - **기능 유지**: mock_set_teacher_subscription·generate_teacher_invoice·lesson_fees·notifications 그대로. **가격 상수·앱구독료↔수업료 분리 무변경**.
 - **검증**: lint/typecheck/test/build green. 3000에서 /billing(사이드바+분리 카피)·/lesson-fees 렌더 확인.
 
-## ▶ 다음 이어갈 지점 (RESUME POINT)
-학생 앱 완료 + 과외쌤 G8~G12 완료(전 화면 사이드바 IA). 다음 실행은 **G13(반응형)**.
+## G13 — 과외쌤 모바일/태블릿 반응형 ✅
+- **device**: teacher-mobile (28장) / teacher-tablet (18장).
+- **손본 화면**: `apps/teacher/src/app/m1.tsx`(`TeacherShell`).
+  - 데스크탑/태블릿(≥768px): 좌측 사이드바 IA(기존).
+  - **모바일(<768px): 사이드바 숨김 + 고정 하단 탭**(홈/학생/검사/리포트/정산/설정, 짧은 라벨+아이콘) + 상단 "쌤플래너" 워드마크. 섹션 하단 여백(pb-24)으로 탭 가림 방지.
+  - 인증 스플릿(`TeacherAuthLayout`)은 모바일에서 브랜드 패널 숨김→폼만(이미 반응형).
+  - 전 과외쌤 화면이 `TeacherShell`을 쓰므로 한 곳 수정으로 일괄 반응형(중복 없음).
+- **기능 유지**: 레이아웃만 device 분기.
+- **검증**: lint/typecheck/build green. 3000을 375px로 리사이즈해 하단 탭(top 761/bottom 812) 고정·사이드바 숨김 확인.
+
+## 🎉 전체 완료 요약
+- **학생 앱(모바일+태블릿)**: 셸+홈·플래너·타이머/집중·또래/기록·숙제/리포트·시스템·가입/로그인·태블릿 반응형 — 카탈로그화 완료.
+- **과외쌤 앱(데스크탑+모바일/태블릿)**: IA 사이드바·인증·대시보드·학생 관리·숙제 검사·리포트/학부모 웹뷰·구독/수업료/알림·반응형 — 카탈로그화 완료.
+
+## ▶ 잔여(후속 라운드, 디자인 외 데이터 작업 포함)
+- 과외쌤 **B3 학생 상세 탭(08~12)**: `/students/[id]` 라우트 + 공개범위 게이팅 데이터 와이어링(큰 작업).
+- 과외쌤 **B4 숙제 출제(13)**: `/students/[id]/homework/new` + todos(source=teacher) 작성 화면.
+- 대시보드 **집중 관리 테이블**(학생 study 데이터 join).
+- 학생 **F4 집중 요약 / F5 집중 리포트** 라이트 화면 다듬기.
+- ⚠️ 위는 새 라우트/데이터 와이어링이 필요해 "겉모습만"을 넘어서는 부분 — 진행 시 RLS/공개범위/익명성 규칙 준수.
 각 그룹: main에서 브랜치 → 카탈로그 PNG → green → squash merge → 기록.
 ⚠️ 과외쌤 m4 패턴: `import { TeacherShell, TeacherShellData } from "./m1"` 후 `shellData={session,loading,message,profile:null,setMessage,refresh}` 구성해 래핑(m5~m7도 동일 적용 권장).
 

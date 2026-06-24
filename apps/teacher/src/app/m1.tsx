@@ -459,13 +459,13 @@ export function TeacherStudentSettingsContent() {
   );
 }
 
-const TEACHER_NAV: Array<{ href: string; label: string; icon: string }> = [
-  { href: "/", label: "대시보드", icon: "▦" },
-  { href: "/students", label: "학생 관리", icon: "👥" },
-  { href: "/homework/review", label: "숙제 검사", icon: "✓" },
-  { href: "/reports/weekly", label: "리포트", icon: "📄" },
-  { href: "/billing", label: "구독·정산", icon: "₩" },
-  { href: "/settings", label: "설정", icon: "⚙" }
+const TEACHER_NAV: Array<{ href: string; label: string; short: string; icon: string }> = [
+  { href: "/", label: "대시보드", short: "홈", icon: "▦" },
+  { href: "/students", label: "학생 관리", short: "학생", icon: "👥" },
+  { href: "/homework/review", label: "숙제 검사", short: "검사", icon: "✓" },
+  { href: "/reports/weekly", label: "리포트", short: "리포트", icon: "📄" },
+  { href: "/billing", label: "구독·정산", short: "정산", icon: "₩" },
+  { href: "/settings", label: "설정", short: "설정", icon: "⚙" }
 ];
 
 function isNavActive(itemHref: string, active?: string): boolean {
@@ -539,7 +539,10 @@ export function TeacherShell({
           </div>
         </aside>
 
-        <section className="flex min-w-0 flex-1 flex-col gap-5 px-4 py-6 md:px-8">
+        <section className="flex min-w-0 flex-1 flex-col gap-5 px-4 pb-24 pt-6 md:px-8 md:pb-6">
+          <a href="/" className="text-base font-extrabold text-brand md:hidden">
+            쌤플래너
+          </a>
           <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <h1 className="text-2xl font-extrabold tracking-normal md:text-3xl">{title}</h1>
@@ -551,6 +554,24 @@ export function TeacherShell({
           {children}
         </section>
       </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-line bg-surface md:hidden">
+        {TEACHER_NAV.map((item) => {
+          const activeItem = isNavActive(item.href, active);
+          return (
+            <a
+              key={item.href}
+              href={item.href}
+              className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-bold ${
+                activeItem ? "text-brand" : "text-muted"
+              }`}
+            >
+              <span className="text-base leading-none">{item.icon}</span>
+              {item.short}
+            </a>
+          );
+        })}
+      </nav>
     </main>
   );
 }
