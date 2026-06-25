@@ -1611,16 +1611,10 @@ function ActionButton({
   );
 }
 
-function EmptyText({ children, icon = "note" }: { children: ReactNode; icon?: IconName }) {
-  // 카드 내부 빈 상태: 옅은 아이콘 배지 + 안내문(가운데 정렬)로 통일.
-  return (
-    <View style={styles.emptyBlock}>
-      <View style={styles.emptyIcon}>
-        <AppIcon name={icon} size={18} color={colors.muted} />
-      </View>
-      <Text style={styles.emptyText}>{children}</Text>
-    </View>
-  );
+// 카드 내부의 작은 빈 상태/조건부 안내는 간결한 한 줄 텍스트로 유지한다.
+// (아이콘+안내+CTA의 큰 빈 상태는 ZeroTodoCard·EmptyStatePanel 등 화면 전체용에만 사용)
+function EmptyText({ children }: { children: ReactNode }) {
+  return <Text style={styles.emptyText}>{children}</Text>;
 }
 
 function parsePlannerView(value: string | string[] | undefined): PlannerView {
@@ -1894,25 +1888,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 23
   },
-  emptyBlock: {
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingVertical: spacing.lg
-  },
-  emptyIcon: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radii.card,
-    backgroundColor: tints.brandSoft
-  },
   emptyText: {
     color: colors.muted,
     fontSize: 14,
     fontWeight: "800",
-    lineHeight: 21,
-    textAlign: "center"
+    lineHeight: 21
   },
   mutedText: {
     color: colors.muted
