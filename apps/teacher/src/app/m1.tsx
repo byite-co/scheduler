@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import {
+  ChevronRight,
   ClipboardCheck,
   FileText,
   LayoutDashboard,
@@ -194,7 +195,12 @@ function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] 
 
       setStudents(
         ids
-          .map((id) => ({ id, name: nameById.get(id) ?? "학생", minutes: minutesById.get(id) ?? 0 }))
+          .map((id) => ({
+            id,
+            // 이름이 있으면 이름, 비어 있을 때만 식별자 일부를 폴백으로.
+            name: (nameById.get(id) ?? "").trim() || `학생 ${shortId(id)}`,
+            minutes: minutesById.get(id) ?? 0
+          }))
           .sort((a, b) => a.minutes - b.minutes)
       );
     }
@@ -207,40 +213,61 @@ function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] 
   return students;
 }
 
+// 집중 관리 상태: 신규·무데이터 학생은 '주의'로 깃발하지 않는다(기록 없음=중립).
+// 이번 주 공부시간 기준(0=기록 없음, <60분=주의, 그 이상=양호).
+function focusStatus(minutes: number): { label: string; className: string } {
+  if (minutes <= 0) return { label: "기록 없음", className: "bg-canvas text-muted" };
+  if (minutes < 60) return { label: "주의", className: "bg-warning/10 text-[#7A5700]" };
+  return { label: "양호", className: "bg-success/10 text-success" };
+}
+
+function formatStudyMinutes(minutes: number): string {
+  if (minutes <= 0) return "이번 주 기록 없음";
+  return `이번 주 ${Math.floor(minutes / 60)}시간 ${minutes % 60}분`;
+}
+
+function StudentAvatar({ name }: { name: string }) {
+  return (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-chip bg-brand/10 text-sm font-extrabold text-brand">
+      {name.slice(0, 1)}
+    </span>
+  );
+}
+
+function StudentRow({ student }: { student: DashboardStudent }) {
+  const status = focusStatus(student.minutes);
+  return (
+    <a
+      href={`/students/${student.id}`}
+      className="flex items-center justify-between gap-3 rounded-control border border-line bg-surface px-4 py-3 transition-colors hover:border-brand hover:bg-canvas"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <StudentAvatar name={student.name} />
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-extrabold text-ink">{student.name}</span>
+          <span className="text-xs font-bold text-muted">{formatStudyMinutes(student.minutes)}</span>
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        <span className={`whitespace-nowrap rounded-chip px-2.5 py-1 text-xs font-extrabold ${status.className}`}>
+          {status.label}
+        </span>
+        <ChevronRight className="h-4 w-4 text-muted" strokeWidth={2} />
+      </span>
+    </a>
+  );
+}
+
 function StudentFocusTable({ students }: { students: DashboardStudent[] }) {
-  if (!students.length) return null;
+  // '집중 관리가 필요한 학생'은 실제로 기록이 있고 저조한 학생만(기록 없음·양호 제외).
+  const needsAttention = students.filter((student) => student.minutes > 0 && student.minutes < 60);
+  if (!needsAttention.length) return null;
   return (
     <Panel title="집중 관리가 필요한 학생">
-      <div className="flex flex-col gap-1">
-        {students.slice(0, 6).map((student) => {
-          const risk = student.minutes < 60;
-          return (
-            <a
-              key={student.id}
-              href={`/students/${student.id}`}
-              className="flex items-center justify-between gap-3 rounded-control px-2 py-2 hover:bg-canvas"
-            >
-              <span className="flex items-center gap-3">
-                <span className="flex h-8 w-8 items-center justify-center rounded-chip bg-canvas text-sm font-extrabold text-muted">
-                  {student.name.slice(0, 1)}
-                </span>
-                <span className="text-sm font-bold">{student.name}</span>
-              </span>
-              <span className="flex items-center gap-3">
-                <span className="font-mono text-sm font-bold text-muted">
-                  {Math.floor(student.minutes / 60)}시간 {student.minutes % 60}분
-                </span>
-                <span
-                  className={`rounded-chip px-2 py-0.5 text-xs font-extrabold ${
-                    risk ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
-                  }`}
-                >
-                  {risk ? "주의" : "양호"}
-                </span>
-              </span>
-            </a>
-          );
-        })}
+      <div className="flex flex-col gap-2">
+        {needsAttention.slice(0, 6).map((student) => (
+          <StudentRow key={student.id} student={student} />
+        ))}
       </div>
     </Panel>
   );
@@ -286,11 +313,21 @@ export function TeacherDashboardContent() {
           <StudentFocusTable students={dashStudents} />
           <Panel title="학생 연결 현황">
             {activeCount ? (
-              <ConnectionList data={data} status="active" />
+              <div className="flex flex-col gap-2">
+                {dashStudents.map((student) => (
+                  <StudentRow key={student.id} student={student} />
+                ))}
+              </div>
             ) : pendingCount ? (
               <ConnectionList data={data} status="pending" />
             ) : (
-              <EmptyState>아직 연결된 학생이 없어요. ‘+ 학생 초대’로 코드를 보내보세요.</EmptyState>
+              <EmptyStatePanel
+                icon={<Users className="h-6 w-6 text-brand" strokeWidth={2} />}
+                title="아직 연결된 학생이 없어요"
+                body="‘+ 학생 초대’로 코드를 보내면 학생이 입력해 연결돼요."
+                ctaHref="/students/invite"
+                ctaLabel="학생 초대하기"
+              />
             )}
           </Panel>
         </div>
@@ -323,6 +360,8 @@ export function TeacherStudentsContent() {
   const data = useTeacherData();
   useRequireOnboarding(data);
   const pending = data.connections.filter((connection) => connection.status === "pending");
+  const roster = useDashboardStudents(data.connections);
+  const activeCount = data.connections.filter((connection) => connection.status === "active").length;
 
   return (
     <TeacherShell
@@ -344,8 +383,22 @@ export function TeacherStudentsContent() {
           <ConnectionList data={data} status="pending" />
         </Panel>
       ) : null}
-      <Panel title="연결된 학생">
-        <ConnectionList data={data} status="active" />
+      <Panel title={`연결된 학생${activeCount ? ` ${activeCount}명` : ""}`}>
+        {activeCount ? (
+          <div className="flex flex-col gap-2">
+            {roster.map((student) => (
+              <StudentRow key={student.id} student={student} />
+            ))}
+          </div>
+        ) : (
+          <EmptyStatePanel
+            icon={<Users className="h-6 w-6 text-brand" strokeWidth={2} />}
+            title="아직 연결된 학생이 없어요"
+            body="‘+ 학생 초대’로 코드를 보내면 학생이 입력해 연결돼요."
+            ctaHref="/students/invite"
+            ctaLabel="학생 초대하기"
+          />
+        )}
       </Panel>
       <div className="flex flex-wrap gap-2">
         <a
@@ -1207,6 +1260,37 @@ function StatusPill({
 
 function EmptyState({ children }: { children: ReactNode }) {
   return <p className="text-sm leading-6 text-muted">{children}</p>;
+}
+
+// 카탈로그 빈 상태 패턴: 아이콘 + 안내문 + 단일 CTA.
+function EmptyStatePanel({
+  icon,
+  title,
+  body,
+  ctaHref,
+  ctaLabel
+}: {
+  icon: ReactNode;
+  title: string;
+  body: string;
+  ctaHref?: string;
+  ctaLabel?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-control border border-dashed border-line bg-canvas px-6 py-10 text-center">
+      <span className="flex h-12 w-12 items-center justify-center rounded-card bg-brand/10">{icon}</span>
+      <p className="text-base font-extrabold text-ink">{title}</p>
+      <p className="max-w-sm text-sm font-bold leading-6 text-muted">{body}</p>
+      {ctaHref && ctaLabel ? (
+        <a
+          href={ctaHref}
+          className="mt-1 inline-flex min-h-10 items-center justify-center rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white"
+        >
+          {ctaLabel}
+        </a>
+      ) : null}
+    </div>
+  );
 }
 
 function createInviteCode(): string {
