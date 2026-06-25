@@ -12,9 +12,15 @@ import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
 import {
   FOCUS_CAMERA_PRIVACY_COPY,
   FOCUS_CAMERA_TIMER_ONLY_COPY,
+  FOCUS_DROWSINESS_RULES,
   getFocusCameraFallbackTitle,
+  getFocusDrowsinessLabel,
   getSignalsFromMediaPipeFaceLandmarker,
+  initFocusDrowsinessState,
+  reduceFocusDrowsiness,
   type FocusDrowsinessResult,
+  type FocusDrowsinessState,
+  type FocusDrowsinessVerdict,
   type FocusFaceSignals
 } from "@ssamplanner/shared";
 // 타입만 사용한다(런타임은 CDN ESM에서 로드 — Metro가 mediapipe 번들을 변환하지 못함).
@@ -66,9 +72,12 @@ function formatDeg(value: number | null): string {
   return typeof value === "number" ? `${Math.round(value)}°` : "—";
 }
 
+type VerdictView = { verdict: FocusDrowsinessVerdict; score: number; reasons: string[] };
+
 export function FocusCameraPanel({ active, style }: FocusCameraProps) {
   const [status, setStatus] = useState<DetectStatus>("loading");
   const [signals, setSignals] = useState<FocusFaceSignals | null>(null);
+  const [verdictView, setVerdictView] = useState<VerdictView>({ verdict: "calibrating", score: 0, reasons: [] });
 
   const containerRef = useRef<View | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -78,6 +87,9 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
     null
   );
   const rafRef = useRef<number | null>(null);
+  // 2단계: 시간 기반 졸음 판단 상태(개인 기준선·지속시간·디바운스). 프레임마다 누적된다.
+  const drowsyStateRef = useRef<FocusDrowsinessState>(initFocusDrowsinessState());
+  const lastSampleMsRef = useRef<number>(0);
 
   useEffect(() => {
     if (!active) return;
@@ -114,15 +126,22 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
       }
     }
 
-    function loop() {
+    function loop(now: number) {
       const video = videoRef.current;
       const landmarker = landmarkerRef.current;
       if (cancelled || !video || !landmarker) return;
-      if (video.readyState >= 2) {
+      // 규칙5: 매 프레임이 아니라 권장 간격(약 10fps)으로만 측정·판정해 안정화.
+      if (now - lastSampleMsRef.current >= FOCUS_DROWSINESS_RULES.sampleIntervalMs && video.readyState >= 2) {
+        lastSampleMsRef.current = now;
         try {
           // 프레임을 온디바이스에서 분석 → 숫자 신호만 추출하고 프레임은 즉시 버린다(저장/전송 없음).
-          const result = landmarker.detectForVideo(video, performance.now());
-          setSignals(getSignalsFromMediaPipeFaceLandmarker(result as never));
+          const result = landmarker.detectForVideo(video, now);
+          const nextSignals = getSignalsFromMediaPipeFaceLandmarker(result as never);
+          setSignals(nextSignals);
+          // 시간/개인화/디바운스 기반 졸음 판단(이미지 아닌 숫자만으로).
+          const nextState = reduceFocusDrowsiness(drowsyStateRef.current, { atMs: now, signals: nextSignals });
+          drowsyStateRef.current = nextState;
+          setVerdictView({ verdict: nextState.verdict, score: nextState.score, reasons: nextState.reasons });
         } catch {
           // 한 프레임 실패는 무시하고 계속.
         }
@@ -135,6 +154,10 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
         if (!cancelled) setStatus("unsupported");
         return;
       }
+      // 세션 시작마다 졸음 판단 상태 초기화(개인 기준선 다시 학습).
+      drowsyStateRef.current = initFocusDrowsinessState();
+      lastSampleMsRef.current = 0;
+      setVerdictView({ verdict: "calibrating", score: 0, reasons: [] });
       setStatus("loading");
       try {
         const vision = await loadVisionModule();
@@ -179,7 +202,7 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
         await video.play();
         if (cancelled) return;
         setStatus("running");
-        loop();
+        rafRef.current = requestAnimationFrame(loop);
       } catch (err) {
         if (cancelled) return;
         const name = (err as { name?: string })?.name ?? "";
@@ -248,10 +271,15 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
 
       <View style={styles.readoutRow}>
         <View style={styles.statusDotWrap}>
-          <View style={[styles.statusDot, facePresent ? styles.statusDotOn : styles.statusDotWarn]} />
-          <Text style={styles.statusText}>{facePresent ? "얼굴 인식 중" : "얼굴이 보이지 않아요"}</Text>
+          <View style={[styles.statusDot, verdictDotStyle(verdictView.verdict)]} />
+          <Text style={styles.statusText}>{getFocusDrowsinessLabel(verdictView.verdict)}</Text>
         </View>
+        <Text style={styles.scoreText}>점수 {verdictView.score.toFixed(2)}</Text>
       </View>
+
+      {verdictView.reasons.length ? (
+        <Text style={styles.reasonText}>{verdictView.reasons.join(" · ")}</Text>
+      ) : null}
 
       {facePresent && signals ? (
         <View style={styles.metricsRow}>
@@ -262,11 +290,15 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
         </View>
       ) : (
         <Text style={styles.hintText}>
-          {status === "loading" ? "얼굴 인식을 준비하고 있어요…" : "카메라 앞에 얼굴을 보여 주세요."}
+          {verdictView.verdict === "measuring_difficult"
+            ? "얼굴이 보이지 않거나 주변이 어두워요."
+            : status === "loading"
+              ? "얼굴 인식을 준비하고 있어요…"
+              : "카메라 앞에 얼굴을 보여 주세요."}
         </Text>
       )}
 
-      <Text style={styles.debugNote}>* 1단계 디버그 표시 — 졸음 판단·기록은 다음 단계예요.</Text>
+      <Text style={styles.debugNote}>* 2단계 디버그 — 졸음 판단까지. 알림·기록은 다음 단계예요.</Text>
 
       <View style={styles.privacyNotice}>
         <Text style={styles.privacyTitle}>{FOCUS_CAMERA_PRIVACY_COPY}</Text>
@@ -276,6 +308,21 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
       </View>
     </View>
   );
+}
+
+function verdictDotStyle(verdict: FocusDrowsinessVerdict) {
+  switch (verdict) {
+    case "focused":
+      return styles.statusDotOn;
+    case "suspect":
+      return styles.statusDotWarn;
+    case "drowsy":
+      return styles.statusDotDanger;
+    case "measuring_difficult":
+      return styles.statusDotMuted;
+    case "calibrating":
+      return styles.statusDotBrand;
+  }
 }
 
 export function FocusCameraPermissionGate({ style }: PermissionGateProps) {
@@ -365,10 +412,31 @@ const styles = StyleSheet.create({
   statusDotWarn: {
     backgroundColor: colors.warning
   },
+  statusDotDanger: {
+    backgroundColor: colors.danger
+  },
+  statusDotMuted: {
+    backgroundColor: colors.muted
+  },
+  statusDotBrand: {
+    backgroundColor: colors.brand
+  },
   statusText: {
     color: colors.ink,
     fontSize: 14,
     fontWeight: "900"
+  },
+  scoreText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800",
+    fontVariant: [typography.numericVariant]
+  },
+  reasonText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19
   },
   metricsRow: {
     flexDirection: "row",
