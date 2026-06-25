@@ -8,20 +8,27 @@ import {
   type ViewStyle
 } from "react-native";
 
-import { colors, radii, spacing, typography } from "@ssamplanner/design-tokens";
+import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
   FOCUS_CAMERA_PRIVACY_COPY,
   FOCUS_CAMERA_TIMER_ONLY_COPY,
   FOCUS_DROWSINESS_RULES,
+  FOCUS_NUDGE_RULES,
   getFocusCameraFallbackTitle,
   getFocusDrowsinessLabel,
+  getFocusNudgeMessage,
   getSignalsFromMediaPipeFaceLandmarker,
   initFocusDrowsinessState,
+  initFocusNudgeState,
+  markFocusNudgeShown,
   reduceFocusDrowsiness,
+  shouldShowFocusNudge,
+  verdictToFocusCheck,
   type FocusDrowsinessResult,
   type FocusDrowsinessState,
   type FocusDrowsinessVerdict,
-  type FocusFaceSignals
+  type FocusFaceSignals,
+  type FocusNudgeState
 } from "@ssamplanner/shared";
 // 타입만 사용한다(런타임은 CDN ESM에서 로드 — Metro가 mediapipe 번들을 변환하지 못함).
 import type * as VisionTasks from "@mediapipe/tasks-vision";
@@ -73,11 +80,13 @@ function formatDeg(value: number | null): string {
 }
 
 type VerdictView = { verdict: FocusDrowsinessVerdict; score: number; reasons: string[] };
+type NudgeView = { visible: boolean; message: string };
 
-export function FocusCameraPanel({ active, style }: FocusCameraProps) {
+export function FocusCameraPanel({ active, onFocusCheck, style }: FocusCameraProps) {
   const [status, setStatus] = useState<DetectStatus>("loading");
   const [signals, setSignals] = useState<FocusFaceSignals | null>(null);
   const [verdictView, setVerdictView] = useState<VerdictView>({ verdict: "calibrating", score: 0, reasons: [] });
+  const [nudge, setNudge] = useState<NudgeView>({ visible: false, message: "" });
 
   const containerRef = useRef<View | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -90,6 +99,15 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
   // 2단계: 시간 기반 졸음 판단 상태(개인 기준선·지속시간·디바운스). 프레임마다 누적된다.
   const drowsyStateRef = useRef<FocusDrowsinessState>(initFocusDrowsinessState());
   const lastSampleMsRef = useRef<number>(0);
+  // 3단계: 넛지 쿨다운 상태 + 주기적 체크 기록 타이밍.
+  const nudgeStateRef = useRef<FocusNudgeState>(initFocusNudgeState());
+  const lastCheckMsRef = useRef<number>(0);
+  const nudgeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // onFocusCheck를 ref로 최신화(카메라 effect 재실행 없이 항상 최신 핸들러 호출).
+  const onFocusCheckRef = useRef(onFocusCheck);
+  useEffect(() => {
+    onFocusCheckRef.current = onFocusCheck;
+  }, [onFocusCheck]);
 
   useEffect(() => {
     if (!active) return;
@@ -124,6 +142,10 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
         }
         landmarkerRef.current = null;
       }
+      if (nudgeHideTimerRef.current) {
+        clearTimeout(nudgeHideTimerRef.current);
+        nudgeHideTimerRef.current = null;
+      }
     }
 
     function loop(now: number) {
@@ -142,6 +164,32 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
           const nextState = reduceFocusDrowsiness(drowsyStateRef.current, { atMs: now, signals: nextSignals });
           drowsyStateRef.current = nextState;
           setVerdictView({ verdict: nextState.verdict, score: nextState.score, reasons: nextState.reasons });
+
+          // 3단계 ① 넛지: 졸음 확정 + 쿨다운 경과일 때만 부드럽게 표시.
+          if (shouldShowFocusNudge(nextState.verdict, nudgeStateRef.current, now)) {
+            const message = getFocusNudgeMessage(nudgeStateRef.current);
+            nudgeStateRef.current = markFocusNudgeShown(nudgeStateRef.current, now);
+            setNudge({ visible: true, message });
+            if (nudgeHideTimerRef.current) clearTimeout(nudgeHideTimerRef.current);
+            nudgeHideTimerRef.current = setTimeout(
+              () => setNudge((prev) => ({ ...prev, visible: false })),
+              FOCUS_NUDGE_RULES.visibleMs
+            );
+          }
+
+          // 3단계 ② 기록: 주기적으로 측정 가능한 판정만 체크로 저장(숫자/판정만, 이미지 없음).
+          if (now - lastCheckMsRef.current >= FOCUS_NUDGE_RULES.checkIntervalMs) {
+            lastCheckMsRef.current = now;
+            const decision = verdictToFocusCheck(nextState.verdict);
+            if (decision.record && onFocusCheckRef.current) {
+              onFocusCheckRef.current({
+                drowsy: decision.drowsy,
+                reason: decision.drowsy ? "eyes_closed" : "focused",
+                confidence: nextState.score,
+                checkedAt: new Date().toISOString()
+              });
+            }
+          }
         } catch {
           // 한 프레임 실패는 무시하고 계속.
         }
@@ -154,10 +202,13 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
         if (!cancelled) setStatus("unsupported");
         return;
       }
-      // 세션 시작마다 졸음 판단 상태 초기화(개인 기준선 다시 학습).
+      // 세션 시작마다 졸음 판단·넛지·체크 상태 초기화(개인 기준선 다시 학습).
       drowsyStateRef.current = initFocusDrowsinessState();
+      nudgeStateRef.current = initFocusNudgeState();
       lastSampleMsRef.current = 0;
+      lastCheckMsRef.current = 0;
       setVerdictView({ verdict: "calibrating", score: 0, reasons: [] });
+      setNudge({ visible: false, message: "" });
       setStatus("loading");
       try {
         const vision = await loadVisionModule();
@@ -267,6 +318,23 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
 
   return (
     <View style={[styles.panel, style]}>
+      {nudge.visible ? (
+        <View style={styles.nudge} accessibilityRole="alert">
+          <View style={styles.nudgeIcon}>
+            <Text style={styles.nudgeIconText}>☕</Text>
+          </View>
+          <Text style={styles.nudgeText}>{nudge.message}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="넛지 닫기"
+            onPress={() => setNudge((prev) => ({ ...prev, visible: false }))}
+            style={styles.nudgeClose}
+          >
+            <Text style={styles.nudgeCloseText}>✕</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View ref={containerRef} style={styles.preview} />
 
       <View style={styles.readoutRow}>
@@ -298,7 +366,7 @@ export function FocusCameraPanel({ active, style }: FocusCameraProps) {
         </Text>
       )}
 
-      <Text style={styles.debugNote}>* 2단계 디버그 — 졸음 판단까지. 알림·기록은 다음 단계예요.</Text>
+      <Text style={styles.debugNote}>* 디버그 표시 — 졸음 판단·넛지·기록까지. 리포트 표시는 다음 단계예요.</Text>
 
       <View style={styles.privacyNotice}>
         <Text style={styles.privacyTitle}>{FOCUS_CAMERA_PRIVACY_COPY}</Text>
@@ -390,6 +458,46 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderRadius: radii.control,
     backgroundColor: colors.ink
+  },
+  // 부드러운 인앱 넛지 배너(비난조 아님, 풀스크린 모달 아님).
+  nudge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: tints.flameNudgeBorder,
+    borderRadius: radii.control,
+    backgroundColor: tints.flameNudge
+  },
+  nudgeIcon: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.button,
+    backgroundColor: tints.flameSoft
+  },
+  nudgeIconText: {
+    fontSize: 16
+  },
+  nudgeText: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 20
+  },
+  nudgeClose: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  nudgeCloseText: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: "900"
   },
   readoutRow: {
     flexDirection: "row",

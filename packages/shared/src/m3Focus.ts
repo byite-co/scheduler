@@ -482,3 +482,69 @@ export function getFocusDrowsinessLabel(verdict: FocusDrowsinessVerdict): string
       return "측정 어려움";
   }
 }
+
+// ============================================================================
+// 3단계: 넛지(부드러운 인앱 안내) + 세션 기록 집계
+// 넛지는 "졸음 확정"에서만, 쿨다운으로 도배 방지. 기록은 숫자/판정만(이미지 X).
+// ============================================================================
+
+export const FOCUS_NUDGE_RULES = {
+  // 한 번 뜨면 이 시간 동안 다시 뜨지 않음(도배 방지).
+  cooldownMs: 180_000,
+  // 넛지 표시 유지 시간.
+  visibleMs: 8_000,
+  // 졸음 체크를 기록하는 주기(주기적 표본).
+  checkIntervalMs: 10_000
+} as const;
+
+export const FOCUS_NUDGE_MESSAGES = [
+  "잠깐 졸았나요? 가볍게 스트레칭 어때요?",
+  "눈이 무거워 보여요. 30초만 일어나 볼까요?",
+  "잠깐 창밖 한 번 보고 다시 가볍게 시작해요."
+] as const;
+
+export type FocusNudgeState = {
+  lastShownAtMs: number | null;
+  messageIndex: number;
+};
+
+export function initFocusNudgeState(): FocusNudgeState {
+  return { lastShownAtMs: null, messageIndex: 0 };
+}
+
+// 졸음 확정 + 쿨다운 경과일 때만 넛지를 띄운다. 졸음의심(suspect)·그 외는 띄우지 않는다.
+export function shouldShowFocusNudge(
+  verdict: FocusDrowsinessVerdict,
+  state: FocusNudgeState,
+  nowMs: number,
+  cooldownMs: number = FOCUS_NUDGE_RULES.cooldownMs
+): boolean {
+  if (verdict !== "drowsy") return false;
+  if (state.lastShownAtMs !== null && nowMs - state.lastShownAtMs < cooldownMs) return false;
+  return true;
+}
+
+export function getFocusNudgeMessage(
+  state: FocusNudgeState,
+  messages: readonly string[] = FOCUS_NUDGE_MESSAGES
+): string {
+  return messages[state.messageIndex % messages.length] ?? messages[0];
+}
+
+// 넛지를 띄운 뒤 상태 갱신(마지막 표시 시각 + 다음 메시지로 회전).
+export function markFocusNudgeShown(
+  state: FocusNudgeState,
+  nowMs: number,
+  messageCount: number = FOCUS_NUDGE_MESSAGES.length
+): FocusNudgeState {
+  return { lastShownAtMs: nowMs, messageIndex: (state.messageIndex + 1) % Math.max(1, messageCount) };
+}
+
+export type FocusCheckDecision = { record: boolean; drowsy: boolean };
+
+// 주기적 체크: 측정 가능한 판정만 기록한다(기준학습/측정어려움 제외). 졸음 확정만 drowsy로 집계.
+export function verdictToFocusCheck(verdict: FocusDrowsinessVerdict): FocusCheckDecision {
+  if (verdict === "drowsy") return { record: true, drowsy: true };
+  if (verdict === "focused" || verdict === "suspect") return { record: true, drowsy: false };
+  return { record: false, drowsy: false };
+}
