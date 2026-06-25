@@ -15,7 +15,9 @@ import {
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
-import { TeacherShell, type TeacherShellData } from "./m1";
+import { ClipboardCheck } from "lucide-react";
+
+import { EmptyStatePanel, TeacherShell, type TeacherShellData } from "./m1";
 import { supabase } from "./supabaseClient";
 
 type SubmissionRow = Database["public"]["Tables"]["homework_submissions"]["Row"];
@@ -135,9 +137,13 @@ export function TeacherHomeworkReview() {
 
       <section className="flex flex-col gap-4">
           {!loading && items.length === 0 ? (
-            <div className="rounded-card border border-line bg-surface p-6 text-sm font-bold text-muted">
-              아직 검사할 제출이 없습니다.
-            </div>
+            <EmptyStatePanel
+              icon={<ClipboardCheck className="h-6 w-6 text-brand" strokeWidth={2} />}
+              title="아직 검사할 제출이 없어요"
+              body="학생이 숙제 사진을 공개하면 여기에서 ‘다 했는지’ 확인할 수 있어요. 숙제를 내면 학생에게 알림이 가요."
+              ctaHref="/homework/new"
+              ctaLabel="숙제 내기"
+            />
           ) : null}
 
           {items.map((item) => {

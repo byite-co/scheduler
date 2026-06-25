@@ -1263,7 +1263,7 @@ function EmptyState({ children }: { children: ReactNode }) {
 }
 
 // 카탈로그 빈 상태 패턴: 아이콘 + 안내문 + 단일 CTA.
-function EmptyStatePanel({
+export function EmptyStatePanel({
   icon,
   title,
   body,

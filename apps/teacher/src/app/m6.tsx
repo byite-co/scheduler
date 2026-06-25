@@ -13,7 +13,9 @@ import {
 } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
-import { TeacherShell, type TeacherShellData } from "./m1";
+import { ReceiptText } from "lucide-react";
+
+import { EmptyStatePanel, TeacherShell, type TeacherShellData } from "./m1";
 import { supabase } from "./supabaseClient";
 
 type InvoiceRow = Database["public"]["Tables"]["billing_invoices"]["Row"];
@@ -148,7 +150,11 @@ export function TeacherBilling() {
             </button>
           </div>
           {invoices.length === 0 ? (
-            <p className="text-sm font-bold text-muted">아직 인보이스가 없습니다.</p>
+            <EmptyStatePanel
+              icon={<ReceiptText className="h-6 w-6 text-brand" strokeWidth={2} />}
+              title="아직 인보이스가 없어요"
+              body="‘이번 달 인보이스 생성’을 누르면 연동 학생 수 기준 앱 구독료 청구서가 만들어져요. (수업·수업료와는 별개)"
+            />
           ) : (
             invoices.map((invoice) => (
               <div key={invoice.id} className="flex items-center justify-between rounded-control border border-line bg-surface px-4 py-3 text-sm">

@@ -7,7 +7,9 @@ import type { Session } from "@supabase/supabase-js";
 import { NOTIF_TYPE_LABELS, unreadCount, validateDeleteConfirmation, type NotifType } from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
-import { TeacherShell, type TeacherShellData } from "./m1";
+import { Bell } from "lucide-react";
+
+import { EmptyStatePanel, TeacherShell, type TeacherShellData } from "./m1";
 import { supabase } from "./supabaseClient";
 
 type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
@@ -66,7 +68,11 @@ export function TeacherNotificationCenter() {
       data={shellData}
     >
         {!loading && notifications.length === 0 ? (
-          <div className="rounded-card border border-line bg-surface p-6 text-sm font-bold text-muted">아직 알림이 없습니다.</div>
+          <EmptyStatePanel
+            icon={<Bell className="h-6 w-6 text-brand" strokeWidth={2} />}
+            title="아직 알림이 없어요"
+            body="학생의 숙제 제출·AI 검사 결과·연결 요청이 생기면 여기로 모여요."
+          />
         ) : null}
         {notifications.map((notification) => (
           <button
