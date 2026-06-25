@@ -800,11 +800,14 @@ export function TeacherShell({
               );
             })}
           </nav>
-          <div className="mt-4 rounded-control border border-line p-3">
-            <p className="text-sm font-extrabold text-ink">{data.profile?.name ?? "과외쌤"}</p>
-            <p className="text-xs font-bold text-muted">{data.session ? "선생님 계정" : "로그인 필요"}</p>
+          {/* 좌하단 Next dev 인디케이터(원형)와 겹치지 않도록 카드를 띄우고 로그아웃을 우측 정렬. */}
+          <div className="mb-14 mt-4 flex items-center justify-between gap-2 rounded-control border border-line p-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-extrabold text-ink">{data.profile?.name ?? "과외쌤"}</p>
+              <p className="text-xs font-bold text-muted">{data.session ? "선생님 계정" : "로그인 필요"}</p>
+            </div>
             {data.session ? (
-              <button className="mt-2 text-xs font-extrabold text-muted hover:text-ink" onClick={signOut}>
+              <button className="shrink-0 rounded-control px-2 py-1 text-xs font-extrabold text-muted hover:bg-canvas hover:text-ink" onClick={signOut}>
                 로그아웃
               </button>
             ) : null}

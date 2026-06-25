@@ -7,7 +7,9 @@ import type { Session } from "@supabase/supabase-js";
 import { SUBJECT_LABELS, aggregateWeeklyStudy } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
-import { TeacherShell, type TeacherShellData } from "../../m1";
+import { ClipboardList, FileText, ListTodo } from "lucide-react";
+
+import { EmptyStatePanel, TeacherShell, type TeacherShellData } from "../../m1";
 import { supabase } from "../../supabaseClient";
 
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
@@ -125,7 +127,13 @@ export default function StudentDetailPage() {
       {tab === "plan" ? (
         <section className="grid gap-2">
           {todos.length === 0 ? (
-            <p className="text-sm font-bold text-muted">아직 등록된 할 일·숙제가 없어요.</p>
+            <EmptyStatePanel
+              icon={<ListTodo className="h-6 w-6 text-brand" strokeWidth={2} />}
+              title="아직 등록된 할 일·숙제가 없어요"
+              body="‘+ 숙제 내기’로 이 학생에게 숙제를 내면 여기 플랜·숙제에 쌓여요."
+              ctaHref="/homework/new"
+              ctaLabel="숙제 내기"
+            />
           ) : (
             todos.map((todo) => (
               <div
@@ -157,26 +165,31 @@ export default function StudentDetailPage() {
       ) : null}
 
       {tab === "records" ? (
-        <section className="grid gap-3 rounded-card border border-line bg-surface p-5">
-          <p className="font-mono text-lg font-extrabold">
-            이번 주 공부 {Math.floor(aggregate.totalMinutes / 60)}시간 {aggregate.totalMinutes % 60}분
-          </p>
-          <div className="flex items-end gap-1" style={{ height: 96 }}>
-            {aggregate.perDayMinutes.map((minutes, index) => {
-              const max = Math.max(1, ...aggregate.perDayMinutes);
-              return (
-                <div
-                  key={["일", "월", "화", "수", "목", "금", "토"][index]}
-                  className="flex-1 rounded-t bg-brand"
-                  style={{ height: 6 + (minutes / max) * 80 }}
-                />
-              );
-            })}
-          </div>
-          {aggregate.totalMinutes === 0 ? (
-            <p className="text-sm font-bold text-muted">학생이 공개한 공부 기록이 아직 없어요.</p>
-          ) : null}
-        </section>
+        aggregate.totalMinutes === 0 ? (
+          <EmptyStatePanel
+            icon={<ClipboardList className="h-6 w-6 text-brand" strokeWidth={2} />}
+            title="공개된 공부 기록이 아직 없어요"
+            body="학생이 공부 시간을 공개하면 이번 주 요일별 기록이 여기에 표시돼요."
+          />
+        ) : (
+          <section className="grid gap-3 rounded-card border border-line bg-surface p-5 shadow-[0_16px_40px_rgba(22,26,46,0.08)]">
+            <p className="font-mono text-lg font-extrabold">
+              이번 주 공부 {Math.floor(aggregate.totalMinutes / 60)}시간 {aggregate.totalMinutes % 60}분
+            </p>
+            <div className="flex items-end gap-1" style={{ height: 96 }}>
+              {aggregate.perDayMinutes.map((minutes, index) => {
+                const max = Math.max(1, ...aggregate.perDayMinutes);
+                return (
+                  <div
+                    key={["일", "월", "화", "수", "목", "금", "토"][index]}
+                    className="flex-1 rounded-t bg-brand"
+                    style={{ height: 6 + (minutes / max) * 80 }}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        )
       ) : null}
 
       {tab === "weakness" ? (
@@ -195,23 +208,31 @@ export default function StudentDetailPage() {
 
       {tab === "reports" ? (
         <section className="grid gap-2">
-          <a href="/reports/weekly" className="text-sm font-extrabold text-brand">
-            + 주간 리포트 만들기
-          </a>
           {reports.length === 0 ? (
-            <p className="text-sm font-bold text-muted">아직 발행한 리포트가 없어요.</p>
+            <EmptyStatePanel
+              icon={<FileText className="h-6 w-6 text-brand" strokeWidth={2} />}
+              title="아직 발행한 리포트가 없어요"
+              body="주간 리포트를 만들면 학부모에게 공유할 수 있어요."
+              ctaHref="/reports/weekly"
+              ctaLabel="주간 리포트 만들기"
+            />
           ) : (
-            reports.map((report) => (
-              <div
-                key={report.id}
-                className="flex items-center justify-between rounded-control border border-line bg-surface px-4 py-3 text-sm"
-              >
-                <span className="font-bold">
-                  {report.period_start} ~ {report.period_end}
-                </span>
-                <span className="font-bold text-muted">{report.status === "sent" ? "발송됨" : "초안"}</span>
-              </div>
-            ))
+            <>
+              <a href="/reports/weekly" className="text-sm font-extrabold text-brand">
+                + 주간 리포트 만들기
+              </a>
+              {reports.map((report) => (
+                <div
+                  key={report.id}
+                  className="flex items-center justify-between rounded-control border border-line bg-surface px-4 py-3 text-sm"
+                >
+                  <span className="font-bold">
+                    {report.period_start} ~ {report.period_end}
+                  </span>
+                  <span className="font-bold text-muted">{report.status === "sent" ? "발송됨" : "초안"}</span>
+                </div>
+              ))}
+            </>
           )}
         </section>
       ) : null}
