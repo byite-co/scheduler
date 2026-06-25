@@ -1611,8 +1611,16 @@ function ActionButton({
   );
 }
 
-function EmptyText({ children }: { children: ReactNode }) {
-  return <Text style={styles.emptyText}>{children}</Text>;
+function EmptyText({ children, icon = "note" }: { children: ReactNode; icon?: IconName }) {
+  // 카드 내부 빈 상태: 옅은 아이콘 배지 + 안내문(가운데 정렬)로 통일.
+  return (
+    <View style={styles.emptyBlock}>
+      <View style={styles.emptyIcon}>
+        <AppIcon name={icon} size={18} color={colors.muted} />
+      </View>
+      <Text style={styles.emptyText}>{children}</Text>
+    </View>
+  );
 }
 
 function parsePlannerView(value: string | string[] | undefined): PlannerView {
@@ -1673,13 +1681,22 @@ function shiftDate(dateKey: string, amount: number): string {
   return new Date(Date.UTC(year, month - 1, day + amount)).toISOString().slice(0, 10);
 }
 
+// 카탈로그 카드의 부드러운 그림자(shadows.soft에 대응). RN 그림자 props로 표현.
+const cardShadow = {
+  shadowColor: "#161A2E",
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.06,
+  shadowRadius: 24,
+  elevation: 2
+} as const;
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.canvas
   },
   scrollContent: {
-    gap: spacing.lg,
+    gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl,
     paddingBottom: 96,
@@ -1877,11 +1894,25 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 23
   },
+  emptyBlock: {
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.lg
+  },
+  emptyIcon: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.card,
+    backgroundColor: tints.brandSoft
+  },
   emptyText: {
     color: colors.muted,
     fontSize: 14,
     fontWeight: "800",
-    lineHeight: 21
+    lineHeight: 21,
+    textAlign: "center"
   },
   mutedText: {
     color: colors.muted
@@ -2274,6 +2305,7 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   card: {
+    ...cardShadow,
     gap: spacing.md,
     padding: spacing.lg,
     borderWidth: 1,
@@ -2545,6 +2577,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand
   },
   studyBarCard: {
+    ...cardShadow,
     gap: spacing.sm,
     padding: spacing.lg,
     borderWidth: 1,
@@ -2781,6 +2814,7 @@ const styles = StyleSheet.create({
     gap: spacing.md
   },
   statCard: {
+    ...cardShadow,
     flex: 1,
     gap: spacing.xs,
     padding: spacing.lg,
