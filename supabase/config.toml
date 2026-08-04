@@ -1,3 +1,11 @@
+# ⚠️ 이 컴퓨터에는 다른 제품(쌤버십)의 Supabase 프로젝트가 함께 존재한다.
+#    쌤플래너 원격 프로젝트 ref: khssgcagudjimrezebxq  (scheduler)
+#    금지: lbeqxarxothkmzqvpudy (ssambership-staging) · wqaykrzfciznptntsvwl (사내전산망)
+#    원격 명령은 맨손 supabase 대신 `pnpm sb ...` 를 써라 — 가드가 대상을 검사한다.
+#
+# 참고: 아래 project_id 는 **로컬 도커 스택 식별자**이며 원격 ref 가 아니다.
+#       여기에 ref 를 적어도 원격 타겟팅에는 영향이 없다 —
+#       원격 대상은 supabase/.temp/project-ref(gitignore, 머신별)가 결정한다.
 project_id = "ssamplanner"
 
 [api]

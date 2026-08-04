@@ -32,6 +32,12 @@
 ---
 
 ## 2. 절대 규칙 (NON-NEGOTIABLE)
+0. **프로젝트 격리 — 이 컴퓨터에는 다른 제품(쌤버십)의 Supabase 프로젝트가 함께 있다.**
+   쌤플래너의 원격 ref 는 **`khssgcagudjimrezebxq`** 하나뿐이며,
+   `lbeqxarxothkmzqvpudy`(ssambership-staging)·`wqaykrzfciznptntsvwl`(사내전산망)는
+   **조회조차 금지**다. CLI 토큰이 조직 전체에 접근되므로 `--project-ref` 생략은 사고로 이어진다.
+   → 원격 명령은 맨손 `supabase` 대신 **`pnpm sb ...`**(가드가 대상 검사 후 중단),
+   세션 시작 시 **`pnpm sb:check`**. 전체 규칙·우회 경로는 `docs/PROJECT-GUIDE.md` §0-2·§0-3.
 1. **시크릿 금지**: API 키·서비스롤 키·Stripe 키·Anthropic 키를 코드/레포에 절대 커밋하지 않는다.
    `.env.example`만 만들고 실제 값은 사람이 채운다. 서버 키는 Edge Function 환경변수로만.
 2. **RLS 필수**: 모든 테이블에 Row Level Security. 학생은 본인 데이터만, 과외쌤은 **연결된(active)**
