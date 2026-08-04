@@ -297,6 +297,8 @@ export function HomeworkDetailScreen() {
   const data = useHomeworkData(todoId);
 
   if (data.loading) return <CenterCard text={data.message} />;
+  if (!data.session) return <CenterCard text="로그인이 필요해요." />;
+  if (!data.todo) return <CenterCard text="숙제를 찾을 수 없어요." />;
 
   const waitingForTeacher =
     data.isTutored && data.submission?.ai_verdict != null && data.submission?.teacher_status === "pending";

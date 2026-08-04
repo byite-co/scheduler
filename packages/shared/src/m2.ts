@@ -63,6 +63,16 @@ export function canStudentToggleTodoAiCheck(todo: TodoLockState): boolean {
   return todo.source === "self" && !todo.locked;
 }
 
+export type StudentTodoRowAction = "open_homework" | "toggle_only";
+
+// 할일 행 탭 정책(카탈로그 C2 홈·C5 플래너):
+// 선생님 숙제는 체크박스(완료 토글) 밖 영역이 숙제 상세(/homework/[id]) 진입이다.
+// 카탈로그가 모든 선생님 숙제 행에 제출 어포던스를 두므로 AI 검사 여부와 무관하게 열린다.
+// 내(self) 할 일은 제출 개념이 없어 토글/편집만 한다 — 혼공(AI 단독) 검사 진입은 별도 과제.
+export function getStudentTodoRowAction(todo: { source: "self" | "teacher" }): StudentTodoRowAction {
+  return todo.source === "teacher" ? "open_homework" : "toggle_only";
+}
+
 export function canShowPeerRanking(
   ranking: PeerRankingSnapshot | null
 ): ranking is PeerRankingSnapshot & {

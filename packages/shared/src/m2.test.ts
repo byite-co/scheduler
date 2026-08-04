@@ -6,6 +6,7 @@ import {
   canShowPeerRanking,
   canStudentToggleTodoAiCheck,
   getStudentHomeVariant,
+  getStudentTodoRowAction,
   shouldShowConnectNudge,
   shouldShowPeerRanking,
   shouldShowTeacherHomework,
@@ -129,5 +130,15 @@ describe("M2 streak and study totals", () => {
     });
     expect(streak.message).toContain("가볍게");
     expect(streak.message).not.toContain("실패");
+  });
+});
+
+describe("M2 todo row tap policy (homework entry)", () => {
+  it("opens homework detail for teacher todos regardless of AI check", () => {
+    expect(getStudentTodoRowAction({ source: "teacher" })).toBe("open_homework");
+  });
+
+  it("keeps self todos on toggle/edit only (no homework entry)", () => {
+    expect(getStudentTodoRowAction({ source: "self" })).toBe("toggle_only");
   });
 });
