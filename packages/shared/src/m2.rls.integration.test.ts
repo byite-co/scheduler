@@ -201,6 +201,18 @@ describeIfRemote("M2 RLS integration against linked Supabase", () => {
         .eq("id", homeworkRow.id);
       expect(blocked.error?.message).toContain("locked_teacher_todo_fields");
 
+      // SECURITY: 허용 목록 방식이라 범위(title)·과목·마감일도 학생이 못 바꿔야 한다.
+      // (금지 목록 시절에는 이 3개가 통과했다 — 학생이 검사 범위를 좁혀 AI 검사를 우회할 수 있었다.)
+      for (const patch of [
+        { title: "학생이 좁힌 범위 p.1" },
+        { subject: "english" as const },
+        { due_date: "2030-01-01" }
+      ]) {
+        const tampered = await studentClient.from("todos").update(patch).eq("id", homeworkRow.id);
+        expect(tampered.error?.message).toContain("locked_teacher_todo_fields");
+      }
+
+      // 회귀: 완료 체크(status)는 여전히 허용.
       assertOk(
         await studentClient
           .from("todos")
@@ -209,14 +221,46 @@ describeIfRemote("M2 RLS integration against linked Supabase", () => {
       );
       const visible = await studentClient
         .from("todos")
-        .select("ai_check_enabled, status")
+        .select("ai_check_enabled, status, title, subject, due_date")
         .eq("id", homeworkRow.id)
         .single();
       assertOk(visible);
-      expect(visible.data).toEqual({
+      // 잠긴 필드는 원본 그대로여야 한다.
+      expect(visible.data).toMatchObject({
         ai_check_enabled: true,
-        status: "done"
+        status: "done",
+        subject: "math"
       });
+      expect(visible.data?.title).not.toContain("학생이 좁힌 범위");
+      expect(visible.data?.due_date).not.toBe("2030-01-01");
+
+      // 회귀: 내가 만든 할 일(source=self)은 내용 편집이 여전히 가능해야 한다.
+      const ownTodo = await studentClient
+        .from("todos")
+        .insert({
+          student_id: studentId,
+          title: "내 할 일",
+          subject: "math",
+          source: "self",
+          status: "todo",
+          created_by: studentId
+        })
+        .select("id")
+        .single();
+      assertOk(ownTodo);
+      const ownId = assertData(ownTodo.data).id;
+      assertOk(
+        await studentClient
+          .from("todos")
+          .update({ title: "내 할 일(수정)", due_date: "2030-02-02", ai_check_enabled: true })
+          .eq("id", ownId)
+      );
+      // 단, 자기 할 일에서도 소유·출처 컬럼은 잠긴다.
+      const ownTampered = await studentClient
+        .from("todos")
+        .update({ source: "teacher" })
+        .eq("id", ownId);
+      expect(ownTampered.error?.message).toBeTruthy();
     } finally {
       if (teacherId) await admin.auth.admin.deleteUser(teacherId);
       if (studentId) await admin.auth.admin.deleteUser(studentId);
