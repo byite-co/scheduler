@@ -11,7 +11,9 @@
     "test": "turbo run test",
     "supabase:start": "supabase start",
     "supabase:reset": "supabase db reset",
-    "supabase:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts"
+    "supabase:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts",
+    "sb": "node scripts/supabase-guard.mjs",
+    "sb:check": "node scripts/supabase-guard.mjs --check"
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",

@@ -1,5 +1,10 @@
 # 쌤플래너 — Codex 핸드오프 레포
 
+> **이 레포 = 쌤플래너(scheduler).** Supabase 원격 프로젝트는 **`khssgcagudjimrezebxq`** 하나뿐이다.
+> 이 컴퓨터에는 다른 제품(**쌤버십**)의 Supabase 프로젝트가 함께 있고 CLI 토큰이 조직 전체에 접근된다.
+> 원격 명령은 맨손 `supabase` 대신 **`pnpm sb ...`** 를 쓴다(가드가 대상을 검사하고 어긋나면 중단).
+> 세션 시작 시 `pnpm sb:check` 로 link 대상을 확인해라. 자세한 규칙: [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md) §0-2
+
 독립 과외쌤–학생 입시 공부관리 앱. **이 레포 하나로 Codex가 처음부터 끝까지 구현**하도록 기획·설계·화면이 모두 들어 있다.
 
 ---
