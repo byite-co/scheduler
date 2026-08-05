@@ -9,6 +9,7 @@ import {
   HOMEWORK_CHECK_DISCLAIMER,
   SUBJECT_LABELS,
   getHomeworkResultView,
+  getTodoScopeTextForDisplay,
   type HomeworkResultView,
   type HomeworkVerdictTone
 } from "@ssamplanner/shared";
@@ -144,7 +145,8 @@ export function HomeworkSubmitScreen() {
 
       <View style={styles.rangeCard}>
         <Text style={styles.rangeLabel}>검사 범위</Text>
-        <Text style={styles.rangeValue}>{data.todo.title}</Text>
+        {/* scope_text 우선, 없으면 title 로 되돌아간다(scope_text 도입 전 숙제는 범위를 title 에 적었다). */}
+        <Text style={styles.rangeValue}>{getTodoScopeTextForDisplay(data.todo)}</Text>
       </View>
 
       <Text style={styles.sectionLabel}>푼 사진을 올려주세요</Text>

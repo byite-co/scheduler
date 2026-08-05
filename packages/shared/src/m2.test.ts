@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PEER_RANKING_MIN_COHORT,
+  TODO_SCOPE_TEXT_ERROR_MESSAGES,
   TODO_SCOPE_TEXT_MAX_LENGTH,
   calculateStudyStreak,
   canShowPeerRanking,
@@ -10,12 +11,15 @@ import {
   countTodoScopeTextLength,
   getStudentHomeVariant,
   getStudentTodoRowAction,
+  getTodoScopeTextForDisplay,
+  isTodoScopeTextRequired,
   normalizeTodoScopeText,
   shouldShowConnectNudge,
   shouldShowPeerRanking,
   shouldShowTeacherHomework,
   sumStudySecondsForDate,
-  validateTodoScopeText
+  validateTodoScopeText,
+  validateTodoScopeTextForSave
 } from "./m2";
 
 describe("M2 student home branching", () => {
@@ -185,5 +189,58 @@ describe("M2 AI check scope text (todos.scope_text)", () => {
     expect(canStudentEditTodoScopeText({ source: "self" })).toBe(true);
     // 학생이 교사 숙제의 범위를 바꿀 수 있으면 검사 기준을 자기에게 유리하게 좁힐 수 있다.
     expect(canStudentEditTodoScopeText({ source: "teacher" })).toBe(false);
+  });
+});
+
+// AI 검사를 켜 놓고 범위를 비우면 AI 가 "무엇과" 대조할지 알 수 없다 → 필수.
+describe("M2 scope text requirement (AI check on)", () => {
+  it("requires scope only when the AI check is on", () => {
+    expect(isTodoScopeTextRequired({ aiCheckEnabled: true })).toBe(true);
+    expect(isTodoScopeTextRequired({ aiCheckEnabled: false })).toBe(false);
+  });
+
+  it("blocks an empty scope when the AI check is on", () => {
+    for (const blank of ["", "   ", null, undefined]) {
+      expect(validateTodoScopeTextForSave(blank, { aiCheckEnabled: true })).toBe("scope_text_required");
+    }
+  });
+
+  it("allows an empty scope when the AI check is off", () => {
+    expect(validateTodoScopeTextForSave("", { aiCheckEnabled: false })).toBeUndefined();
+    expect(validateTodoScopeTextForSave(null, { aiCheckEnabled: false })).toBeUndefined();
+  });
+
+  it("still enforces the length limit regardless of the AI check", () => {
+    const tooLong = "가".repeat(TODO_SCOPE_TEXT_MAX_LENGTH + 1);
+    expect(validateTodoScopeTextForSave(tooLong, { aiCheckEnabled: true })).toBe("scope_text_too_long");
+    expect(validateTodoScopeTextForSave(tooLong, { aiCheckEnabled: false })).toBe("scope_text_too_long");
+  });
+
+  it("accepts a filled scope with the AI check on", () => {
+    expect(validateTodoScopeTextForSave("쎈 112~118p, 115p 제외", { aiCheckEnabled: true })).toBeUndefined();
+  });
+
+  it("has a message for every error so neither app invents its own wording", () => {
+    for (const key of ["scope_text_required", "scope_text_too_long"] as const) {
+      expect(TODO_SCOPE_TEXT_ERROR_MESSAGES[key]).toBeTruthy();
+    }
+  });
+});
+
+// scope_text 도입 전 숙제는 범위를 title 에 적었고, 마이그레이션은 ai_check_enabled 인 행만
+// 복사했다 → AI 검사가 꺼진 옛 행은 scope_text 가 비어 있다. 빈칸을 보여주면 "범위가 사라졌다"가 된다.
+describe("M2 scope text display fallback", () => {
+  it("prefers scope_text when present", () => {
+    expect(getTodoScopeTextForDisplay({ scope_text: "쎈 112~118p", title: "수학 숙제" })).toBe("쎈 112~118p");
+  });
+
+  it("falls back to title when scope_text is missing or blank", () => {
+    expect(getTodoScopeTextForDisplay({ scope_text: null, title: "수학 p.116~118" })).toBe("수학 p.116~118");
+    expect(getTodoScopeTextForDisplay({ scope_text: "   ", title: "수학 p.116~118" })).toBe("수학 p.116~118");
+    expect(getTodoScopeTextForDisplay({ title: "수학 p.116~118" })).toBe("수학 p.116~118");
+  });
+
+  it("trims the stored scope so display matches what the DB normalized", () => {
+    expect(getTodoScopeTextForDisplay({ scope_text: "  기출 21~30번  ", title: "무시됨" })).toBe("기출 21~30번");
   });
 });

@@ -7,9 +7,16 @@ import {
   HOMEWORK_REVIEW_STATUS_LABELS,
   HOMEWORK_VERDICT_LABELS,
   SUBJECT_LABELS,
+  TODO_SCOPE_TEXT_ERROR_MESSAGES,
+  TODO_SCOPE_TEXT_MAX_LENGTH,
+  countTodoScopeTextLength,
   createTeacherReviewPatch,
   getHomeworkConfidencePercent,
+  getTodoScopeTextForDisplay,
+  isTodoScopeTextRequired,
+  normalizeTodoScopeText,
   summarizeReviewQueue,
+  validateTodoScopeTextForSave,
   type HomeworkVerdict,
   type HomeworkVerdictTone
 } from "@ssamplanner/shared";
@@ -26,6 +33,7 @@ type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 
 type ReviewItem = SubmissionRow & {
   todoTitle: string;
+  todoScopeText: string;
   todoSubject: SubjectCode | null;
   studentName: string;
 };
@@ -67,8 +75,8 @@ export function TeacherHomeworkReview() {
 
     const [todosResult, profilesResult] = await Promise.all([
       todoIds.length
-        ? supabase.from("todos").select("id, title, subject").in("id", todoIds)
-        : Promise.resolve({ data: [] as Pick<TodoRow, "id" | "title" | "subject">[] }),
+        ? supabase.from("todos").select("id, title, subject, scope_text").in("id", todoIds)
+        : Promise.resolve({ data: [] as Pick<TodoRow, "id" | "title" | "subject" | "scope_text">[] }),
       studentIds.length
         ? supabase.from("profiles").select("id, name").in("id", studentIds)
         : Promise.resolve({ data: [] as Pick<ProfileRow, "id" | "name">[] })
@@ -81,6 +89,12 @@ export function TeacherHomeworkReview() {
       submissions.map((submission) => ({
         ...submission,
         todoTitle: todoById.get(submission.todo_id)?.title ?? "숙제",
+        // 검사자는 "무엇을 하기로 했는지"를 봐야 한다. 제목과 범위를 분리한 뒤로는
+        // 제목만 보면 범위를 알 수 없으므로 여기서도 함께 보여준다.
+        todoScopeText: (() => {
+          const todo = todoById.get(submission.todo_id);
+          return todo ? getTodoScopeTextForDisplay(todo) : "";
+        })(),
         todoSubject: (todoById.get(submission.todo_id)?.subject ?? null) as SubjectCode | null,
         studentName: nameById.get(submission.student_id) ?? "학생"
       }))
@@ -154,6 +168,12 @@ export function TeacherHomeworkReview() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-base font-extrabold">{item.todoTitle}</p>
+                    {item.todoScopeText && item.todoScopeText !== item.todoTitle ? (
+                      <p className="text-sm font-bold text-ink">
+                        <span className="text-muted">검사 범위 · </span>
+                        {item.todoScopeText}
+                      </p>
+                    ) : null}
                     <p className="text-sm font-bold text-muted">
                       {item.studentName}
                       {item.todoSubject ? ` · ${SUBJECT_LABELS[item.todoSubject]}` : ""}
@@ -217,6 +237,8 @@ export function TeacherHomeworkAssign() {
   const [students, setStudents] = useState<Array<{ connectionId: string; studentId: string; name: string }>>([]);
   const [studentId, setStudentId] = useState("");
   const [title, setTitle] = useState("");
+  // AI 완료검사가 제출 사진과 대조할 범위 원문. title(목록에 보이는 숙제 이름)과 별개 컬럼이다.
+  const [scopeText, setScopeText] = useState("");
   const [subject, setSubject] = useState<SubjectCode>("math");
   const [dueDate, setDueDate] = useState("");
   const [aiCheck, setAiCheck] = useState(true);
@@ -260,12 +282,20 @@ export function TeacherHomeworkAssign() {
       setMessage("숙제 제목을 입력해 주세요.");
       return;
     }
+    // 범위 규칙은 DB(todos_scope_text_len + 정규화 트리거)에도 걸려 있지만, 저장 전에
+    // 사용자가 알아야 하므로 shared 헬퍼로 같은 규칙을 앱에서 먼저 검사한다.
+    const scopeError = validateTodoScopeTextForSave(scopeText, { aiCheckEnabled: aiCheck });
+    if (scopeError) {
+      setMessage(TODO_SCOPE_TEXT_ERROR_MESSAGES[scopeError]);
+      return;
+    }
     // teacher-todo: todos_teacher_rw 정책(active 연결)으로 허용. 학생은 잠금(locked).
     const { error } = await supabase.from("todos").insert({
       student_id: studentId,
       connection_id: conn.connectionId,
       source: "teacher",
       title: title.trim(),
+      scope_text: normalizeTodoScopeText(scopeText),
       subject,
       due_date: dueDate.trim() || null,
       ai_check_enabled: aiCheck,
@@ -274,7 +304,10 @@ export function TeacherHomeworkAssign() {
       created_by: session.user.id
     });
     setMessage(error ? error.message : "숙제를 출제했어요.");
-    if (!error) setTitle("");
+    if (!error) {
+      setTitle("");
+      setScopeText("");
+    }
   }
 
   const shellData: TeacherShellData = {
@@ -287,6 +320,14 @@ export function TeacherHomeworkAssign() {
       await refresh();
     }
   };
+
+  // 범위 검증은 shared 헬퍼로만 판단한다 — DB 제약과 규칙이 갈라지지 않게.
+  const scopeRequired = isTodoScopeTextRequired({ aiCheckEnabled: aiCheck });
+  const scopeCount = countTodoScopeTextLength(scopeText);
+  const scopeSaveError = validateTodoScopeTextForSave(scopeText, { aiCheckEnabled: aiCheck });
+  // 비어 있는데 필수인 경우는 라벨의 '(필수)'와 버튼 비활성으로 알린다 — 타이핑 전부터
+  // 빨간 오류를 띄우면 잔소리처럼 보인다. 길이 초과만 인라인으로 표시한다.
+  const scopeTooLong = scopeSaveError === "scope_text_too_long";
 
   return (
     <TeacherShell
@@ -325,8 +366,35 @@ export function TeacherHomeworkAssign() {
               className="rounded-control border border-line px-3 py-2 text-sm"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="예: 쌤 B단계 p.112~118"
+              // 범위를 제목에 적지 않도록 유도한다 — 예전 placeholder("쌤 B단계 p.112~118")가
+              // 범위를 제목에 섞어 넣게 만든 원인이었다. 카탈로그 B4 의 제목 예시를 따른다.
+              placeholder="예: 미적분 단원 마무리 — 쎈 C단계"
             />
+          </label>
+          {/* 카탈로그 B4: '숙제 내용'(제목) 바로 아래 "범위 지정 · AI 완료검사 기준이 됩니다". */}
+          <label className="grid gap-1">
+            <span className="text-xs font-bold text-muted">
+              범위 지정 <span className="text-brand">· AI 완료검사 기준이 됩니다</span>{" "}
+              {scopeRequired ? <span className="text-brand">(필수)</span> : <span>(선택)</span>}
+            </span>
+            <input
+              className={`rounded-control border px-3 py-2 text-sm ${scopeTooLong ? "border-danger" : "border-line"}`}
+              value={scopeText}
+              onChange={(e) => setScopeText(e.target.value)}
+              placeholder="예: 쎈 112-118p, 115 제외"
+            />
+            <span className="text-xs font-bold text-muted">
+              제목과 달리 <b>AI 가 제출 사진과 대조하는 기준</b>이에요. 교재·페이지·문제번호를 적어 주세요.
+            </span>
+            {scopeTooLong ? (
+              <span className="text-xs font-bold text-danger">
+                {TODO_SCOPE_TEXT_ERROR_MESSAGES.scope_text_too_long}
+              </span>
+            ) : scopeCount > TODO_SCOPE_TEXT_MAX_LENGTH * 0.8 ? (
+              <span className="text-xs font-bold text-muted">
+                공백 제외 {scopeCount} / {TODO_SCOPE_TEXT_MAX_LENGTH}자
+              </span>
+            ) : null}
           </label>
           <label className="grid gap-1">
             <span className="text-xs font-bold text-muted">과목</span>
@@ -357,12 +425,17 @@ export function TeacherHomeworkAssign() {
           </label>
           <button
             type="button"
-            disabled={!studentId || !title.trim()}
+            disabled={!studentId || !title.trim() || Boolean(scopeSaveError)}
             onClick={() => void assign()}
             className="rounded-control bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
           >
             숙제 출제하기
           </button>
+          {scopeSaveError === "scope_text_required" ? (
+            <p className="text-xs font-bold text-muted">
+              {TODO_SCOPE_TEXT_ERROR_MESSAGES.scope_text_required} AI 검사가 필요 없으면 위 토글을 끄세요.
+            </p>
+          ) : null}
         </section>
       </div>
     </TeacherShell>
