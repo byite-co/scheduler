@@ -162,6 +162,12 @@ C:\dev\ssamplanner
 - **타입 캐스팅으로 라우트 검사 우회 금지:** 기존 코드 곳곳에 `as Href` / `as never` 캐스팅이 있고,
   이것이 존재하지 않는 라우트로 가는 끊긴 링크를 컴파일 단계에서 숨겨왔다.
   새로 만드는 링크에는 캐스팅을 쓰지 마라.
+- **⚠️ RLS 통합 테스트는 조용히 skip 된다:** `*.rls.integration.test.ts` 는 루트 `.env.local` 의
+  `SUPABASE_PROJECT_REF` **와** `SUPABASE_ACCESS_TOKEN` 이 **둘 다** 있어야 실행된다
+  (`describeIfRemote` 게이팅). 현재 `SUPABASE_ACCESS_TOKEN` 이 빈 값이라 **8건이 skip 상태**다.
+  `pnpm test` 가 green 이어도 **RLS·트리거·권한은 검증되지 않았다는 뜻**이다.
+  실제로 이번 `scope_text` 작업의 버그(20260806020000)는 이 테스트가 아니라 별도로 돌린
+  실계정 검증에서 잡혔다. RLS 를 건드리는 작업은 반드시 원격 대상으로 직접 검증해라.
 
 ---
 
@@ -170,8 +176,9 @@ C:\dev\ssamplanner
 ### 주요 테이블
 - **`todos`** — 과외쌤 숙제와 학생 할 일이 **같은 테이블**, `source`('self'|'teacher')로 구분.
   주요 컬럼: `student_id`, `connection_id`(교사 숙제만), `title`, `subject`, `source`,
-  `ai_check_enabled`, `locked`, `due_date`, `status`, `created_by`
-  - **범위(scope) 전용 컬럼 없음.** 현재는 `title`에 범위를 적는 구조.
+  `ai_check_enabled`, `scope_text`, `locked`, `due_date`, `status`, `created_by`
+  - **`scope_text`** — AI 숙제검사가 제출 사진과 대조할 **수행 범위 원문**(20260806010000 추가).
+    자세한 규칙은 아래 "4-3. `todos.scope_text`" 참고.
 - **`homework_submissions`** — 제출 + AI 결과가 한 테이블.
   `photo_paths`, `ai_verdict`, `ai_confidence`, `ai_reason`, `teacher_status` 등
   - **검사 이력·상태·idempotency 없음.** AI 결과를 덮어써서 이전 판정이 소실된다.
@@ -181,8 +188,10 @@ C:\dev\ssamplanner
 
 ### 보호 장치 (작동 확인됨)
 - `guard_student_todo_source_lock` 트리거 — **허용 목록(allowlist) 방식**(20260805000000).
-  학생 UPDATE 는 teacher 행=`status`만 / self 행=`title`·`subject`·`due_date`·`status`·`ai_check_enabled`.
-  목록에 없는 컬럼은 **기본 잠김** — 새 컬럼(`scope_text` 등)이 추가돼도 자동으로 막힌다.
+  학생 UPDATE 는 teacher 행=`status`만 / self 행=`title`·`subject`·`due_date`·`status`·`ai_check_enabled`·`scope_text`.
+  목록에 없는 컬럼은 **기본 잠김**.
+  - **실제로 값을 했다:** `scope_text` 추가(20260806010000) 때 teacher 행은 목록에 넣지 않는 것만으로
+    잠겼다. 금지 목록 방식이었다면 "열린 채로" 추가됐을 컬럼이다.
 - `guard_homework_submission_fields` 트리거 — 인증 사용자가 `ai_verdict` 등 AI 필드 직접 쓰기 불가
   (학생 계정으로 위조 시도 → 서버가 거부하는 것을 실증 확인)
 - 제출 사진 열람 — active 연결 + `share_homework_photos` 공개범위로 게이팅
@@ -228,6 +237,54 @@ service_role 은 RLS 를 우회하니 RPC 없이 구독 테이블에 직접 쓰�
 - `ai-homework-check` Edge Function — 코드는 있으나 **미배포**(라이브 404),
   내용도 사진 개수만 보는 스텁. Anthropic 미사용
 - Storage 버킷 `homework-photos`(private) — 용량·개수·MIME 제한 없음
+
+---
+
+## 4-3. `todos.scope_text` — AI 검사 범위 (20260806010000)
+
+`scope_text` 는 **"AI 가 제출 사진과 대조할 기준이 되는, 사용자가 입력한 수행 범위 원문"** 이다.
+
+```
+예) '쎈 112~118p, 115p 제외'  /  '영단어 Day 12~14'  /  '기출 21~30번, 26번 제외'
+```
+
+### ⚠️ `title` 과 혼동하지 마라 — 역할이 다르다
+
+| | 용도 |
+| --- | --- |
+| `title` | 목록에 보이는 **할 일 이름**. 양쪽 앱의 목록 표시가 이걸 쓴다. |
+| `scope_text` | AI 가 대조할 **검사 범위**. 목록에 안 보여도 된다. |
+
+**일반 메모로 쓰지 마라.** "열심히 하자" 같은 내용이 들어가면 AI 가 그걸 검사 기준으로 삼는다.
+메모가 필요하면 별도 컬럼을 만들어라.
+
+### 규칙 (DB 가 강제한다)
+- `text`, **NULL 허용** — NULL 은 "범위 미지정"이다.
+- **공백 제외 500자** (`todos_scope_text_len` CHECK 제약).
+- **빈 문자열·공백뿐인 입력은 NULL 로 정규화**된다(`guard_student_todo_source_lock` 트리거).
+  "범위 없음"의 표현을 하나로 고정하기 위한 것 — `''` 와 NULL 이 섞이면 AI 검사 분기가 둘 다 다뤄야 한다.
+- 앱 쪽 같은 규칙: `packages/shared/src/m2.ts` 의 `normalizeTodoScopeText` ·
+  `validateTodoScopeText` · `TODO_SCOPE_TEXT_MAX_LENGTH`.
+  **DB 와 앱 규칙이 갈라지면 앱이 통과시킨 값을 DB 가 거부해 날 오류가 사용자에게 보인다.**
+  실제로 그렇게 됐다 — 20260806020000 은 `btrim(v)` 이 인자 하나면 **space 만** 지우는 탓에
+  탭·개행뿐인 입력이 NULL 이 되지 않고 제약 위반으로 거부된 버그를 고친 것이다.
+  공백 정의는 양쪽 모두 `\s`(space·tab·CR·LF·FF·VT)로 맞춰 두었다.
+
+### 수정 권한 (의미는 같고 권한만 다르다)
+- `source='teacher'` → **교사만** 수정. 학생은 불가(허용 목록에 없어 자동 잠김).
+  학생이 바꿀 수 있으면 검사 범위를 자기에게 유리하게 좁혀 AI 검사를 무력화한다.
+- `source='self'` → 학생이 수정 가능.
+- 판정 헬퍼: `canStudentEditTodoScopeText({ source })`.
+
+### 기존 데이터 이전
+`ai_check_enabled=true` 인 행에만 **`title` 전체를 복사**했다(원격 3행 복사, 0행 미복사).
+`title` 은 그대로 남겼다. **제목에서 범위를 자동 분리하지 않는다** — 문장 패턴 추출은 잘못
+분리돼도 사람이 발견하기 어렵고, 그 오류가 AI 판정에 그대로 들어간다.
+
+### 아직 안 한 것
+- **UI 없음.** 양쪽 앱에 `scope_text` 입력란이 없다 — 스키마 확장만 한 상태다.
+  UI 를 만들 때 위 "title 과 혼동 금지"와 수정 권한을 지켜라.
+- AI 검사가 이 값을 실제로 쓰는 로직(`ai-homework-check`)은 미구현.
 
 ---
 

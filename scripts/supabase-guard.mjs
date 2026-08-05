@@ -133,13 +133,16 @@ if (cliArgs.length === 0) {
   process.exit(1);
 }
 
-console.log(
+// 가드 배너는 stderr 로 낸다. stdout 에 찍으면 출력을 파일로 받는 명령의 결과가 오염된다
+// (`pnpm sb gen types typescript --linked > database.types.ts`, `pnpm sb db dump > x.sql` 에서
+//  배너가 파일 첫 줄에 섞여 들어간다). 사람에게 보여주는 메시지는 stdout 이 아니라 stderr 가 맞다.
+console.error(
   `[42m[30m GUARD OK [0m 대상 ${linkedRef ?? "(link 무관 명령)"} → supabase ${cliArgs.join(" ")}`
 );
 
 // 자기 검증용: 스폰 없이 검사 결과만 확인한다(가드 시험 시 실제 명령이 나가지 않게).
 if (process.env.SUPABASE_GUARD_DRY === "1") {
-  console.log("SUPABASE_GUARD_DRY=1 — 검사만 수행하고 CLI 는 실행하지 않았습니다.");
+  console.error("SUPABASE_GUARD_DRY=1 — 검사만 수행하고 CLI 는 실행하지 않았습니다.");
   process.exit(0);
 }
 

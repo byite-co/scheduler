@@ -63,6 +63,50 @@ export function canStudentToggleTodoAiCheck(todo: TodoLockState): boolean {
   return todo.source === "self" && !todo.locked;
 }
 
+// ── todos.scope_text ─────────────────────────────────────────────────────────
+// AI 숙제검사가 제출 사진과 대조할 "수행 범위 원문". title(목록에 보이는 할 일 이름)과
+// 역할이 다르다. 예) '쎈 112~118p, 115p 제외'. 일반 메모로 쓰지 않는다.
+//
+// DB(todos_scope_text_len 제약 + 정규화 트리거)가 최종 방어선이고, 아래 함수들은 같은 규칙을
+// 앱에서 미리 적용해 사용자에게 안내를 보여주기 위한 것이다. 규칙이 갈라지면 앱이 통과시킨
+// 값을 DB 가 거부해 날 오류가 그대로 노출되므로, 두 규칙은 같아야 한다.
+
+/** 공백을 제외한 글자 수 기준 상한. DB 제약과 같은 값이어야 한다. */
+export const TODO_SCOPE_TEXT_MAX_LENGTH = 500;
+
+// Postgres 의 \s([[:space:]])와 맞추기 위해 ASCII 공백만 제거한다.
+// JS 의 \s 는 유니코드 공백(U+00A0 NBSP, U+3000 등)까지 포함해 DB 보다 더 많이 지운다 → 앱이
+// 더 짧게 세어 "통과"시킨 값을 DB 가 거부하게 된다. 더 적게 지워서 앱이 먼저 거부하는 편이 안전하다.
+const ASCII_WHITESPACE = /[ \t\n\v\f\r]/g;
+
+/** 빈 문자열·공백뿐인 입력은 NULL 로 저장한다 — DB 트리거와 같은 규칙. */
+export function normalizeTodoScopeText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/** 공백을 제외한 글자 수 — 사용자에게 남은 글자수를 보여줄 때도 쓴다. */
+export function countTodoScopeTextLength(value: string): number {
+  return value.replace(ASCII_WHITESPACE, "").length;
+}
+
+export type TodoScopeTextError = "scope_text_too_long";
+
+export function validateTodoScopeText(value: string | null | undefined): TodoScopeTextError | undefined {
+  const normalized = normalizeTodoScopeText(value);
+  if (normalized && countTodoScopeTextLength(normalized) > TODO_SCOPE_TEXT_MAX_LENGTH) {
+    return "scope_text_too_long";
+  }
+  return undefined;
+}
+
+// 범위의 '의미'는 교사 숙제와 개인 할 일에서 동일하고, 수정 권한만 다르다.
+// teacher 숙제의 범위는 출제자(교사)의 것이므로 학생이 바꿀 수 없다 — 바꿀 수 있으면
+// 학생이 검사 기준을 자기에게 유리하게 좁힐 수 있다. DB 허용 목록도 같은 규칙이다.
+export function canStudentEditTodoScopeText(todo: { source: "self" | "teacher" }): boolean {
+  return todo.source === "self";
+}
+
 export type StudentTodoRowAction = "open_homework" | "toggle_only";
 
 // 할일 행 탭 정책(카탈로그 C2 홈·C5 플래너):
