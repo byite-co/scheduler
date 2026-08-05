@@ -2,15 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import {
   PEER_RANKING_MIN_COHORT,
+  TODO_SCOPE_TEXT_MAX_LENGTH,
   calculateStudyStreak,
   canShowPeerRanking,
+  canStudentEditTodoScopeText,
   canStudentToggleTodoAiCheck,
+  countTodoScopeTextLength,
   getStudentHomeVariant,
   getStudentTodoRowAction,
+  normalizeTodoScopeText,
   shouldShowConnectNudge,
   shouldShowPeerRanking,
   shouldShowTeacherHomework,
-  sumStudySecondsForDate
+  sumStudySecondsForDate,
+  validateTodoScopeText
 } from "./m2";
 
 describe("M2 student home branching", () => {
@@ -140,5 +145,45 @@ describe("M2 todo row tap policy (homework entry)", () => {
 
   it("keeps self todos on toggle/edit only (no homework entry)", () => {
     expect(getStudentTodoRowAction({ source: "self" })).toBe("toggle_only");
+  });
+});
+
+// 이 규칙들은 DB(todos_scope_text_len 제약 + 정규화 트리거)와 같아야 한다.
+// 갈라지면 앱이 통과시킨 값을 DB 가 거부해 날 오류가 사용자에게 그대로 보인다.
+describe("M2 AI check scope text (todos.scope_text)", () => {
+  it("normalizes blank input to null so '범위 없음' has one representation", () => {
+    for (const blank of ["", "   ", "\t\n ", null, undefined]) {
+      expect(normalizeTodoScopeText(blank)).toBeNull();
+    }
+  });
+
+  it("trims surrounding whitespace but keeps the entered scope verbatim", () => {
+    expect(normalizeTodoScopeText("  쎈 112~118p, 115p 제외  ")).toBe("쎈 112~118p, 115p 제외");
+  });
+
+  it("counts length excluding whitespace, matching the DB constraint", () => {
+    expect(countTodoScopeTextLength("쎈 112~118p")).toBe("쎈112~118p".length);
+    expect(countTodoScopeTextLength("가 ".repeat(10))).toBe(10);
+  });
+
+  it("accepts the limit and rejects one character past it", () => {
+    expect(validateTodoScopeText("가".repeat(TODO_SCOPE_TEXT_MAX_LENGTH))).toBeUndefined();
+    expect(validateTodoScopeText("가".repeat(TODO_SCOPE_TEXT_MAX_LENGTH + 1))).toBe("scope_text_too_long");
+  });
+
+  it("does not count whitespace toward the limit", () => {
+    // 공백을 세면 이 값이 상한을 넘는다고 잘못 판단한다.
+    expect(validateTodoScopeText("가 ".repeat(TODO_SCOPE_TEXT_MAX_LENGTH))).toBeUndefined();
+  });
+
+  it("treats blank input as valid — it simply means no scope", () => {
+    expect(validateTodoScopeText("")).toBeUndefined();
+    expect(validateTodoScopeText(null)).toBeUndefined();
+  });
+
+  it("lets students edit their own scope but not teacher-assigned scope", () => {
+    expect(canStudentEditTodoScopeText({ source: "self" })).toBe(true);
+    // 학생이 교사 숙제의 범위를 바꿀 수 있으면 검사 기준을 자기에게 유리하게 좁힐 수 있다.
+    expect(canStudentEditTodoScopeText({ source: "teacher" })).toBe(false);
   });
 });

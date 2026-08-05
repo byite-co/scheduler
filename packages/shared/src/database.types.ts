@@ -872,6 +872,7 @@ export type Database = {
           due_date: string | null
           id: string
           locked: boolean
+          scope_text: string | null
           source: Database["public"]["Enums"]["todo_source"]
           status: Database["public"]["Enums"]["todo_status"]
           student_id: string
@@ -886,6 +887,7 @@ export type Database = {
           due_date?: string | null
           id?: string
           locked?: boolean
+          scope_text?: string | null
           source?: Database["public"]["Enums"]["todo_source"]
           status?: Database["public"]["Enums"]["todo_status"]
           student_id: string
@@ -900,6 +902,7 @@ export type Database = {
           due_date?: string | null
           id?: string
           locked?: boolean
+          scope_text?: string | null
           source?: Database["public"]["Enums"]["todo_source"]
           status?: Database["public"]["Enums"]["todo_status"]
           student_id?: string

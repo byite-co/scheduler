@@ -244,11 +244,19 @@ create table todos (
   subject       subject_code,
   source        todo_source not null default 'self',
   ai_check_enabled boolean not null default false,  -- self는 학생 토글 / teacher는 출제 때 결정
+  -- AI 숙제검사가 제출 사진과 대조할 "수행 범위 원문". title(목록에 보이는 이름)과 역할이 다르다.
+  -- 예) '쎈 112~118p, 115p 제외'. 일반 메모로 쓰지 않는다. 빈 문자열은 트리거가 NULL 로 정규화.
+  scope_text    text,
   locked        boolean not null default false,     -- teacher 숙제는 학생이 ai_check 변경 불가
   due_date      date,
   status        todo_status not null default 'todo',
   created_by    uuid not null references profiles(id),
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  -- 길이 상한은 DB 에서 강제한다 — 클라이언트 검증만 두면 PostgREST 직접 호출로 우회된다.
+  -- 공백 제외 글자 수 기준(\s = [[:space:]]). 하한 1 은 "빈 문자열은 NULL" 불변식을 못박는 것으로,
+  -- 정규화 트리거가 사라지거나 우회되면 곧바로 드러난다.
+  constraint todos_scope_text_len
+    check (scope_text is null or length(regexp_replace(scope_text, '\s', '', 'g')) between 1 and 500)
 );
 alter table todos enable row level security;
 create policy todos_student_rw on todos for all
@@ -261,11 +269,13 @@ create policy todos_teacher_rw on todos for all using (
 );
 
 -- 학생의 todos UPDATE 는 '허용 목록(allowlist)'만 통과한다 — 목록에 없는 컬럼은 기본 잠김.
---  - source='teacher' 숙제: status(완료 체크)만. 범위(title)·과목·마감일 포함 그 외 전부 금지.
---  - source='self' 할 일: title/subject/due_date/status/ai_check_enabled.
+--  - source='teacher' 숙제: status(완료 체크)만. 범위(scope_text/title)·과목·마감일 포함 그 외 전부 금지.
+--  - source='self' 할 일: title/subject/due_date/status/ai_check_enabled/scope_text.
 --  - 어느 쪽에도 없는 id/student_id/connection_id/source/created_by/created_at/locked 는 항상 잠김.
 -- 새 컬럼을 추가하면 자동으로 잠긴다(금지 목록 방식의 갱신 누락 사고 방지).
+--   → scope_text 추가 때 실제로 값을 했다: teacher 행에서는 목록에 넣지 않는 것만으로 잠겼다.
 -- 교사(active 연결)·서비스롤은 이 게이트를 지나지 않는다 → 기존 권한 유지. 교사 숙제는 항상 locked=true.
+-- 이 함수는 scope_text 의 '빈 문자열 → NULL' 정규화도 함께 맡는다(아래 주석 참고).
 create or replace function guard_student_todo_source_lock()
 returns trigger
 language plpgsql
@@ -277,6 +287,19 @@ declare
   old_frozen jsonb;
   new_frozen jsonb;
 begin
+  -- 빈 문자열·공백뿐인 입력은 NULL 로 정규화한다. "범위 없음"을 표현하는 값은 하나여야
+  -- 한다 — '' 와 NULL 이 섞이면 AI 검사 분기가 두 값을 모두 다뤄야 한다.
+  --
+  -- 앞뒤 공백 제거에 btrim(v) 을 쓰면 안 된다 — 인자가 하나면 space 만 지우고 탭·개행이
+  -- 남는다. 그러면 공백뿐인 입력이 NULL 이 되지 않고 위 CHECK 제약 위반으로 거부된다
+  -- (20260806020000 에서 실제로 잡힌 버그). CHECK 와 같은 \s 클래스를 써야 갈라지지 않는다.
+  --
+  -- 별도 트리거로 분리하지 않고 이 함수 맨 앞에 둔 이유:
+  --   · 같은 테이블의 BEFORE 트리거는 이름 알파벳순으로 실행된다 → 순서가 이름에 의존해 깨지기 쉽다.
+  --   · 아래 INSERT 분기는 early return 하므로, INSERT 에도 적용되려면 그보다 앞이어야 한다.
+  --   · 허용 목록 비교보다 먼저 정규화돼야 '' → NULL 같은 실질적 무변경이 오탐으로 막히지 않는다.
+  new.scope_text := nullif(regexp_replace(new.scope_text, '^\s+|\s+$', '', 'g'), '');
+
   if tg_op = 'INSERT' then
     if auth.uid() = new.student_id and new.source = 'teacher' then
       raise exception 'students_cannot_create_teacher_todos';
@@ -291,7 +314,7 @@ begin
     if old.source = 'teacher' then
       student_editable := array['status'];
     else
-      student_editable := array['title', 'subject', 'due_date', 'status', 'ai_check_enabled'];
+      student_editable := array['title', 'subject', 'due_date', 'status', 'ai_check_enabled', 'scope_text'];
     end if;
 
     old_frozen := to_jsonb(old) - student_editable;
