@@ -40,13 +40,10 @@ function useSubscription() {
     void refresh();
   }, [refresh]);
 
-  async function setSub(next: SubStatus) {
-    const { error } = await supabase.rpc("mock_set_student_subscription", { p_status: next });
-    setMessage(error ? error.message : next === "active" ? "프리미엄이 활성화됐어요. (모의 결제)" : "구독을 해지했어요.");
-    if (!error) await refresh();
-  }
-
-  return { session, status, expiresAt, loading, message, refresh, setSub };
+  // 상태를 바꾸는 mock RPC 호출은 제거했다 — 클라이언트가 스스로 프리미엄이 되는 구멍이었고
+  // 실행 권한을 회수했다(20260805000000). 실제 결제는 IAP/RevenueCat 웹훅이 담당한다.
+  // 개발/테스트에서 상태를 만들려면 scripts/dev-set-subscription.mjs (service_role 필요).
+  return { session, status, expiresAt, loading, message, refresh };
 }
 
 export function SubscribeScreen() {
@@ -69,14 +66,24 @@ export function SubscribeScreen() {
 
       <Text style={styles.notice}>{sub.message}</Text>
 
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>현재 상태</Text>
+        <Text style={styles.cardBody}>{premium.label}</Text>
+      </View>
+
       {premium.isPremium ? (
         <Pressable accessibilityRole="button" onPress={() => router.push("/settings/subscription")} style={styles.secondaryButton}>
           <Text style={styles.secondaryButtonText}>구독 관리</Text>
         </Pressable>
       ) : (
-        <Pressable accessibilityRole="button" onPress={() => void sub.setSub("active")} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>프리미엄 시작 (모의 결제)</Text>
-        </Pressable>
+        // 결제 진입은 실연동(IAP) 전까지 비워둔다. 예전엔 mock RPC 로 스스로 프리미엄이 됐는데
+        // 그건 보안 구멍이라 제거했다 — 상태 표시는 남기고 상태를 바꾸는 버튼만 없앴다.
+        <View style={styles.pendingCard}>
+          <Text style={styles.pendingTitle}>결제 준비 중</Text>
+          <Text style={styles.cardBody}>
+            인앱 결제 연동 후 여기서 바로 구독할 수 있어요. 그때까지는 광고 보상으로 열어서 써주세요.
+          </Text>
+        </View>
       )}
     </ScrollView>
   );
@@ -94,10 +101,22 @@ export function SubscriptionManageScreen() {
       <Text style={styles.title}>{premium.label}</Text>
       <Text style={styles.notice}>{sub.message}</Text>
 
+      {sub.expiresAt ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>만료 예정</Text>
+          <Text style={styles.cardBody}>{new Date(sub.expiresAt).toLocaleDateString("ko-KR")}</Text>
+        </View>
+      ) : null}
+
       {premium.isPremium ? (
-        <Pressable accessibilityRole="button" onPress={() => void sub.setSub("canceled")} style={styles.dangerButton}>
-          <Text style={styles.dangerButtonText}>구독 해지</Text>
-        </Pressable>
+        // 해지는 결제 공급자(App Store / Google Play)에서 해야 한다 — 앱이 직접 상태를 바꾸면
+        // 실제 결제와 DB 가 어긋난다. 예전 mock 해지 버튼은 그래서 제거했다.
+        <View style={styles.pendingCard}>
+          <Text style={styles.pendingTitle}>해지 안내</Text>
+          <Text style={styles.cardBody}>
+            구독 해지는 결제하신 스토어(App Store · Google Play)의 구독 관리에서 할 수 있어요.
+          </Text>
+        </View>
       ) : (
         <Pressable accessibilityRole="button" onPress={() => router.push("/subscribe")} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>프리미엄 보러가기</Text>
@@ -131,6 +150,13 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: colors.surface, fontSize: 15, fontWeight: "900" },
   secondaryButton: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.button, borderWidth: 1, borderColor: colors.brand },
   secondaryButtonText: { color: colors.brand, fontSize: 15, fontWeight: "900" },
-  dangerButton: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: radii.button, borderWidth: 1, borderColor: colors.danger },
-  dangerButtonText: { color: colors.danger, fontSize: 15, fontWeight: "900" }
+  pendingCard: {
+    gap: spacing.xs,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.card,
+    backgroundColor: colors.canvas
+  },
+  pendingTitle: { color: colors.muted, fontSize: 15, fontWeight: "900" }
 });

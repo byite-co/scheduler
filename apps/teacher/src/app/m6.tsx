@@ -62,11 +62,9 @@ export function TeacherBilling() {
   const billing = getTeacherBillingState(status);
   const estimated = getTeacherMonthlySubscriptionAmount(activeCount);
 
-  async function setSub(next: SubStatus) {
-    const { error } = await supabase.rpc("mock_set_teacher_subscription", { p_status: next });
-    setMessage(error ? error.message : `구독 상태를 ${next}로 변경했습니다. (모의 웹훅)`);
-    if (!error) await refresh();
-  }
+  // 상태를 바꾸는 mock RPC 호출은 제거했다 — 과외쌤이 스스로 앱 구독료를 active 로 만들 수
+  // 있는 구멍이었고 실행 권한을 회수했다(20260806000000). 실제 전이는 Stripe 웹훅이 담당한다.
+  // 개발/테스트에서 상태를 만들려면 scripts/dev-set-subscription.mjs (service_role 필요).
 
   async function generateInvoice() {
     const { error } = await supabase.rpc("generate_teacher_invoice", { p_period: currentPeriod() });
@@ -115,31 +113,15 @@ export function TeacherBilling() {
           <p className="font-mono text-sm font-bold text-ink">
             예상 월 청구 = active {activeCount}명 × {formatKrw(PRICE_PER_STUDENT_KRW)} = {formatKrw(estimated)}
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {billing.status === "active" ? (
-              <>
-                <button className="rounded-control border border-warning px-4 py-2 text-sm font-bold text-warning" onClick={() => void setSub("paused")} type="button">
-                  일시정지
-                </button>
-                <button className="rounded-control border border-danger px-4 py-2 text-sm font-bold text-danger" onClick={() => void setSub("canceled")} type="button">
-                  해지
-                </button>
-              </>
-            ) : billing.status === "past_due" ? (
-              <button className="rounded-control bg-brand px-4 py-2 text-sm font-bold text-surface" onClick={() => void setSub("active")} type="button">
-                결제수단 업데이트로 복구 (모의)
-              </button>
-            ) : (
-              <button className="rounded-control bg-brand px-4 py-2 text-sm font-bold text-surface" onClick={() => void setSub("active")} type="button">
-                구독 시작 (모의 결제)
-              </button>
-            )}
-            {billing.status === "active" ? (
-              <button className="rounded-control border border-danger px-4 py-2 text-sm font-bold text-danger" onClick={() => void setSub("past_due")} type="button">
-                결제 실패 시뮬레이트
-              </button>
-            ) : null}
-          </div>
+          {/* 상태를 바꾸는 버튼은 제거했다(보안). 상태·금액 표시는 위에 그대로 남는다.
+              구독 시작·해지·일시정지는 실연동 Stripe 결제 화면이 담당할 예정이다. */}
+          <p className="mt-2 rounded-control border border-line bg-canvas px-4 py-3 text-sm font-bold text-muted">
+            {billing.status === "active"
+              ? "해지·일시정지는 결제 연동 후 이 화면에서 처리할 수 있어요."
+              : billing.status === "past_due"
+                ? "미납 복구는 결제 연동 후 결제수단 업데이트로 처리돼요."
+                : "구독 시작은 결제 연동(Stripe) 후 이 화면에서 할 수 있어요."}
+          </p>
         </section>
 
         <section className="grid gap-3">
