@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 import { createClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import type { Database } from "./database.types";
+import { assertNoLeakedTestUsers, deleteTestUsers } from "./rlsTestCleanup";
 
 type ApiKey = { api_key: string; name: string };
 type TestEnv = { accessToken: string; projectRef: string; url: string };
@@ -14,6 +15,9 @@ const env = loadTestEnv();
 const describeIfRemote = env ? describe : describe.skip;
 
 describeIfRemote("M5 report sharing RLS against linked Supabase", () => {
+  // 정리 실패는 finally 에서 throw 하면 원래 실패 원인을 덮어쓴다 → 여기서 따로 터뜨린다.
+  afterAll(assertNoLeakedTestUsers);
+
   it("lets parents open a report by token only (no login), logs views, and enforces expiry", async () => {
     if (!env) throw new Error("Missing Supabase test environment");
 
@@ -136,9 +140,7 @@ describeIfRemote("M5 report sharing RLS against linked Supabase", () => {
       expect((expired.data as SharedReportResult).status).toBe("expired");
     } finally {
       if (reportId) await admin.from("reports").delete().eq("id", reportId);
-      if (teacherId) await admin.auth.admin.deleteUser(teacherId);
-      if (otherId) await admin.auth.admin.deleteUser(otherId);
-      if (studentId) await admin.auth.admin.deleteUser(studentId);
+      await deleteTestUsers(admin, [studentId, otherId, teacherId]);
     }
   }, 60_000);
 });

@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 import { createClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import type { Database } from "./database.types";
 import { PRICE_PER_STUDENT_KRW } from "./pricing";
+import { assertNoLeakedTestUsers, deleteTestUsers } from "./rlsTestCleanup";
 
 type ApiKey = { api_key: string; name: string };
 type TestEnv = { accessToken: string; projectRef: string; url: string };
@@ -14,6 +15,9 @@ const env = loadTestEnv();
 const describeIfRemote = env ? describe : describe.skip;
 
 describeIfRemote("M6 billing RLS against linked Supabase", () => {
+  // 정리 실패는 finally 에서 throw 하면 원래 실패 원인을 덮어쓴다 → 여기서 따로 터뜨린다.
+  afterAll(assertNoLeakedTestUsers);
+
   it("bills active connections × price, drops on disconnect, isolates per teacher", async () => {
     if (!env) throw new Error("Missing Supabase test environment");
 
@@ -123,7 +127,8 @@ describeIfRemote("M6 billing RLS against linked Supabase", () => {
       assertOk(premium);
       expect(premium.data).toMatchObject({ status: "active", provider: "iap" });
     } finally {
-      for (const id of ids) await admin.auth.admin.deleteUser(id);
+      // ids 는 생성 순서(교사 → 학생)라 뒤에서부터 지운다 — 학생 먼저, 교사 마지막.
+      await deleteTestUsers(admin, [...ids].reverse());
     }
   }, 60_000);
 });
