@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 import { createClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import type { Database } from "./database.types";
+import { assertNoLeakedTestUsers, deleteTestUsers } from "./rlsTestCleanup";
 
 type ApiKey = { api_key: string; name: string };
 type TestEnv = { accessToken: string; projectRef: string; url: string };
@@ -13,6 +14,9 @@ const env = loadTestEnv();
 const describeIfRemote = env ? describe : describe.skip;
 
 describeIfRemote("M7 account + system RLS against linked Supabase", () => {
+  // 정리 실패는 finally 에서 throw 하면 원래 실패 원인을 덮어쓴다 → 여기서 따로 터뜨린다.
+  afterAll(assertNoLeakedTestUsers);
+
   it("self-deletes the account with full cascade and exposes public app_config", async () => {
     if (!env) throw new Error("Missing Supabase test environment");
 
@@ -79,8 +83,7 @@ describeIfRemote("M7 account + system RLS against linked Supabase", () => {
       expect(userGone.data.user).toBeNull();
       studentId = ""; // already removed
     } finally {
-      if (studentId) await admin.auth.admin.deleteUser(studentId);
-      if (teacherId) await admin.auth.admin.deleteUser(teacherId);
+      await deleteTestUsers(admin, [studentId, teacherId]);
     }
   }, 60_000);
 });

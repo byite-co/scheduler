@@ -2,10 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { createClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { PEER_RANKING_MIN_COHORT, TODO_SCOPE_TEXT_MAX_LENGTH } from "./m2";
 import type { Database } from "./database.types";
+import { assertNoLeakedTestUsers, deleteTestUsers } from "./rlsTestCleanup";
 
 type ApiKey = {
   name: string;
@@ -22,6 +23,9 @@ const env = loadTestEnv();
 const describeIfRemote = env ? describe : describe.skip;
 
 describeIfRemote("M2 RLS integration against linked Supabase", () => {
+  // 정리 실패는 finally 에서 throw 하면 원래 실패 원인을 덮어쓴다 → 여기서 따로 터뜨린다.
+  afterAll(assertNoLeakedTestUsers);
+
   it("hides peer ranking aggregates when the same-grade cohort is below the minimum", async () => {
     if (!env) throw new Error("Missing Supabase test environment");
 
@@ -93,7 +97,7 @@ describeIfRemote("M2 RLS integration against linked Supabase", () => {
         rank_percentile: null
       });
     } finally {
-      if (studentId) await admin.auth.admin.deleteUser(studentId);
+      await deleteTestUsers(admin, [studentId]);
     }
   }, 60_000);
 
@@ -303,8 +307,7 @@ describeIfRemote("M2 RLS integration against linked Supabase", () => {
         .eq("id", ownId);
       expect(ownTampered.error?.message).toBeTruthy();
     } finally {
-      if (teacherId) await admin.auth.admin.deleteUser(teacherId);
-      if (studentId) await admin.auth.admin.deleteUser(studentId);
+      await deleteTestUsers(admin, [studentId, teacherId]);
     }
   }, 60_000);
 });

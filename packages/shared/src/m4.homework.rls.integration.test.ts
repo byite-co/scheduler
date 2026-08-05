@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 import { createClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import type { Database } from "./database.types";
 import { createTeacherReviewPatch } from "./m4";
+import { assertNoLeakedTestUsers, deleteTestUsers } from "./rlsTestCleanup";
 
 type ApiKey = { api_key: string; name: string };
 type TestEnv = { accessToken: string; projectRef: string; url: string };
@@ -14,6 +15,9 @@ const env = loadTestEnv();
 const describeIfRemote = env ? describe : describe.skip;
 
 describeIfRemote("M4 homework AI-check RLS against linked Supabase", () => {
+  // 정리 실패는 finally 에서 throw 하면 원래 실패 원인을 덮어쓴다 → 여기서 따로 터뜨린다.
+  afterAll(assertNoLeakedTestUsers);
+
   it("keeps AI verdict server-authoritative and teacher reads gated by photo disclosure", async () => {
     if (!env) throw new Error("Missing Supabase test environment");
 
@@ -234,9 +238,7 @@ describeIfRemote("M4 homework AI-check RLS against linked Supabase", () => {
       assertOk(teacherSeesSolo);
       expect(teacherSeesSolo.data).toEqual([]);
     } finally {
-      if (teacherId) await admin.auth.admin.deleteUser(teacherId);
-      if (studentId) await admin.auth.admin.deleteUser(studentId);
-      if (soloId) await admin.auth.admin.deleteUser(soloId);
+      await deleteTestUsers(admin, [studentId, soloId, teacherId]);
     }
   }, 60_000);
 });

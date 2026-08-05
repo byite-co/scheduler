@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 import { createClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import type { Database } from "./database.types";
+import { assertNoLeakedTestUsers, deleteTestUsers } from "./rlsTestCleanup";
 
 type ApiKey = {
   api_key: string;
@@ -21,6 +22,9 @@ const env = loadTestEnv();
 const describeIfRemote = env ? describe : describe.skip;
 
 describeIfRemote("M3 focus RLS integration against linked Supabase", () => {
+  // 정리 실패는 finally 에서 throw 하면 원래 실패 원인을 덮어쓴다 → 여기서 따로 터뜨린다.
+  afterAll(assertNoLeakedTestUsers);
+
   it("lets only the student save focus checks and reveals them to teachers only when focus disclosure is on", async () => {
     if (!env) throw new Error("Missing Supabase test environment");
 
@@ -189,8 +193,7 @@ describeIfRemote("M3 focus RLS integration against linked Supabase", () => {
         id: sessionId
       });
     } finally {
-      if (teacherId) await admin.auth.admin.deleteUser(teacherId);
-      if (studentId) await admin.auth.admin.deleteUser(studentId);
+      await deleteTestUsers(admin, [studentId, teacherId]);
     }
   }, 60_000);
 });

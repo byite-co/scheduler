@@ -162,12 +162,17 @@ C:\dev\ssamplanner
 - **타입 캐스팅으로 라우트 검사 우회 금지:** 기존 코드 곳곳에 `as Href` / `as never` 캐스팅이 있고,
   이것이 존재하지 않는 라우트로 가는 끊긴 링크를 컴파일 단계에서 숨겨왔다.
   새로 만드는 링크에는 캐스팅을 쓰지 마라.
-- **⚠️ RLS 통합 테스트는 조용히 skip 된다:** `*.rls.integration.test.ts` 는 루트 `.env.local` 의
-  `SUPABASE_PROJECT_REF` **와** `SUPABASE_ACCESS_TOKEN` 이 **둘 다** 있어야 실행된다
-  (`describeIfRemote` 게이팅). 현재 `SUPABASE_ACCESS_TOKEN` 이 빈 값이라 **8건이 skip 상태**다.
-  `pnpm test` 가 green 이어도 **RLS·트리거·권한은 검증되지 않았다는 뜻**이다.
-  실제로 이번 `scope_text` 작업의 버그(20260806020000)는 이 테스트가 아니라 별도로 돌린
-  실계정 검증에서 잡혔다. RLS 를 건드리는 작업은 반드시 원격 대상으로 직접 검증해라.
+- **RLS 통합 테스트는 토큰이 없으면 조용히 skip 된다:** `*.rls.integration.test.ts` 는 루트
+  `.env.local` 의 `SUPABASE_PROJECT_REF` **와** `SUPABASE_ACCESS_TOKEN` 이 **둘 다** 있어야
+  실행된다(`describeIfRemote` 게이팅). 토큰이 비면 skip 되면서도 `pnpm test` 는 green 이라
+  **RLS·트리거·권한이 검증되지 않았다는 사실이 드러나지 않는다.**
+  - **2026-08-06 토큰 설정 완료** → 8건이 실제로 실행된다(shared 133 passed / **0 skipped**).
+    그 전에는 `scope_text` 의 `btrim` 버그처럼 이 테스트가 잡아야 할 것을 별도 실계정
+    검증에서야 발견했다.
+  - 토큰이 비었는지 확인: `pnpm test` 출력에 `skipped` 가 있으면 게이팅이 걸린 것이다.
+- **⚠️ turbo 캐시가 검증을 무력화한다:** `pnpm test` 가 캐시 히트면 실제 실행이 안 된다.
+  진짜 검증은 `pnpm exec turbo run test --force` 로 해라.
+  (`pnpm test --force` 는 pnpm 이 먹어서 `Unknown option: 'force'` 가 난다.)
 
 ---
 
@@ -179,6 +184,14 @@ C:\dev\ssamplanner
   `ai_check_enabled`, `scope_text`, `locked`, `due_date`, `status`, `created_by`
   - **`scope_text`** — AI 숙제검사가 제출 사진과 대조할 **수행 범위 원문**(20260806010000 추가).
     자세한 규칙은 아래 "4-3. `todos.scope_text`" 참고.
+  - ⚠️ **`created_by` 에 ON DELETE 절이 없다**(= NO ACTION). `connections.requested_by` 도 같다.
+    그래서 교사가 만든 숙제 행이 남아 있으면 교사 프로필을 지울 수 없다. 게다가 Postgres 는
+    FK 트리거를 **제약 이름 알파벳순**으로 실행하므로, 같은 행을 CASCADE·NO ACTION 양쪽으로
+    참조할 때 NO ACTION 이 먼저 발동해 삭제가 막힌다(`connections_requested_by_fkey` <
+    `connections_student_id_fkey`). 계정을 지우는 코드는 **순서에 의존하지 말고**
+    `packages/shared/src/rlsTestCleanup.ts` 처럼 "지워지는 것부터 지우고 반복"해야 한다.
+    이 함정 때문에 테스트 계정 55건이 원격에 쌓였고, `deleteUser` 실패를 확인하지 않아
+    아무도 몰랐다.
 - **`homework_submissions`** — 제출 + AI 결과가 한 테이블.
   `photo_paths`, `ai_verdict`, `ai_confidence`, `ai_reason`, `teacher_status` 등
   - **검사 이력·상태·idempotency 없음.** AI 결과를 덮어써서 이전 판정이 소실된다.
