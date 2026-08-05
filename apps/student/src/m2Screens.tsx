@@ -1,6 +1,6 @@
 import { Children, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { Link, useLocalSearchParams, type Href } from "expo-router";
+import { Link, router, useLocalSearchParams, type Href } from "expo-router";
 import type { Session } from "@supabase/supabase-js";
 import {
   ActivityIndicator,
@@ -23,6 +23,7 @@ import {
   canStudentToggleTodoAiCheck,
   getDateKey,
   getStudentHomeVariant,
+  getStudentTodoRowAction,
   shouldShowConnectNudge,
   shouldShowPeerRanking,
   shouldShowTeacherHomework,
@@ -442,7 +443,14 @@ function TodosPlanner({
       {teacherTodos.length ? (
         <HomeCard title="선생님 숙제" right={<SoftTag tone="lock">편집 잠김</SoftTag>}>
           {teacherTodos.map((todo) => (
-            <PlannerTodoRow key={todo.id} onToggle={toggleTodoStatus} todo={todo} />
+            <PlannerTodoRow
+              key={todo.id}
+              onOpen={
+                getStudentTodoRowAction(todo) === "open_homework" ? () => openHomeworkDetail(todo.id) : undefined
+              }
+              onToggle={toggleTodoStatus}
+              todo={todo}
+            />
           ))}
         </HomeCard>
       ) : null}
@@ -465,14 +473,18 @@ function TodosPlanner({
 
 function PlannerTodoRow({
   onEdit,
+  onOpen,
   onToggle,
   todo
 }: {
   onEdit?: () => void;
+  onOpen?: () => void;
   onToggle: (todo: TodoRow) => Promise<void>;
   todo: TodoRow;
 }) {
   const done = todo.status === "done";
+  // 내 할 일은 제목=편집, 선생님 숙제는 제목=숙제 상세(카탈로그 C5 — 편집 잠김이지 진입 잠김이 아님).
+  const onTitlePress = onEdit ?? onOpen;
   return (
     <View style={styles.todoRow}>
       <Pressable
@@ -482,7 +494,12 @@ function PlannerTodoRow({
       >
         {done ? <AppIcon name="check" size={15} color={colors.surface} /> : null}
       </Pressable>
-      <Pressable disabled={!onEdit} onPress={() => onEdit?.()} style={styles.flex}>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!onTitlePress}
+        onPress={() => onTitlePress?.()}
+        style={styles.flex}
+      >
         <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
           {todo.title}
         </Text>
@@ -1029,25 +1046,65 @@ function SoftTag({
   );
 }
 
+// 선생님 숙제 행에서 숙제 상세(제출/대기/결과)로 진입한다. 라우트 리터럴을 앱 코드에 둬서
+// expo-router typed routes가 캐스팅 없이 검사하게 한다.
+function openHomeworkDetail(todoId: string) {
+  router.push({ pathname: "/homework/[id]", params: { id: todoId } });
+}
+
 function StudyTodoRow({
+  onOpen,
   onToggleStatus,
   todo
 }: {
+  onOpen?: () => void;
   onToggleStatus: (todo: TodoRow) => Promise<void>;
   todo: TodoRow;
 }) {
   const done = todo.status === "done";
+
+  if (!onOpen) {
+    return (
+      <Pressable onPress={() => void onToggleStatus(todo)} style={styles.todoRow}>
+        <View style={[styles.checkbox, done ? styles.checkboxDone : null]}>
+          {done ? <AppIcon name="check" size={15} color={colors.surface} /> : null}
+        </View>
+        <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
+          {todo.title}
+        </Text>
+        {todo.ai_check_enabled ? <SoftTag tone="brand">AI 검사</SoftTag> : null}
+        <SoftTag tone="subject">{todo.subject ? SUBJECT_LABELS[todo.subject] : "기타"}</SoftTag>
+      </Pressable>
+    );
+  }
+
+  // 선생님 숙제(카탈로그 C2): 체크박스=완료 토글, 제목·카메라=숙제 상세 진입.
   return (
-    <Pressable onPress={() => void onToggleStatus(todo)} style={styles.todoRow}>
-      <View style={[styles.checkbox, done ? styles.checkboxDone : null]}>
+    <View style={styles.todoRow}>
+      <Pressable
+        accessibilityLabel="완료 표시"
+        accessibilityRole="checkbox"
+        onPress={() => void onToggleStatus(todo)}
+        style={[styles.checkbox, done ? styles.checkboxDone : null]}
+      >
         {done ? <AppIcon name="check" size={15} color={colors.surface} /> : null}
-      </View>
-      <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
-        {todo.title}
-      </Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" onPress={onOpen} style={styles.flex}>
+        <Text style={[styles.todoRowTitle, done ? styles.todoRowTitleDone : null]} numberOfLines={1}>
+          {todo.title}
+        </Text>
+      </Pressable>
       {todo.ai_check_enabled ? <SoftTag tone="brand">AI 검사</SoftTag> : null}
+      <Pressable
+        accessibilityLabel="숙제 제출·결과 보기"
+        accessibilityRole="button"
+        onPress={onOpen}
+        style={styles.homeworkOpenButton}
+      >
+        <AppIcon name="camera" size={16} color={colors.brand} />
+      </Pressable>
       <SoftTag tone="subject">{todo.subject ? SUBJECT_LABELS[todo.subject] : "기타"}</SoftTag>
-    </Pressable>
+    </View>
   );
 }
 
@@ -1097,7 +1154,16 @@ function TeacherHomeworkCard({
       right={todos.length ? <Text style={styles.countBadge}>{`${done}/${todos.length}`}</Text> : undefined}
     >
       {todos.length ? (
-        todos.slice(0, 4).map((todo) => <StudyTodoRow key={todo.id} onToggleStatus={onToggleStatus} todo={todo} />)
+        todos.slice(0, 4).map((todo) => (
+          <StudyTodoRow
+            key={todo.id}
+            onOpen={
+              getStudentTodoRowAction(todo) === "open_homework" ? () => openHomeworkDetail(todo.id) : undefined
+            }
+            onToggleStatus={onToggleStatus}
+            todo={todo}
+          />
+        ))
       ) : (
         <EmptyText>오늘 마감인 선생님 숙제는 없어요.</EmptyText>
       )}
@@ -2365,6 +2431,14 @@ const styles = StyleSheet.create({
   checkboxDone: {
     borderColor: colors.success,
     backgroundColor: colors.success
+  },
+  homeworkOpenButton: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.chip,
+    backgroundColor: tints.brandSoft
   },
   checkboxMark: {
     color: colors.surface,
