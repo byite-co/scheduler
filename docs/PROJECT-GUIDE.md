@@ -180,19 +180,48 @@ C:\dev\ssamplanner
 - **사용량/비용 기록 테이블: 없음.**
 
 ### 보호 장치 (작동 확인됨)
-- `guard_student_todo_source_lock` 트리거 — 학생이 교사 숙제의
-  `ai_check_enabled`/`locked`/`source`/`connection_id`/`created_by`/`student_id` 변경 불가
+- `guard_student_todo_source_lock` 트리거 — **허용 목록(allowlist) 방식**(20260805000000).
+  학생 UPDATE 는 teacher 행=`status`만 / self 행=`title`·`subject`·`due_date`·`status`·`ai_check_enabled`.
+  목록에 없는 컬럼은 **기본 잠김** — 새 컬럼(`scope_text` 등)이 추가돼도 자동으로 막힌다.
 - `guard_homework_submission_fields` 트리거 — 인증 사용자가 `ai_verdict` 등 AI 필드 직접 쓰기 불가
   (학생 계정으로 위조 시도 → 서버가 거부하는 것을 실증 확인)
 - 제출 사진 열람 — active 연결 + `share_homework_photos` 공개범위로 게이팅
+- **구독 mock RPC 차단** — `mock_set_student_subscription`(20260805000000) ·
+  `mock_set_teacher_subscription`(20260806000000) 모두 anon/authenticated/public 에서 회수.
+  둘의 권한 형태를 동일하게 유지한다(한쪽만 다시 열리는 사고 방지 — 스키마 테스트가 검사).
+
+### 개발/테스트에서 구독 상태 만들기
+
+mock RPC 는 막혔고 앱 UI 에도 "상태를 바꾸는 버튼"이 없다(보안). 구독 상태가 필요하면:
+
+```bash
+node scripts/dev-set-subscription.mjs student <email> active
+node scripts/dev-set-subscription.mjs teacher <email> past_due
+# status: none | active | past_due | canceled | paused
+```
+
+**⚠️ 이 스크립트는 `SUPABASE_SERVICE_ROLE_KEY` 를 요구한다.**
+- 그 키는 **RLS 를 전부 우회**한다 — 사실상 DB 관리자 권한이다.
+- **앱 번들(`apps/*`)에 절대 넣지 마라.** `NEXT_PUBLIC_`/`EXPO_PUBLIC_` 접두사를 붙이면
+  클라이언트로 배포돼 누구나 DB 전체를 읽고 쓸 수 있다.
+- 루트 `.env` 의 `SUPABASE_SERVICE_ROLE_KEY` 로만 두고, 개발자가 로컬에서 직접 실행하는
+  도구에서만 읽는다. 현재 이 값은 **미발급** 상태라 스크립트를 쓰려면 먼저 발급해야 한다
+  (Supabase 대시보드 → Project Settings → API → service_role).
+
+왜 RPC 가 아니라 테이블 직접 upsert 인가: mock RPC 들은 대상을 `auth.uid()` 로 정하므로
+service_role(`auth.uid()` 가 null)로는 호출 자체가 안 된다(`authentication_required`).
+service_role 은 RLS 를 우회하니 RPC 없이 구독 테이블에 직접 쓰면 된다.
+
+영구 대체는 실연동 Edge Function(`iap-webhook` / `billing-stripe`)이며 별도 작업이다.
 
 ### ⚠️ 확인된 보안 구멍 (수리 필요)
-1. **학생이 교사 숙제의 `title`·`subject`·`due_date`를 변경할 수 있다.**
-   트리거 잠금 목록에 이 셋이 없다. `title`이 곧 검사 범위이므로,
-   학생이 범위를 좁혀놓고 AI 검사를 통과받는 우회가 가능하다.
-   (실제 학생 계정으로 `due_date` 변경 성공을 확인, 즉시 원복함)
-2. **프리미엄 검증이 클라이언트에만 있고 `expires_at`을 보지 않는다.**
+1. ~~학생이 교사 숙제의 `title`·`subject`·`due_date`를 변경할 수 있다~~
+   **→ 수리·원격 적용 완료**(20260805000000, 허용 목록 전환). 라이브 검증 7/7 통과.
+2. ~~mock 구독 RPC 로 사용자가 스스로 유료 상태가 될 수 있다~~
+   **→ 학생 20260805000000 · 과외쌤 20260806000000 으로 양쪽 회수 완료.**
+3. **프리미엄 검증이 클라이언트에만 있고 `expires_at`을 보지 않는다.**
    서버(Edge Function) 측 구독 검증이 0곳이다. 유료 기능을 만들려면 서버 검증이 전제다.
+   (mock RPC 를 막아 "스스로 유료가 되는" 경로는 사라졌지만, 이 판정 로직 구멍은 남아 있다.)
 
 ### 미구현 (스텁 상태)
 - 숙제 사진 실제 업로드/열람 코드 — 현재는 경로 문자열만 저장

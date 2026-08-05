@@ -78,8 +78,19 @@ describeIfRemote("M6 billing RLS against linked Supabase", () => {
       assertOk(others);
       expect(others.data).toEqual([]);
 
-      // 모의 웹훅: 미납 전이 후 본인 구독만 조회
-      const dunning = await teacherClient.rpc("mock_set_teacher_subscription", { p_status: "past_due" });
+      // SECURITY: 과외쌤 구독 mock RPC 도 클라이언트 롤에서 차단돼야 한다.
+      // (열려 있으면 과외쌤이 스스로 앱 구독료를 active 로 만든다 — 주 수입원이라 매출 직접 영향.)
+      const selfServeBilling = await teacherClient.rpc("mock_set_teacher_subscription", {
+        p_status: "active"
+      });
+      expect(selfServeBilling.error?.message ?? "").toMatch(/permission denied|not find the function/i);
+
+      // 미납 상태는 서버 키(service_role)로 만든다 — 실연동에서는 Stripe 웹훅이 이 자리를 맡는다.
+      const dunning = await admin
+        .from("teacher_subscriptions")
+        .upsert({ teacher_id: teacherId, status: "past_due", provider: "stripe" })
+        .select("status")
+        .single();
       assertOk(dunning);
       expect(dunning.data).toMatchObject({ status: "past_due" });
       const sub = await teacherClient.from("teacher_subscriptions").select("status").eq("teacher_id", teacherId).single();

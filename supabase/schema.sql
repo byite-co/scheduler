@@ -907,8 +907,14 @@ begin
   return result_row;
 end;
 $$;
+-- SECURITY: 클라이언트가 도달하는 롤에는 절대 주지 않는다 — 주면 과외쌤이 스스로
+-- 앱 구독료를 active 로 만들 수 있다(주 수입원이라 매출에 직접 영향).
+-- 구독 상태 생성은 서버 키(service_role) 경로로만 — scripts/dev-set-subscription.mjs 참조.
+-- 실연동 시 billing-stripe 가 이 자리를 대체한다.
 revoke all on function mock_set_teacher_subscription(sub_status) from public;
-grant execute on function mock_set_teacher_subscription(sub_status) to authenticated;
+revoke execute on function mock_set_teacher_subscription(sub_status) from anon;
+revoke execute on function mock_set_teacher_subscription(sub_status) from authenticated;
+grant execute on function mock_set_teacher_subscription(sub_status) to service_role;
 
 create or replace function mock_set_student_subscription(p_status sub_status, p_expires_at timestamptz default null)
 returns student_subscriptions
