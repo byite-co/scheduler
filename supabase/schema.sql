@@ -260,32 +260,49 @@ create policy todos_teacher_rw on todos for all using (
   exists(select 1 from connections c where c.id=todos.connection_id and c.teacher_id=auth.uid() and c.status='active')
 );
 
--- 학생은 선생님 숙제(source=teacher)의 완료 상태 등은 바꿀 수 있지만
--- AI 검사 여부/출처/연결/작성자는 바꿀 수 없다. 선생님 숙제는 항상 locked=true.
+-- 학생의 todos UPDATE 는 '허용 목록(allowlist)'만 통과한다 — 목록에 없는 컬럼은 기본 잠김.
+--  - source='teacher' 숙제: status(완료 체크)만. 범위(title)·과목·마감일 포함 그 외 전부 금지.
+--  - source='self' 할 일: title/subject/due_date/status/ai_check_enabled.
+--  - 어느 쪽에도 없는 id/student_id/connection_id/source/created_by/created_at/locked 는 항상 잠김.
+-- 새 컬럼을 추가하면 자동으로 잠긴다(금지 목록 방식의 갱신 누락 사고 방지).
+-- 교사(active 연결)·서비스롤은 이 게이트를 지나지 않는다 → 기존 권한 유지. 교사 숙제는 항상 locked=true.
 create or replace function guard_student_todo_source_lock()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  student_editable text[];
+  old_frozen jsonb;
+  new_frozen jsonb;
 begin
   if tg_op = 'INSERT' then
     if auth.uid() = new.student_id and new.source = 'teacher' then
       raise exception 'students_cannot_create_teacher_todos';
     end if;
+    if new.source = 'teacher' then
+      new.locked := true;
+    end if;
+    return new;
   end if;
 
-  if tg_op = 'UPDATE'
-    and auth.uid() = old.student_id
-    and old.source = 'teacher'
-    and old.locked = true then
-    if new.ai_check_enabled is distinct from old.ai_check_enabled
-      or new.locked is distinct from old.locked
-      or new.source is distinct from old.source
-      or new.connection_id is distinct from old.connection_id
-      or new.created_by is distinct from old.created_by
-      or new.student_id is distinct from old.student_id then
-      raise exception 'locked_teacher_todo_fields';
+  if auth.uid() = old.student_id then
+    if old.source = 'teacher' then
+      student_editable := array['status'];
+    else
+      student_editable := array['title', 'subject', 'due_date', 'status', 'ai_check_enabled'];
+    end if;
+
+    old_frozen := to_jsonb(old) - student_editable;
+    new_frozen := to_jsonb(new) - student_editable;
+
+    if old_frozen is distinct from new_frozen then
+      if old.source = 'teacher' then
+        raise exception 'locked_teacher_todo_fields';
+      else
+        raise exception 'locked_self_todo_fields';
+      end if;
     end if;
   end if;
 
@@ -907,8 +924,12 @@ begin
   return result_row;
 end;
 $$;
+-- SECURITY: 클라이언트가 도달하는 롤에는 절대 주지 않는다 — 주면 사용자가 스스로 프리미엄이 된다.
+-- 프리미엄 상태 생성은 서버 키(service_role) 경로로만. 실연동 시 iap-webhook 이 이 자리를 대체한다.
 revoke all on function mock_set_student_subscription(sub_status, timestamptz) from public;
-grant execute on function mock_set_student_subscription(sub_status, timestamptz) to authenticated;
+revoke execute on function mock_set_student_subscription(sub_status, timestamptz) from anon;
+revoke execute on function mock_set_student_subscription(sub_status, timestamptz) from authenticated;
+grant execute on function mock_set_student_subscription(sub_status, timestamptz) to service_role;
 
 -- 광고 보상 언락(무료 사용자) — 리포트/AI검사(혼공)/AI추천
 create table ad_unlocks (

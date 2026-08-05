@@ -86,9 +86,29 @@ describeIfRemote("M6 billing RLS against linked Supabase", () => {
       assertOk(sub);
       expect(sub.data?.status).toBe("past_due");
 
-      // 학생 프리미엄 모의 활성화
+      // SECURITY: 학생 프리미엄 mock RPC 는 클라이언트 롤에서 차단돼야 한다.
+      // (열려 있으면 사용자가 스스로 프리미엄이 되어 서버측 검증이 무의미해진다.)
       await signIn(teacherClient, s1Email, password); // reuse client as student session
-      const premium = await teacherClient.rpc("mock_set_student_subscription", { p_status: "active" });
+      const selfServePremium = await teacherClient.rpc("mock_set_student_subscription", {
+        p_status: "active"
+      });
+      expect(selfServePremium.error?.message ?? "").toMatch(/permission denied|not find the function/i);
+      const notPremium = await teacherClient
+        .from("student_subscriptions")
+        .select("status")
+        .eq("student_id", s1)
+        .maybeSingle();
+      assertOk(notPremium);
+      expect(notPremium.data?.status ?? "none").not.toBe("active");
+
+      // 개발/테스트용 프리미엄 상태는 서버 키(service_role)로 테이블에 직접 쓴다.
+      // (mock RPC 는 auth.uid() 로 대상을 정하므로 service_role 로는 쓸 수 없다 — auth.uid() 가 null.
+      //  service_role 은 RLS 를 우회하므로 RPC 없이 upsert 하면 된다.)
+      const premium = await admin
+        .from("student_subscriptions")
+        .upsert({ student_id: s1, status: "active", provider: "iap" })
+        .select("status, provider")
+        .single();
       assertOk(premium);
       expect(premium.data).toMatchObject({ status: "active", provider: "iap" });
     } finally {
