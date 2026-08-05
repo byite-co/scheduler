@@ -1,5 +1,11 @@
 name: ci
-on: [push, pull_request]
+
+# PR 에서 검사하고, main 에 들어온 것만 추가로 검사한다.
+# 예전 `on: [push, pull_request]` 는 브랜치 push 와 PR 에서 같은 커밋을 두 번 돌렸다.
+on:
+  pull_request:
+  push:
+    branches: [main]
 
 jobs:
   build:
@@ -11,10 +17,13 @@ jobs:
           version: 9.15.9
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -w lint
       - run: pnpm -w typecheck
       - run: pnpm -w test
+      # 빌드는 Supabase 환경변수 없이 통과해야 한다(클라이언트가 지연 생성이므로).
+      # 여기에 더미 값을 넣지 않는 것은 의도다 — 넣으면 "모듈 로드 시점에 클라이언트를 만들어
+      # 빌드가 죽는" 회귀가 CI 에서 가려진다. 실제 시크릿도 넣지 않는다(빌드에 불필요).
       - run: pnpm -w build
