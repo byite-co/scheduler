@@ -1,0 +1,25 @@
+-- AI 완료검사를 켠 할 일은 검사 범위(scope_text)가 있어야 한다.
+--
+-- 왜: 범위가 없으면 AI 가 "무엇과" 대조할지 알 수 없다. 사진만 보고 판정하게 되어 검사가
+-- 사실상 무의미해지고, 실연동 뒤에는 기준 없는 검사에 API 비용까지 든다.
+--
+-- 지금까지는 UI(양쪽 앱)에서만 막고 있었다. 클라이언트 검증만 두면 PostgREST 직접 호출로
+-- 그대로 우회된다 — 이 레포에서 이미 같은 유형의 사고를 겪었다(mock 구독 RPC 가 클라이언트에
+-- 열려 있었다). 최종 방어선은 DB 에 있어야 한다.
+--
+-- ── 적용 전 실측 (2026-08-06) ────────────────────────────────────────────────
+--   전체 todos                             3
+--   ai_check_enabled = true                1
+--   ai_check = true AND scope_text IS NULL 0   ← 위반 0건
+-- 위반이 0이므로 NOT VALID → VALIDATE 2단계가 필요 없다. 바로 검증되는 제약으로 넣는다.
+--
+-- ⚠️ 위반 행이 있었다면 scope_text 를 title 로 자동 채우지 않는다. 그건 AI 의 대조 기준을
+--    사람 모르게 바꾸는 일이다(20260806010000 에서 제목 자동 분리를 배제한 것과 같은 이유).
+--    그 경우 NOT VALID 로 걸고 사람이 각 행의 범위를 입력한 뒤 VALIDATE 해야 한다.
+--
+-- 표현: `ai_check_enabled = false or scope_text is not null`
+--   ai_check_enabled 는 not null 이므로 3값 논리 문제가 없다. "켜져 있으면 범위 필수"를
+--   그대로 읽히게 쓴다. scope_text 의 빈 문자열은 정규화 트리거가 이미 NULL 로 바꾸므로
+--   여기서 '' 를 따로 다룰 필요가 없다(하한 1 인 todos_scope_text_len 이 그 불변식을 못박는다).
+alter table todos add constraint todos_ai_check_needs_scope
+  check (ai_check_enabled = false or scope_text is not null);

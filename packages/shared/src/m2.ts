@@ -109,8 +109,10 @@ export function validateTodoScopeText(value: string | null | undefined): TodoSco
 // AI 완료검사를 켜면 범위가 필수다 — 범위가 없으면 AI 가 "무엇과" 대조할지 알 수 없고,
 // 사진만 보고 판정하게 되어 검사가 사실상 무의미해진다. 끄면 선택 입력이다.
 //
-// ※ DB 제약(ai_check_enabled=true → scope_text not null)은 아직 걸지 않았다. 기존 행 중
-//    AI 검사가 켜져 있는데 범위가 빈 것이 있을 수 있어, UI 전환이 끝난 뒤 별도로 넣는다.
+// ※ DB 에도 같은 규칙이 제약으로 걸려 있다(todos_ai_check_needs_scope, 20260806030000):
+//      check (ai_check_enabled = false or scope_text is not null)
+//    이 함수는 그 제약을 앱에서 미리 적용해 "저장 전에" 안내하기 위한 것이다. 규칙이 갈라지면
+//    앱이 통과시킨 값을 DB 가 거부해 날 오류가 사용자에게 그대로 보인다.
 export function isTodoScopeTextRequired(input: { aiCheckEnabled: boolean }): boolean {
   return input.aiCheckEnabled;
 }

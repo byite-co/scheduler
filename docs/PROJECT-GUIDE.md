@@ -307,9 +307,21 @@ service_role 은 RLS 를 우회하니 RPC 없이 구독 테이블에 직접 쓰�
 - 검사 화면(`/homework/review`)에도 범위를 넣은 이유: 제목과 범위를 분리한 뒤로는 제목만 보면
   검사자가 "무엇을 하기로 했는지" 알 수 없다. 분리 이전에는 제목에 범위가 섞여 있어 보였다.
 
+### DB 제약 (2026-08-06)
+`todos` 에 걸린 scope_text 관련 제약 2개 — **둘 다 DB 가 최종 방어선**이다. UI 만 막으면
+PostgREST 직접 호출로 우회된다(이 레포에서 mock 구독 RPC 로 이미 겪은 유형).
+
+| 제약 | 내용 | 마이그레이션 |
+| --- | --- | --- |
+| `todos_scope_text_len` | 공백 제외 1~500자 (하한 1 = "빈 문자열은 NULL" 불변식) | `20260806010000` |
+| `todos_ai_check_needs_scope` | `ai_check_enabled = false or scope_text is not null` | `20260806030000` |
+
+- 적용 시점 실측: `ai_check=true AND scope_text IS NULL` **0건** → `NOT VALID` 2단계 불필요.
+- ⚠️ 앞으로 위반 행이 생겨 제약을 다시 걸어야 하면 **`scope_text` 를 `title` 로 자동 채우지 마라.**
+  AI 의 대조 기준을 사람 모르게 바꾸는 일이다. `NOT VALID` 로 걸고 사람이 범위를 입력한 뒤 `VALIDATE`.
+- 앱 쪽 같은 규칙: `isTodoScopeTextRequired` · `validateTodoScopeTextForSave`.
+
 ### 아직 안 한 것
-- **DB 제약 `ai_check_enabled=true → scope_text not null` 은 아직 없다.** UI 가 두 앱 모두에서
-  막고 있지만, 기존 행에 위반이 있을 수 있어 별도 마이그레이션으로 넣어야 한다.
 - AI 검사가 이 값을 실제로 쓰는 로직(`ai-homework-check`)은 미구현.
 - 혼공생 AI 검사 진입점·프리미엄 게이트 미구현(입력 칸과 필수 규칙까지만 있다).
 

@@ -262,42 +262,75 @@ describeIfRemote("M2 RLS integration against linked Supabase", () => {
         .single();
       assertOk(ownTodo);
       const ownId = assertData(ownTodo.data).id;
-      assertOk(
-        await studentClient
-          .from("todos")
-          .update({ title: "내 할 일(수정)", due_date: "2030-02-02", ai_check_enabled: true })
-          .eq("id", ownId)
-      );
-
-      // source='self' 에서는 학생이 scope_text 를 직접 정할 수 있어야 한다(혼공 AI 검사 기준).
-      const readScope = async () => {
-        const row = await studentClient.from("todos").select("scope_text").eq("id", ownId).single();
+      const readScope = async (id: string) => {
+        const row = await studentClient.from("todos").select("scope_text").eq("id", id).single();
         assertOk(row);
         return row.data?.scope_text ?? null;
       };
-      assertOk(await studentClient.from("todos").update({ scope_text: "영단어 Day 12~14" }).eq("id", ownId));
-      expect(await readScope()).toBe("영단어 Day 12~14");
 
-      // 정규화: 빈 문자열·공백뿐인 입력은 NULL 로 저장된다("범위 없음"의 표현을 하나로 고정).
+      // AI 검사를 켜는 UPDATE 는 범위를 함께 넣어야 한다(todos_ai_check_needs_scope).
+      // 앱도 같은 규칙이라 이게 실제 사용 경로다.
+      assertOk(
+        await studentClient
+          .from("todos")
+          .update({
+            title: "내 할 일(수정)",
+            due_date: "2030-02-02",
+            ai_check_enabled: true,
+            scope_text: "영단어 Day 12~14"
+          })
+          .eq("id", ownId)
+      );
+      expect(await readScope(ownId)).toBe("영단어 Day 12~14");
+
+      // source='self' 에서는 학생이 scope_text 를 직접 바꿀 수 있어야 한다(혼공 AI 검사 기준).
+      assertOk(await studentClient.from("todos").update({ scope_text: "기출 21~30번" }).eq("id", ownId));
+      expect(await readScope(ownId)).toBe("기출 21~30번");
+
+      // SECURITY/정합성: AI 검사가 켜진 채로 범위를 비울 수는 없다.
+      // 비울 수 있으면 AI 가 대조할 기준 없이 검사가 돌아 판정이 무의미해진다.
+      const clearedWhileOn = await studentClient.from("todos").update({ scope_text: null }).eq("id", ownId);
+      expect(clearedWhileOn.error?.message ?? "").toContain("todos_ai_check_needs_scope");
+      expect(await readScope(ownId)).toBe("기출 21~30번"); // 거부됐으니 원래 값 유지
+
+      // 정규화·길이 규칙은 AI 검사 여부와 무관하다 → AI 를 끈 별도 행에서 검증한다.
+      // (같은 행에서 하면 '빈 값 → NULL' 검증이 위 제약에 걸려 규칙 자체를 확인할 수 없다.)
+      const normTodo = await studentClient
+        .from("todos")
+        .insert({
+          student_id: studentId,
+          title: "정규화 확인용 할 일",
+          subject: "math",
+          source: "self",
+          ai_check_enabled: false,
+          status: "todo",
+          created_by: studentId
+        })
+        .select("id")
+        .single();
+      assertOk(normTodo);
+      const normId = assertData(normTodo.data).id;
+
+      // 빈 문자열·공백뿐인 입력은 NULL 로 저장된다("범위 없음"의 표현을 하나로 고정).
       for (const blank of ["", "   ", "\t\n "]) {
-        assertOk(await studentClient.from("todos").update({ scope_text: blank }).eq("id", ownId));
-        expect(await readScope()).toBeNull();
+        assertOk(await studentClient.from("todos").update({ scope_text: blank }).eq("id", normId));
+        expect(await readScope(normId)).toBeNull();
       }
       // 앞뒤 공백은 제거되고 내용은 보존된다.
-      assertOk(await studentClient.from("todos").update({ scope_text: "  기출 21~30번  " }).eq("id", ownId));
-      expect(await readScope()).toBe("기출 21~30번");
+      assertOk(await studentClient.from("todos").update({ scope_text: "  기출 21~30번  " }).eq("id", normId));
+      expect(await readScope(normId)).toBe("기출 21~30번");
 
       // 길이 상한은 DB 가 강제한다 — 공백을 제외한 글자 수 기준.
       const maxLen = TODO_SCOPE_TEXT_MAX_LENGTH;
-      assertOk(await studentClient.from("todos").update({ scope_text: "가".repeat(maxLen) }).eq("id", ownId));
-      expect(await readScope()).toHaveLength(maxLen);
+      assertOk(await studentClient.from("todos").update({ scope_text: "가".repeat(maxLen) }).eq("id", normId));
+      expect(await readScope(normId)).toHaveLength(maxLen);
       // 공백은 세지 않으므로, 같은 글자수에 공백을 잔뜩 넣어도 통과해야 한다.
-      assertOk(await studentClient.from("todos").update({ scope_text: "가 ".repeat(maxLen) }).eq("id", ownId));
+      assertOk(await studentClient.from("todos").update({ scope_text: "가 ".repeat(maxLen) }).eq("id", normId));
       // 공백 제외 상한 초과는 거부된다(CHECK 제약 위반).
       const tooLong = await studentClient
         .from("todos")
         .update({ scope_text: "가".repeat(maxLen + 1) })
-        .eq("id", ownId);
+        .eq("id", normId);
       expect(tooLong.error?.message ?? "").toContain("todos_scope_text_len");
 
       // 단, 자기 할 일에서도 소유·출처 컬럼은 잠긴다.

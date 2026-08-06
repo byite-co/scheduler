@@ -256,7 +256,11 @@ create table todos (
   -- 공백 제외 글자 수 기준(\s = [[:space:]]). 하한 1 은 "빈 문자열은 NULL" 불변식을 못박는 것으로,
   -- 정규화 트리거가 사라지거나 우회되면 곧바로 드러난다.
   constraint todos_scope_text_len
-    check (scope_text is null or length(regexp_replace(scope_text, '\s', '', 'g')) between 1 and 500)
+    check (scope_text is null or length(regexp_replace(scope_text, '\s', '', 'g')) between 1 and 500),
+  -- AI 완료검사를 켠 행은 범위가 있어야 한다. 없으면 AI 가 "무엇과" 대조할지 알 수 없고,
+  -- 기준 없는 검사에 API 비용만 든다. UI 도 막지만 PostgREST 직접 호출은 UI 를 지나지 않는다.
+  constraint todos_ai_check_needs_scope
+    check (ai_check_enabled = false or scope_text is not null)
 );
 alter table todos enable row level security;
 create policy todos_student_rw on todos for all
