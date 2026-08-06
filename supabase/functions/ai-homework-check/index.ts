@@ -24,7 +24,7 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { CheckError, callAnthropicVision, type CheckErrorCode, type VisionResult } from "./anthropic.ts";
 
 // 시크릿이 없을 때의 대비값. 실제 값은 함수 시크릿(ANTHROPIC_MODEL)에서 온다.
-const DEFAULT_MODEL = "claude-sonnet-5";
+const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const PHOTO_BUCKET = "homework-photos";
 
 // Anthropic 비전이 읽을 수 있는 형식만. 버킷 allowed_mime_types 와 같아야 한다.
