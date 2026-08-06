@@ -26,6 +26,10 @@ const scopeTrimFixMigration = readFileSync(
   new URL("../../../supabase/migrations/20260806020000_fix_scope_text_whitespace_trim.sql", import.meta.url),
   "utf8"
 );
+const aiCheckNeedsScopeMigration = readFileSync(
+  new URL("../../../supabase/migrations/20260806030000_todos_ai_check_needs_scope.sql", import.meta.url),
+  "utf8"
+);
 
 // 트리거 함수는 마이그레이션이 쌓이며 통째로 교체된다. "현재 유효한" 정의는 schema.sql 과 그
 // 함수를 마지막으로 고친 마이그레이션에만 있다 — 과거 파일은 그 시점의 내용을 그대로 보존해야
@@ -91,6 +95,17 @@ describe("M2 Supabase schema coverage", () => {
     expect(scopeTextMigration).toContain("set scope_text = title");
     // title 을 잘라내거나 다시 쓰면 양쪽 앱 목록 표시가 깨진다.
     expect(scopeTextMigration).not.toMatch(/update todos[\s\S]*?set title/);
+  });
+
+  // AI 검사를 켜 놓고 범위를 비우면 AI 가 "무엇과" 대조할지 알 수 없다 → DB 가 막아야 한다.
+  // UI 만 막으면 PostgREST 직접 호출로 우회된다.
+  it("requires a scope whenever the AI check is enabled", () => {
+    for (const source of [schema, aiCheckNeedsScopeMigration]) {
+      expect(source).toContain("todos_ai_check_needs_scope");
+      expect(source).toContain("check (ai_check_enabled = false or scope_text is not null)");
+    }
+    // 위반 행의 범위를 title 로 자동 채우면 AI 의 대조 기준이 사람 모르게 바뀐다.
+    expect(aiCheckNeedsScopeMigration).not.toMatch(/update\s+todos[\s\S]*?set\s+scope_text\s*=\s*title/);
   });
 
   // 검사 범위(title)·과목·마감일이 교사 숙제 허용 목록에 절대 들어가지 않아야 한다.

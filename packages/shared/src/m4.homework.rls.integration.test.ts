@@ -88,12 +88,15 @@ describeIfRemote("M4 homework AI-check RLS against linked Supabase", () => {
       );
 
       // 선생님 숙제(과외생) + 혼공 본인 할 일
+      // AI 검사를 켜는 행은 scope_text 가 있어야 한다(todos_ai_check_needs_scope 제약).
+      // 범위가 없으면 AI 가 "무엇과" 대조할지 알 수 없다.
       const teacherTodo = await admin
         .from("todos")
         .insert({
           student_id: studentId,
           connection_id: connectionId,
-          title: "수학 p.116~118",
+          title: "수학 단원 마무리",
+          scope_text: "수학 p.116~118",
           subject: "math",
           source: "teacher",
           ai_check_enabled: true,
@@ -109,7 +112,8 @@ describeIfRemote("M4 homework AI-check RLS against linked Supabase", () => {
         .from("todos")
         .insert({
           student_id: soloId,
-          title: "영어 단어 30개",
+          title: "영단어 암기",
+          scope_text: "영어 단어 30개",
           subject: "english",
           source: "self",
           ai_check_enabled: true,
