@@ -196,6 +196,25 @@ C:\dev\ssamplanner
 
 ## 4. 알려진 함정
 
+- **⚠️ 브랜치 base 를 확인하지 않으면 커밋이 main 에 안 들어간다 (2026-08-06 실제 사고):**
+  PR #19(Haiku 전환)가 main 이 아니라 `feat/anthropic-homework-check` 로 머지됐다.
+  PR #18 이 **12초 먼저** main 에 들어가면서, #19 의 base 가 이미 머지된 브랜치가 된 것이다.
+  결과: **배포본은 Haiku인데 레포는 Sonnet 단가**였고, main 에서 재배포하면 비용 기록이 3배가
+  된다. 커밋 이력만 보면 "머지됨"이라 드러나지 않았다 — 조사 중에 우연히 발견했다.
+  - 브랜치를 딸 때 base 를 **명시**한다: `git checkout -B <name> origin/main`.
+    현재 브랜치에서 `git checkout -b` 하면 base 가 우연에 좌우된다.
+  - PR 을 만들 때 `--base main` 을 주고, 만든 뒤 `gh pr view <n> --json baseRefName` 으로 되읽는다.
+  - 머지 전 `git merge-base --is-ancestor origin/main <branch>` 가 true 인지 본다.
+    false 면 브랜치가 main 을 포함하지 않으므로 rebase 후 머지한다.
+- **⚠️ Edge Function 을 배포했으면 배포본과 레포를 대조한다:**
+  ```
+  supabase functions download ai-homework-check --use-api --workdir <빈 디렉터리>
+  ```
+  `--output-dir` 은 없고 기본 동작이 **작업 트리를 덮어쓴다** — 반드시 `--workdir` 로 딴 데 받는다.
+  위 12초 사고는 이 절차가 있었다면 그 자리에서 잡혔다.
+- **⚠️ `String.replace` 의 치환 문자열에서 `$$` 는 리터럴 `$` 다:**
+  SQL 을 스크립트로 조립할 때 달러 인용(`$$ ... $$`)이 전부 `$` 로 깨진다(schema.sql 을 한 번
+  깨뜨렸다). 치환 **함수**를 써라: `s.replace(a, () => b)`.
 - **Slot 패턴:** `<Link asChild>` 의 자식에 style 배열을 넘길 때 `StyleSheet.flatten` 필수.
 - **`apps/teacher/next-env.d.ts`:** Next.js가 자동 생성하는 파일. `build`/`dev` 중 뭐가 마지막에 돌았냐에 따라
   내용이 바뀐다. 수정하지도, 커밋하지도 말 것.
