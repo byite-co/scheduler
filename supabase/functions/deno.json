@@ -1,0 +1,17 @@
+{
+  "//": [
+    "Edge Function 전용 Deno 설정. 두 가지 이유로 둔다:",
+    "1) 이 파일이 없으면 deno 가 상위의 pnpm-workspace.yaml 을 발견하고 루트 package.json 에",
+    "   workspaces 필드를 써 넣으려 한다(실제로 그렇게 됐다). 여기 설정을 두면 이 디렉터리가",
+    "   설정 루트가 되어 워크스페이스를 건드리지 않는다.",
+    "2) nodeModulesDir=none: 함수는 Supabase 런타임에서 도는 Deno 코드이고 로컬 node_modules 를",
+    "   쓰지 않는다. auto 로 두면 jsr 타입이 참조하는 npm 패키지를 node_modules 에서 찾다가 실패한다.",
+    "타입 검사: pnpm check:functions"
+  ],
+  "nodeModulesDir": "none",
+  "lock": false,
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.window", "dom"]
+  }
+}

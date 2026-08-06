@@ -11,6 +11,7 @@ import {
   HOMEWORK_PHOTO_MAX_COUNT,
   HOMEWORK_PHOTO_TIPS,
   SUBJECT_LABELS,
+  getHomeworkCheckErrorMessage,
   getHomeworkResultView,
   getTodoScopeTextForDisplay,
   validateHomeworkPhotos,
@@ -169,13 +170,22 @@ export function HomeworkSubmitScreen() {
 
     setSubmitState("checking");
     const checked = await supabase.functions.invoke("ai-homework-check", {
-      body: { submissionId: inserted.data.id }
+      body: { submissionId: inserted.data.id, idempotencyKey: `${inserted.data.id}:${submissionKey}` }
     });
 
     if (checked.error) {
-      // 제출 자체는 저장됨 — 검사만 실패(H3).
+      // 제출 자체는 저장됐다 — 검사만 실패(H3). AI 는 조수이므로 여기서 막지 않고
+      // 과외쌤 수동 검사로 넘어간다. 서버가 준 errorCode 로 안내 문구를 고른다.
+      let code: string | null = null;
+      try {
+        // functions.invoke 는 non-2xx 를 error 로 주고 본문은 context 에 담는다.
+        const body = await (checked.error as { context?: Response }).context?.json();
+        code = typeof body?.errorCode === "string" ? body.errorCode : null;
+      } catch {
+        code = null;
+      }
       setSubmitState("check_failed");
-      setErrorText("AI 검사를 끝내지 못했어요. 다시 시도하거나 잠시 후 결과를 확인해요.");
+      setErrorText(getHomeworkCheckErrorMessage(code));
       return;
     }
 

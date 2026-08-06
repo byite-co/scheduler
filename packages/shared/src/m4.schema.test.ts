@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { HOMEWORK_CHECK_ERROR_MESSAGES } from "./m4";
+
 const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
 const migration = readFileSync(
   new URL("../../../supabase/migrations/20260624000000_m4_homework_ai_check.sql", import.meta.url),
@@ -201,8 +203,10 @@ describe("M4 server-side AI check gate", () => {
     expect(edgeFunction).not.toContain("body?.photoPaths");
     // markedLowEffort 는 pass ↔ insufficient 를 뒤집던 클라이언트 플래그였다 → 제거.
     expect(edgeFunction).not.toContain("body?.markedLowEffort");
-    // 판정 함수는 스냅샷의 사진 수만 받는다(클라이언트 힌트를 인자로 되살리면 회귀).
-    expect(edgeFunction).toContain("function getStubHomeworkVerdict(photoCount: number): StubResult");
+    // 판정 입력은 서버가 DB 에서 읽은 스냅샷뿐이다. 실연동 후에도 body 에서 읽는 것은
+    // ID 와 idempotency 키뿐이어야 한다 — 판정에 영향을 주는 값이 추가되면 회귀.
+    const bodyReads = [...edgeFunction.matchAll(/body\?\.(\w+)/g)].map((m) => m[1]);
+    expect([...new Set(bodyReads)].sort()).toEqual(["idempotencyKey", "submissionId"]);
   });
 
   it("does not reveal whether someone else's submission exists", () => {
@@ -210,5 +214,57 @@ describe("M4 server-side AI check gate", () => {
     expect(edgeFunction).toContain("const NOT_FOUND");
     // DB 예외 원문을 그대로 흘리면 다른 행의 정보가 섞일 수 있다.
     expect(edgeFunction).not.toContain("detail: startError?.message");
+  });
+});
+
+// Deno 런타임은 이 패키지를 import 할 수 없어 Edge Function 에 쌍둥이 정의가 있다.
+// 두 곳이 갈라지면 서버가 보낸 error_code 에 대응하는 사용자 문구가 없어진다.
+describe("M4 edge function ↔ shared 대조", () => {
+  const anthropicModule = readFileSync(
+    new URL("../../../supabase/functions/ai-homework-check/anthropic.ts", import.meta.url),
+    "utf8"
+  );
+
+  it("keeps the CheckErrorCode set identical on both sides", () => {
+    const denoCodes = [...anthropicModule.matchAll(/^\s*\|\s*"([a-z_]+)"/gm)].map((m) => m[1]);
+    expect(denoCodes.length).toBeGreaterThan(5);
+    const sharedCodes = Object.keys(HOMEWORK_CHECK_ERROR_MESSAGES);
+    expect([...denoCodes].sort()).toEqual([...sharedCodes].sort());
+  });
+
+  it("keeps the AI as an assistant, not a grader", () => {
+    // 제품 원칙 §3-2. 프롬프트가 정답 채점을 하지 않는다고 못박아야 한다.
+    expect(anthropicModule).toContain("정답 여부를 판정하지 않습니다");
+    expect(anthropicModule).toContain("확신할 수 없는 것을 단정하지 않습니다");
+    expect(anthropicModule).toContain("추측으로 채우지 않습니다");
+    // 페이지 번호가 안 보이면 억지 판정 금지.
+    expect(anthropicModule).toContain("페이지 확인 어려움");
+  });
+
+  it("keeps pricing in integer micros so costs can be summed without drift", () => {
+    expect(anthropicModule).toContain("INPUT_MICROS_PER_MTOK");
+    expect(anthropicModule).toContain("OUTPUT_MICROS_PER_MTOK");
+    expect(anthropicModule).toContain("estimateCostUsdMicros");
+  });
+
+  it("sets a timeout and an image size ceiling", () => {
+    expect(anthropicModule).toContain("REQUEST_TIMEOUT_MS");
+    expect(anthropicModule).toContain("MAX_TOTAL_IMAGE_BYTES");
+    expect(anthropicModule).toContain("AbortController");
+  });
+
+  it("verifies snapshot photos exist before calling the model", () => {
+    expect(edgeFunction).toContain("downloadSnapshotImages");
+    expect(edgeFunction).toContain("photos_missing");
+    // 라이브 값이 아니라 스냅샷을 봐야 한다.
+    expect(edgeFunction).toContain("attempt.photo_paths_snapshot");
+    expect(edgeFunction).toContain("attempt.scope_text_snapshot");
+    // 실패는 반드시 attempt 에 남겨 슬롯을 비운다 — 안 그러면 재시도가 영구히 막힌다.
+    expect(edgeFunction).toContain("fail_homework_check_attempt");
+  });
+
+  it("no longer contains the stub verdict", () => {
+    expect(edgeFunction).not.toContain("getStubHomeworkVerdict");
+    expect(edgeFunction).not.toContain("stub-deterministic");
   });
 });

@@ -302,6 +302,44 @@ export const HOMEWORK_PHOTO_TIPS = [
   "밝은 곳에서 똑바로, 그림자 없이 찍어요."
 ] as const;
 
+// ── AI 검사 실패 코드 → 사용자 메시지 ───────────────────────────────────────
+// Edge Function 이 attempt.error_code 에 남기는 값이다(supabase/functions/.../anthropic.ts 의
+// CheckErrorCode 와 같은 집합이어야 한다 — Deno 는 이 패키지를 import 할 수 없어 쌍둥이 구현이고
+// 스키마 테스트가 두 곳을 대조한다).
+//
+// 원칙: **실패해도 학생을 막지 않는다.** AI 는 조수이므로 못 봤으면 과외쌤 수동 검사로 넘어간다.
+// 문구에 "실패"를 앞세우지 않고 다음 행동을 알려 준다.
+export type HomeworkCheckErrorCode =
+  | "photos_missing"
+  | "photo_download_failed"
+  | "photo_too_large"
+  | "auth_failed"
+  | "rate_limited"
+  | "upstream_timeout"
+  | "upstream_error"
+  | "response_malformed"
+  | "unknown";
+
+export const HOMEWORK_CHECK_ERROR_MESSAGES: Record<HomeworkCheckErrorCode, string> = {
+  photos_missing: "올린 사진을 찾지 못했어요. 사진을 다시 올려 제출해 주세요.",
+  photo_download_failed: "사진을 읽는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.",
+  photo_too_large: "사진 용량이 너무 커요. 조금 더 작게 찍어 다시 올려 주세요.",
+  // 키 문제는 사용자가 할 수 있는 게 없다 — 서버 문제임을 알리고 수동 검사로 넘긴다.
+  auth_failed: "확인 중 문제가 생겼어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
+  rate_limited: "지금 확인 요청이 많아요. 잠시 후 다시 시도해 주세요.",
+  upstream_timeout: "확인이 오래 걸려 멈췄어요. 제출은 저장됐어요. 다시 시도하거나 결과를 기다려 주세요.",
+  upstream_error: "확인 중 문제가 생겼어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
+  response_malformed: "확인 결과를 읽지 못했어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
+  unknown: "확인 중 문제가 생겼어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요."
+};
+
+export function getHomeworkCheckErrorMessage(code: string | null | undefined): string {
+  if (code && code in HOMEWORK_CHECK_ERROR_MESSAGES) {
+    return HOMEWORK_CHECK_ERROR_MESSAGES[code as HomeworkCheckErrorCode];
+  }
+  return HOMEWORK_CHECK_ERROR_MESSAGES.unknown;
+}
+
 // ── AI 검사 과금 권한 ────────────────────────────────────────────────────────
 // 🚨 가격 구조의 핵심. 모든 AI 요청에 학생 프리미엄을 요구하면 안 된다.
 //

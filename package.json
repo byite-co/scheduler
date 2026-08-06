@@ -14,10 +14,12 @@
     "supabase:types": "supabase gen types typescript --local > packages/shared/src/database.types.ts",
     "sb": "node scripts/supabase-guard.mjs",
     "sb:check": "node scripts/supabase-guard.mjs --check",
-    "dev:set-subscription": "node scripts/dev-set-subscription.mjs"
+    "dev:set-subscription": "node scripts/dev-set-subscription.mjs",
+    "check:functions": "deno check --config supabase/functions/deno.json supabase/functions/**/index.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",
+    "deno": "^2.9.4",
     "eslint": "9.39.4",
     "globals": "16.5.0",
     "pnpm": "9.15.9",
