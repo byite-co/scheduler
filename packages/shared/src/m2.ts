@@ -90,7 +90,13 @@ export function countTodoScopeTextLength(value: string): number {
   return value.replace(ASCII_WHITESPACE, "").length;
 }
 
-export type TodoScopeTextError = "scope_text_too_long";
+export type TodoScopeTextError = "scope_text_too_long" | "scope_text_required";
+
+/** 두 앱이 같은 문구를 쓰도록 shared 에 둔다(SUBJECT_LABELS 등과 같은 방식). */
+export const TODO_SCOPE_TEXT_ERROR_MESSAGES: Record<TodoScopeTextError, string> = {
+  scope_text_required: "AI 완료검사를 켜면 검사 범위를 입력해야 해요.",
+  scope_text_too_long: `검사 범위는 공백을 빼고 ${TODO_SCOPE_TEXT_MAX_LENGTH}자까지 쓸 수 있어요.`
+};
 
 export function validateTodoScopeText(value: string | null | undefined): TodoScopeTextError | undefined {
   const normalized = normalizeTodoScopeText(value);
@@ -98,6 +104,36 @@ export function validateTodoScopeText(value: string | null | undefined): TodoSco
     return "scope_text_too_long";
   }
   return undefined;
+}
+
+// AI 완료검사를 켜면 범위가 필수다 — 범위가 없으면 AI 가 "무엇과" 대조할지 알 수 없고,
+// 사진만 보고 판정하게 되어 검사가 사실상 무의미해진다. 끄면 선택 입력이다.
+//
+// ※ DB 제약(ai_check_enabled=true → scope_text not null)은 아직 걸지 않았다. 기존 행 중
+//    AI 검사가 켜져 있는데 범위가 빈 것이 있을 수 있어, UI 전환이 끝난 뒤 별도로 넣는다.
+export function isTodoScopeTextRequired(input: { aiCheckEnabled: boolean }): boolean {
+  return input.aiCheckEnabled;
+}
+
+/** 저장 직전 검증 — 필수 여부까지 함께 본다. 두 앱이 같은 규칙을 쓰게 하려고 shared 에 둔다. */
+export function validateTodoScopeTextForSave(
+  value: string | null | undefined,
+  input: { aiCheckEnabled: boolean }
+): TodoScopeTextError | undefined {
+  const normalized = normalizeTodoScopeText(value);
+  if (!normalized) return isTodoScopeTextRequired(input) ? "scope_text_required" : undefined;
+  return validateTodoScopeText(normalized);
+}
+
+/**
+ * 화면에 보여줄 "검사 범위" — scope_text 우선, 없으면 title 로 되돌아간다.
+ *
+ * scope_text 도입(20260806010000) 전에 만들어진 할 일은 범위를 title 에 적어 뒀다. 그 마이그레이션은
+ * `ai_check_enabled = true` 인 행만 title 을 복사했으므로, **AI 검사가 꺼진 옛 행은 아직 scope_text 가
+ * 비어 있다.** 그런 행에서 빈칸을 보여주면 "범위가 사라졌다"로 보이므로 title 로 대체한다.
+ */
+export function getTodoScopeTextForDisplay(todo: { scope_text?: string | null; title: string }): string {
+  return normalizeTodoScopeText(todo.scope_text) ?? todo.title;
 }
 
 // 범위의 '의미'는 교사 숙제와 개인 할 일에서 동일하고, 수정 권한만 다르다.

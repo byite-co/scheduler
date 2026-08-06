@@ -18,16 +18,20 @@ import { colors, meetsAA, radii, spacing, tints, typography } from "@ssamplanner
 import {
   PEER_RANKING_MIN_COHORT,
   SUBJECT_LABELS,
+  TODO_SCOPE_TEXT_ERROR_MESSAGES,
   calculateStudyStreak,
   canShowPeerRanking,
   canStudentToggleTodoAiCheck,
   getDateKey,
   getStudentHomeVariant,
   getStudentTodoRowAction,
+  isTodoScopeTextRequired,
+  normalizeTodoScopeText,
   shouldShowConnectNudge,
   shouldShowPeerRanking,
   shouldShowTeacherHomework,
-  sumStudySecondsForDate
+  sumStudySecondsForDate,
+  validateTodoScopeTextForSave
 } from "@ssamplanner/shared";
 import type { Database, PeerRankingSnapshot, SubjectCode } from "@ssamplanner/shared";
 
@@ -316,6 +320,8 @@ function TodosPlanner({
   const [composing, setComposing] = useState(Boolean(composeTodo));
   const [editingId, setEditingId] = useState<string | null>(initialTodoId ?? null);
   const [title, setTitle] = useState("");
+  // AI 검사가 제출 사진과 대조할 범위 원문. title(목록에 보이는 이름)과 역할이 다르다.
+  const [scopeText, setScopeText] = useState("");
   const [subject, setSubject] = useState<SubjectCode>("math");
   const [dueDate, setDueDate] = useState(getDateKey(new Date()));
   const [aiCheckEnabled, setAiCheckEnabled] = useState(false);
@@ -325,6 +331,9 @@ function TodosPlanner({
   useEffect(() => {
     if (!editingTodo) return;
     setTitle(editingTodo.title);
+    // 편집 시에는 title fallback 을 쓰지 않는다 — 빈 범위를 title 로 채워 보여주면
+    // 저장 순간 title 이 범위로 복사돼 버린다. 표시용 fallback 은 읽기 화면에서만 쓴다.
+    setScopeText(editingTodo.scope_text ?? "");
     setSubject(editingTodo.subject ?? "etc");
     setDueDate(editingTodo.due_date ?? getDateKey(new Date()));
     setAiCheckEnabled(editingTodo.ai_check_enabled);
@@ -334,6 +343,7 @@ function TodosPlanner({
     setEditingId(null);
     setComposing(false);
     setTitle("");
+    setScopeText("");
     setAiCheckEnabled(false);
   }
 
@@ -350,8 +360,16 @@ function TodosPlanner({
       return;
     }
 
+    // 범위 규칙은 DB(todos_scope_text_len + 정규화 트리거)에도 있지만, 저장 전에 알려야 한다.
+    const scopeError = validateTodoScopeTextForSave(scopeText, { aiCheckEnabled });
+    if (scopeError) {
+      data.setMessage(TODO_SCOPE_TEXT_ERROR_MESSAGES[scopeError]);
+      return;
+    }
+
     const payload = {
       title: trimmedTitle,
+      scope_text: normalizeTodoScopeText(scopeText),
       subject,
       due_date: dueDate.trim() || null,
       ai_check_enabled: aiCheckEnabled
@@ -402,11 +420,29 @@ function TodosPlanner({
 
   if (showForm) {
     const aiLocked = Boolean(editingTodo && !canStudentToggleTodoAiCheck(editingTodo));
+    // 범위 판정은 shared 헬퍼로만 한다 — DB 제약과 규칙이 갈라지면 날 오류가 그대로 보인다.
+    const scopeRequired = isTodoScopeTextRequired({ aiCheckEnabled });
+    const scopeTooLong =
+      validateTodoScopeTextForSave(scopeText, { aiCheckEnabled }) === "scope_text_too_long";
     return (
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{editingTodo ? "할 일 수정" : "새 할 일"}</Text>
         <View style={styles.cardBody}>
-          <InputRow label="제목" value={title} onChange={setTitle} placeholder="예: 수학 개념 복습 30분" />
+          <InputRow label="제목" value={title} onChange={setTitle} placeholder="예: 미적분 오답노트 3문제" />
+          {/* 카탈로그 K1 에는 범위 칸이 없어 새로 만들었다. 라벨은 C4(숙제 제출)의 '검사 범위'와
+              맞추고, 위치는 카탈로그 B4(과외쌤 출제)처럼 제목 바로 아래에 둔다. */}
+          <InputRow
+            label={scopeRequired ? "검사 범위 (필수)" : "검사 범위 (선택)"}
+            value={scopeText}
+            onChange={setScopeText}
+            placeholder="예: 쎈 112-118p, 115 제외"
+            error={scopeTooLong ? TODO_SCOPE_TEXT_ERROR_MESSAGES.scope_text_too_long : undefined}
+            hint={
+              scopeRequired
+                ? "AI 가 사진과 대조할 기준이에요. 교재·페이지·문제번호를 적어요."
+                : "AI 완료검사를 켜면 꼭 입력해야 해요. 제목과 달리 대조 기준이 됩니다."
+            }
+          />
           <InputRow label="마감일" value={dueDate} onChange={setDueDate} placeholder="YYYY-MM-DD" />
           <ChoiceRow
             label="과목"
@@ -1601,11 +1637,15 @@ function ChoiceRow<T extends string | number>({
 }
 
 function InputRow({
+  error,
+  hint,
   label,
   onChange,
   placeholder,
   value
 }: {
+  error?: string;
+  hint?: string;
   label: string;
   onChange: (value: string) => void;
   placeholder: string;
@@ -1619,9 +1659,14 @@ function InputRow({
         onChangeText={onChange}
         placeholder={placeholder}
         placeholderTextColor={colors.muted}
-        style={styles.input}
+        style={[styles.input, error ? styles.inputError : null]}
         value={value}
       />
+      {error ? (
+        <Text style={styles.fieldError}>{error}</Text>
+      ) : hint ? (
+        <Text style={styles.fieldHint}>{hint}</Text>
+      ) : null}
     </View>
   );
 }
@@ -2081,6 +2126,19 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 13,
     fontWeight: "900"
+  },
+  inputError: {
+    borderColor: colors.danger
+  },
+  fieldHint: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  fieldError: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "800"
   },
   input: {
     minHeight: 44,
