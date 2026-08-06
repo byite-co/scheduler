@@ -360,7 +360,10 @@ create table homework_submissions (
   teacher_status review_status not null default 'pending', -- 혼공생은 teacher_* 사용 안 함
   teacher_comment text,
   resubmit_requested boolean not null default false,
-  created_at     timestamptz not null default now()
+  created_at     timestamptz not null default now(),
+  -- 사진 1~9장. coalesce 없이 array_length 를 쓰면 빈 배열(NULL)이 통과한다.
+  constraint subs_photo_count
+    check (coalesce(array_length(photo_paths, 1), 0) between 1 and 9)
 );
 alter table homework_submissions enable row level security;
 create policy subs_student_rw on homework_submissions for all
@@ -753,9 +756,21 @@ begin
       raise exception 'teacher_fields_not_student_editable';
     end if;
   end if;
+
+  -- 모든 사진 경로는 제출 학생의 폴더(`${student_id}/...`) 안이어야 한다. 남의 폴더를
+  -- 가리키면 과외쌤 검사 화면에 다른 학생의 사진이 뜬다. service_role 도 예외가 아니다.
+  if exists (
+    select 1
+      from unnest(new.photo_paths) as p
+     where p is null
+        or p not like new.student_id::text || '/%'
+  ) then
+    raise exception 'photo_paths_must_be_in_own_folder';
+  end if;
+
   return new;
 end;
-$$;
+$;
 drop trigger if exists guard_homework_submission_fields_trigger on homework_submissions;
 create trigger guard_homework_submission_fields_trigger
   before insert or update on homework_submissions
@@ -1436,6 +1451,12 @@ create index if not exists timetable_blocks_student_day_start_idx on timetable_b
 -- ============================================================================
 -- Storage 버킷(앱에서 생성):
 --   - homework-photos : 숙제 제출 사진(비공개, 학생 본인 + 공개 시 연결 쌤)
+--     · 버킷 제한(20260806060000): file_size_limit 5MB,
+--       allowed_mime_types = image/jpeg, image/png, image/webp
+--       (HEIC 제외 — 비전 API 가 못 읽으므로 앱이 업로드 전에 JPEG 로 변환한다)
+--     · Storage 정책: 학생은 자기 폴더 insert/select/delete,
+--       과외쌤은 select 만 — subs_teacher_read 와 같은 조건
+--       (active 연결 + disclosure_settings.share_homework_photos)
 --   - avatars         : 프로필 이미지(공개/서명 URL)
 --   ※ 집중 모드 졸음 영상/프레임 버킷은 만들지 않는다(온디바이스 전용).
 --

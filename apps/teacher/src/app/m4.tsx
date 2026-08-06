@@ -187,6 +187,12 @@ export function TeacherHomeworkReview() {
                   </div>
                 </div>
 
+                {/* 버킷이 private 이라 서명 URL 이 필요하다. 발급 권한은 Storage 정책
+                    homework_photos_teacher_select 가 결정한다 — active 연결 +
+                    share_homework_photos 로 subs_teacher_read 와 같은 조건이다.
+                    공개범위가 꺼져 있으면 여기서 URL 이 발급되지 않아 사진이 안 보인다. */}
+                <SubmissionPhotos paths={item.photo_paths} />
+
                 {item.ai_reason ? <p className="text-sm font-semibold text-ink">{item.ai_reason}</p> : null}
 
                 <p className="text-xs font-bold text-muted">
@@ -439,6 +445,55 @@ export function TeacherHomeworkAssign() {
         </section>
       </div>
     </TeacherShell>
+  );
+}
+
+// 비공개 버킷의 사진을 서명 URL 로 보여준다. 발급 자체가 권한 검사다 —
+// Storage 정책(active 연결 + share_homework_photos)을 통과하지 못하면 URL 이 안 나온다.
+function SubmissionPhotos({ paths }: { paths: string[] }) {
+  const [urls, setUrls] = useState<string[]>([]);
+  const [blocked, setBlocked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (paths.length === 0) return;
+      const { data, error } = await supabase.storage
+        .from("homework-photos")
+        .createSignedUrls(paths, 600);
+      if (cancelled) return;
+      const signed = (data ?? [])
+        .map((item) => item.signedUrl)
+        .filter((url): url is string => Boolean(url));
+      setUrls(signed);
+      // 공개범위가 꺼져 있으면 서명 URL 이 하나도 안 나온다.
+      setBlocked(Boolean(error) || signed.length === 0);
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [paths]);
+
+  if (paths.length === 0) return null;
+  if (blocked) {
+    return (
+      <p className="text-xs font-bold text-muted">
+        사진 {paths.length}장 — 학생이 사진 공개를 꺼 두어 볼 수 없어요.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {urls.map((url, index) => (
+        <img
+          key={url}
+          src={url}
+          alt={`제출 사진 ${index + 1}`}
+          className="h-28 w-28 rounded-control border border-line object-cover"
+        />
+      ))}
+    </div>
   );
 }
 

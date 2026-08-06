@@ -103,7 +103,7 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
 
       const submission = await admin
         .from("homework_submissions")
-        .insert({ todo_id: todoId, student_id: studentId, photo_paths: ["a/1.jpg", "a/2.jpg"] })
+        .insert({ todo_id: todoId, student_id: studentId, photo_paths: [`${studentId}/p1.jpg`, `${studentId}/p2.jpg`] })
         .select("id")
         .single();
       assertOk(submission);
@@ -117,7 +117,7 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
       const studentInsert = await studentClient.from("homework_check_attempts").insert({
         submission_id: submissionId,
         requested_by: studentId,
-        photo_paths_snapshot: ["a/1.jpg"],
+        photo_paths_snapshot: [`${studentId}/p1.jpg`],
         idempotency_key: `student-forged-${suffix}`
       });
       expect(studentInsert.error).toBeTruthy();
@@ -133,7 +133,7 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
       expect(attempt.status).toBe("processing");
       // 스냅샷: 검사 시작 시점의 범위·사진이 고정돼야 한다.
       expect(attempt.scope_text_snapshot).toBe("쎈 112~118p, 115p 제외");
-      expect(attempt.photo_paths_snapshot).toEqual(["a/1.jpg", "a/2.jpg"]);
+      expect(attempt.photo_paths_snapshot).toEqual([`${studentId}/p1.jpg`, `${studentId}/p2.jpg`]);
       expect(attempt.verdict).toBeNull();
       const attemptId = attempt.id as string;
 
@@ -196,7 +196,7 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
       const dupInsert = await admin.from("homework_check_attempts").insert({
         submission_id: submissionId,
         requested_by: studentId,
-        photo_paths_snapshot: ["a/1.jpg"],
+        photo_paths_snapshot: [`${studentId}/p1.jpg`],
         idempotency_key: `run-1-${suffix}`
       });
       expect(dupInsert.error?.message ?? "").toMatch(/duplicate key|idempotency/i);
