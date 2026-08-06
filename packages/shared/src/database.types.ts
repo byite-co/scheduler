@@ -307,6 +307,87 @@ export type Database = {
           },
         ]
       }
+      homework_check_attempts: {
+        Row: {
+          completed_at: string | null
+          confidence: number | null
+          created_at: string
+          error_code: string | null
+          estimated_cost_usd_micros: number | null
+          id: string
+          idempotency_key: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          photo_paths_snapshot: string[]
+          reason: string | null
+          requested_by: string
+          scope_text_snapshot: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["check_attempt_status"]
+          submission_id: string
+          updated_at: string
+          verdict: Database["public"]["Enums"]["submission_verdict"] | null
+        }
+        Insert: {
+          completed_at?: string | null
+          confidence?: number | null
+          created_at?: string
+          error_code?: string | null
+          estimated_cost_usd_micros?: number | null
+          id?: string
+          idempotency_key: string
+          input_tokens?: number | null
+          model?: string | null
+          output_tokens?: number | null
+          photo_paths_snapshot: string[]
+          reason?: string | null
+          requested_by: string
+          scope_text_snapshot?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["check_attempt_status"]
+          submission_id: string
+          updated_at?: string
+          verdict?: Database["public"]["Enums"]["submission_verdict"] | null
+        }
+        Update: {
+          completed_at?: string | null
+          confidence?: number | null
+          created_at?: string
+          error_code?: string | null
+          estimated_cost_usd_micros?: number | null
+          id?: string
+          idempotency_key?: string
+          input_tokens?: number | null
+          model?: string | null
+          output_tokens?: number | null
+          photo_paths_snapshot?: string[]
+          reason?: string | null
+          requested_by?: string
+          scope_text_snapshot?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["check_attempt_status"]
+          submission_id?: string
+          updated_at?: string
+          verdict?: Database["public"]["Enums"]["submission_verdict"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_check_attempts_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "homework_check_attempts_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "homework_submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_submissions: {
         Row: {
           ai_confidence: number | null
@@ -1035,6 +1116,45 @@ export type Database = {
         Args: { p_session: string; p_teacher: string }
         Returns: boolean
       }
+      complete_homework_check_attempt: {
+        Args: {
+          p_attempt_id: string
+          p_confidence: number
+          p_estimated_cost_usd_micros?: number
+          p_input_tokens?: number
+          p_model?: string
+          p_output_tokens?: number
+          p_reason: string
+          p_verdict: Database["public"]["Enums"]["submission_verdict"]
+        }
+        Returns: {
+          completed_at: string | null
+          confidence: number | null
+          created_at: string
+          error_code: string | null
+          estimated_cost_usd_micros: number | null
+          id: string
+          idempotency_key: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          photo_paths_snapshot: string[]
+          reason: string | null
+          requested_by: string
+          scope_text_snapshot: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["check_attempt_status"]
+          submission_id: string
+          updated_at: string
+          verdict: Database["public"]["Enums"]["submission_verdict"] | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "homework_check_attempts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_report_share: {
         Args: { p_report_id: string; p_ttl_hours?: number }
         Returns: Json
@@ -1044,6 +1164,36 @@ export type Database = {
         Returns: boolean
       }
       delete_my_account: { Args: never; Returns: undefined }
+      fail_homework_check_attempt: {
+        Args: { p_attempt_id: string; p_error_code: string }
+        Returns: {
+          completed_at: string | null
+          confidence: number | null
+          created_at: string
+          error_code: string | null
+          estimated_cost_usd_micros: number | null
+          id: string
+          idempotency_key: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          photo_paths_snapshot: string[]
+          reason: string | null
+          requested_by: string
+          scope_text_snapshot: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["check_attempt_status"]
+          submission_id: string
+          updated_at: string
+          verdict: Database["public"]["Enums"]["submission_verdict"] | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "homework_check_attempts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       generate_teacher_invoice: {
         Args: { p_period: string }
         Returns: {
@@ -1145,9 +1295,44 @@ export type Database = {
           session_id: string
         }[]
       }
+      start_homework_check_attempt: {
+        Args: {
+          p_idempotency_key: string
+          p_requested_by: string
+          p_submission_id: string
+        }
+        Returns: {
+          completed_at: string | null
+          confidence: number | null
+          created_at: string
+          error_code: string | null
+          estimated_cost_usd_micros: number | null
+          id: string
+          idempotency_key: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          photo_paths_snapshot: string[]
+          reason: string | null
+          requested_by: string
+          scope_text_snapshot: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["check_attempt_status"]
+          submission_id: string
+          updated_at: string
+          verdict: Database["public"]["Enums"]["submission_verdict"] | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "homework_check_attempts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       activity_type: "school" | "academy" | "self" | "class"
+      check_attempt_status: "queued" | "processing" | "completed" | "failed"
       connection_status: "pending" | "active" | "rejected" | "disconnected"
       notif_type:
         | "reminder"
@@ -1301,6 +1486,7 @@ export const Constants = {
   public: {
     Enums: {
       activity_type: ["school", "academy", "self", "class"],
+      check_attempt_status: ["queued", "processing", "completed", "failed"],
       connection_status: ["pending", "active", "rejected", "disconnected"],
       notif_type: [
         "reminder",

@@ -192,12 +192,15 @@ C:\dev\ssamplanner
     `packages/shared/src/rlsTestCleanup.ts` 처럼 "지워지는 것부터 지우고 반복"해야 한다.
     이 함정 때문에 테스트 계정 55건이 원격에 쌓였고, `deleteUser` 실패를 확인하지 않아
     아무도 몰랐다.
-- **`homework_submissions`** — 제출 + AI 결과가 한 테이블.
-  `photo_paths`, `ai_verdict`, `ai_confidence`, `ai_reason`, `teacher_status` 등
-  - **검사 이력·상태·idempotency 없음.** AI 결과를 덮어써서 이전 판정이 소실된다.
+- **`homework_submissions`** — 제출 기록. `photo_paths`, `teacher_status` 등
+  - ⚠️ `ai_verdict`·`ai_confidence`·`ai_reason` 은 **원본이 아니라 "최신 완료 결과의 복사본"**이다
+    (20260806040000 이후). 원본은 `homework_check_attempts` 다. 아래 "4-4" 참고.
+- **`homework_check_attempts`** — **AI 검사 실행 레코드(원본)**. 상태·스냅샷·idempotency·
+  토큰·비용을 남긴다. 쓰기는 service_role RPC 만. 아래 "4-4" 참고.
 - **`student_subscriptions`** — 프리미엄 권한. `status`, `provider`, `expires_at`.
   RLS는 select만 허용, 쓰기는 definer RPC(mock)로만.
-- **사용량/비용 기록 테이블: 없음.**
+- **사용량/비용 기록**: `homework_check_attempts` 의 `input_tokens`·`output_tokens`·
+  `estimated_cost_usd_micros` 에 남는다(스텁은 0). 집계 뷰는 아직 없다.
 
 ### 보호 장치 (작동 확인됨)
 - `guard_student_todo_source_lock` 트리거 — **허용 목록(allowlist) 방식**(20260805000000).
@@ -324,6 +327,46 @@ PostgREST 직접 호출로 우회된다(이 레포에서 mock 구독 RPC 로 이
 ### 아직 안 한 것
 - AI 검사가 이 값을 실제로 쓰는 로직(`ai-homework-check`)은 미구현.
 - 혼공생 AI 검사 진입점·프리미엄 게이트 미구현(입력 칸과 필수 규칙까지만 있다).
+
+---
+
+## 4-4. `homework_check_attempts` — AI 검사 실행 레코드 (20260806040000)
+
+**원본은 이 테이블이다.** `homework_submissions.ai_verdict/ai_confidence/ai_reason` 은
+**최신 완료 결과의 복사본**(구버전 앱 호환용)이다. 두 앱이 새 테이블을 읽도록 전환한 뒤에
+`ai_*` 제거를 판단한다 — 지금 지우면 학생 앱과 과외쌤 웹이 동시에 깨진다.
+
+### 왜 만들었나
+덮어쓰기 구조에서는 ① 재검사 시 이전 판정 소실 ② 상태(대기/처리중/완료/실패) 구분 불가
+③ 중복 호출 차단 없음(실연동 시 중복 과금) ④ 무엇을 보고 판정했는지 기록 없음
+⑤ 사용량·비용 측정 불가. 감사 로그가 아니라 **AI 호출의 실행 레코드**다.
+
+### 라이프사이클 (전부 service_role 전용 RPC)
+| RPC | 하는 일 |
+| --- | --- |
+| `start_homework_check_attempt(submission, requested_by, idempotency_key)` | 슬롯 확보 + **범위·사진 스냅샷 고정**. 같은 키 재전송이면 기존 행 반환, 같은 제출에 진행 중이면 `check_already_in_progress` |
+| `complete_homework_check_attempt(attempt, verdict, confidence, reason, model, in/out tokens, cost)` | 완료 기록 + `submissions.ai_*` 캐시 갱신 |
+| `fail_homework_check_attempt(attempt, error_code)` | 실패 기록(슬롯을 비워 재시도 가능) |
+
+`requested_by` 를 `auth.uid()` 로 유도하지 않고 **인자로 받는다** — service_role 은
+`auth.uid()` 가 null 이라 유도형이면 호출 자체가 불가능하다(mock 구독 RPC 에서 겪은 문제).
+
+### 알아둘 함정
+- **가드 트리거는 `before insert or update` 만이다.** cascade DELETE 는 호출자 컨텍스트
+  (`auth.uid()` 존재)에서 실행되므로 DELETE 까지 막으면 **학생이 자기 제출을 못 지우고
+  계정 탈퇴의 전체 cascade 도 깨진다.**
+- **클라이언트 쓰기는 오류가 아니라 "0행 처리"로 조용히 끝난다.** Postgres RLS 는 UPDATE/DELETE
+  정책이 없으면 대상 행을 하나도 고르지 않는다(INSERT 만 42501 을 낸다). 검증할 때 오류 유무가
+  아니라 **값이 바뀌었는지**로 확인해야 한다.
+- `array_length(빈 배열, 1)` 은 0이 아니라 **NULL** 이다. `coalesce` 없이 `between 1 and 9` 를
+  쓰면 사진 0개가 그대로 통과한다.
+- 비용은 `estimated_cost_usd_micros`(정수, 마이크로달러). 부동소수점 합산 오차를 피한다.
+
+### `apply_homework_ai_verdict` 는 DEPRECATED
+attempt 없이 `ai_*` 만 덮어쓰므로 이력이 남지 않는다. 시그니처가 `submission_id` 라
+"어느 실행이 완료됐는지" 알 수 없어 확장하지 않고 남겨 뒀다(전환 기간). 호출자를 전부
+`complete_homework_check_attempt` 로 옮긴 뒤 제거한다. 남아 있는 동안은 attempt 없이
+`ai_*` 를 쓸 수 있는 경로이기도 하다 — service_role 만 부를 수 있어 감수 중이다.
 
 ---
 
