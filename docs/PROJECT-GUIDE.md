@@ -173,6 +173,8 @@ C:\dev\ssamplanner
 - **⚠️ turbo 캐시가 검증을 무력화한다:** `pnpm test` 가 캐시 히트면 실제 실행이 안 된다.
   진짜 검증은 `pnpm exec turbo run test --force` 로 해라.
   (`pnpm test --force` 는 pnpm 이 먹어서 `Unknown option: 'force'` 가 난다.)
+- **Edge Function 은 turbo typecheck 에 안 잡힌다:** Deno 코드라 별도다. `pnpm check:functions` 로
+  검사하고, CI 에도 그 단계가 있다. 자세한 내용은 §4-7.
 
 ---
 
@@ -251,8 +253,7 @@ service_role 은 RLS 를 우회하니 RPC 없이 구독 테이블에 직접 쓰�
 
 ### 미구현 (스텁 상태)
 - ~~숙제 사진 실제 업로드/열람 코드~~ **→ 구현 완료**(20260806060000). 아래 "4-6" 참고.
-- `ai-homework-check` Edge Function — 코드는 있으나 **미배포**(라이브 404),
-  내용도 사진 개수만 보는 스텁. Anthropic 미사용
+- ~~`ai-homework-check` Edge Function 미배포·스텁~~ **→ 배포·실연동 완료**(2026-08-06). 위 "4-7" 참고.
 - Storage 버킷 `homework-photos`(private) — 용량·개수·MIME 제한 없음
 
 ---
@@ -508,6 +509,75 @@ ${studentUid}/${todoId}/${submissionKey}/page-N.jpg
 카탈로그 C4(모바일·태블릿)에는 촬영 안내가 **없다.** AI 정확도가 촬영 품질에 직결되므로 새로
 넣었다(`HOMEWORK_PHOTO_TIPS`): 페이지 번호가 보이게 / 한 페이지씩 한 장으로 / 밝은 곳에서 똑바로.
 주황(`#FF6B3D`)은 "지금·시작·연속·긴급" 전용이라 쓰지 않고 중립 톤 카드로 뒀다.
+
+---
+
+## 4-7. AI 숙제검사 실연동 (2026-08-06 배포)
+
+**`ai-homework-check` 는 이제 실제 Claude 비전을 호출한다.** 스텁은 제거됐다.
+
+### 모델·비용 (실측)
+| 항목 | 값 |
+| --- | --- |
+| 모델 | `claude-sonnet-5` (함수 시크릿 `ANTHROPIC_MODEL`) |
+| 요금 상수 | 입력 $3 / 출력 $15 per Mtok — `anthropic.ts` 의 `INPUT_MICROS_PER_MTOK`·`OUTPUT_MICROS_PER_MTOK` |
+| 실측 (작은 테스트 이미지 1장) | 입력 1,059 · 출력 70 토큰 → **4,227µ$ ≈ 5.9원** |
+
+⚠️ **호출당 0.3원이라는 초기 추정은 틀렸다.** 실측은 그보다 20배 크다. 비용은 **입력 토큰이
+지배**하고, 그 입력은 ① 시스템 프롬프트(한국어 ~800토큰) ② 이미지 토큰으로 나뉜다.
+실제 사진(긴 변 1568px)은 장당 ~1,600토큰이므로 **1장 ≈ 12원, 9장 ≈ 60원**을 예상해야 한다.
+
+비용을 줄이려면(아직 안 함):
+- **프롬프트 캐싱** — 시스템 프롬프트가 매 호출 동일하므로 캐시 읽기(10%)로 바꾸면 가장 효과가
+  크다. 단 Sonnet 은 **최소 1,024토큰**부터 캐시되므로 현재 프롬프트 길이가 경계에 있다 — 먼저 측정해야 한다.
+- 1차 판별을 Haiku 로 돌리고 애매한 것만 Sonnet 으로 올리는 2단 구성.
+- 프롬프트 축약은 권하지 않는다 — 판정 품질(§3-2 원칙 준수)이 이 프롬프트에서 나온다.
+
+### 프롬프트 원칙 (§3-2 "AI 는 감독관이 아니라 조수다")
+- **정답 여부를 판정하지 않는다.** 분량 수행만 본다.
+- **확신 없으면 `ambiguous`** 로 넘겨 과외쌤이 보게 한다.
+- **사진에서 읽을 수 없는 것을 추측하지 않는다.** 페이지 번호가 안 보이면 범위 대조를 포기하고
+  "페이지 확인 어려움"을 적은 뒤 빈칸 여부만 판단한다.
+- 범위 자유 텍스트(`112-118p, 115 제외` / `3, 5-12번`)의 구간·제외를 해석해 대조한다.
+
+프롬프트는 `supabase/functions/ai-homework-check/anthropic.ts` 에 있고, 위 원칙 문장들은
+스키마 테스트가 존재를 검사한다(문구를 지우면 CI 가 잡는다).
+
+### error_code → 사용자 메시지
+`CheckErrorCode`(Deno) ↔ `HOMEWORK_CHECK_ERROR_MESSAGES`(shared)는 **같은 집합**이어야 하고,
+스키마 테스트가 두 목록을 정렬 비교한다. Deno 는 이 패키지를 import 할 수 없어 쌍둥이 구현이다.
+
+| code | 상황 | 사용자에게 |
+| --- | --- | --- |
+| `photos_missing` | 스냅샷 경로의 객체가 Storage 에 없다 | 사진을 다시 올려 제출 |
+| `photo_download_failed` | 다운로드 실패 | 잠시 후 재시도 |
+| `photo_too_large` | 비전 입력 상한(12MB) 초과 | 더 작게 찍어 다시 |
+| `auth_failed` | 키 문제(401/403) | 제출은 저장됨 · 선생님이 확인 |
+| `rate_limited` | 429 | 잠시 후 재시도 |
+| `upstream_timeout` | 60초 초과 | 제출은 저장됨 · 재시도 가능 |
+| `upstream_error` | 그 외 API 실패 | 제출은 저장됨 · 선생님이 확인 |
+| `response_malformed` | 응답이 기대 형식 아님 | 제출은 저장됨 · 선생님이 확인 |
+
+**실패해도 학생을 막지 않는다.** 실패는 `fail_homework_check_attempt` 로 attempt 에 남고
+슬롯이 비워져 재시도가 가능하며, 앱은 위 문구로 안내하고 과외쌤 수동 검사로 넘어간다.
+
+### 안전장치
+- **사진 존재 검증** — service_role 로 스냅샷 경로를 내려받는 과정이 곧 존재 검증이다.
+  없으면 `photos_missing` 으로 끝내고 **AI 를 호출하지 않는다**(비용 낭비 방지).
+- **타임아웃 60초** (`AbortController`), **총 이미지 12MB 상한**.
+- **응답 방어** — 코드펜스·앞뒤 설명을 걷어내고 JSON 만 파싱, `verdict` 화이트리스트 검사,
+  `confidence` 0~1 클램프, `reason` 500자 절단. 어긋나면 `response_malformed`.
+- 판정은 **스냅샷만** 본다(라이브 `photo_paths`/`scope_text` 를 읽지 않는다).
+
+### Edge Function 타입 검사
+`supabase/functions` 는 turbo typecheck 대상이 아니다(Deno 코드). 배포되는 코드이므로 따로 검사한다.
+```bash
+pnpm check:functions   # deno check --config supabase/functions/deno.json
+```
+- `deno` 는 **레포 devDependency**(npm 배포판)다 — 시스템 설치가 아니라 `pnpm install` 만으로
+  로컬·CI 가 같게 동작한다. **CI 에도 이 단계가 들어가 있다.**
+- `supabase/functions/deno.json` 이 필요한 이유: 없으면 deno 가 상위 `pnpm-workspace.yaml` 을
+  발견해 **루트 `package.json` 에 `workspaces` 필드를 써 넣는다**(실제로 그렇게 됐다).
 
 ---
 

@@ -1,8 +1,8 @@
 // Edge Function: ai-homework-check
 // 숙제 제출 사진 → AI 완료검사 → {verdict, confidence, reason}. 채점이 아니라 "다 했는지" 확인.
 //
-// ⚠️ 현재는 STUB(고정/결정적 응답)다. Anthropic 키 없이 동작하며, 플로우 완성을 위한 미리보기다.
-//    키 준비 후 `callAnthropicVision()`을 채워 실제 비전 호출로 교체한다(서버 키는 함수 env로만).
+// Claude 비전 실연동(작업 5b-2). 서버 키는 Supabase 함수 시크릿(ANTHROPIC_API_KEY)에서만 읽는다.
+// 판정 로직·프롬프트·요금 계산은 ./anthropic.ts 에 있다.
 //
 // 권한 모델(M4):
 //  - 호출자는 본인 제출만 검사할 수 있다(JWT로 소유 검증, RLS로 강제).
@@ -15,36 +15,55 @@
 //   3) fail_homework_check_attempt     — 실패 기록(슬롯을 비워 재시도 가능하게)
 // apply_homework_ai_verdict는 DEPRECATED다 — attempt 없이 ai_*만 덮어써서 이력이 남지 않는다.
 //
-// 작업 5(실연동)에서 바뀌는 곳은 getStubHomeworkVerdict() 호출과, complete에 넘기는
-// model/input_tokens/output_tokens/estimated_cost_usd_micros 값뿐이다. 나머지 배선은 그대로 쓴다.
+// 사진은 photo_paths_snapshot 을 service_role 로 내려받는다 — 그 과정이 "경로가 실제로
+// 존재하는지" 검증도 겸한다(본인 폴더의 없는 파일을 가리키는 제출이 가능하다).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
-type Verdict = "pass" | "insufficient" | "ambiguous";
+import { CheckError, callAnthropicVision, type CheckErrorCode, type VisionResult } from "./anthropic.ts";
 
-type StubResult = { verdict: Verdict; confidence: number; reason: string };
+// 시크릿이 없을 때의 대비값. 실제 값은 함수 시크릿(ANTHROPIC_MODEL)에서 온다.
+const DEFAULT_MODEL = "claude-sonnet-5";
+const PHOTO_BUCKET = "homework-photos";
 
-// 결정적 STUB 판정. 스냅샷의 사진 수만 본다.
-//
-// ⚠️ 예전에는 클라이언트가 보내는 markedLowEffort 플래그로 pass ↔ insufficient 를 뒤집었다.
-//    그건 **클라이언트가 AI 판정을 정하는 경로**라서 제거했다. 판정 입력은 서버가 DB에서
-//    읽은 것(스냅샷)만이어야 한다. 힌트로 저장만 하는 선택지도 있었지만, 쓰이지 않는 컬럼을
-//    늘리는 대신 실연동에서 필요해지면 그때 설계하는 편이 낫다고 판단했다.
-function getStubHomeworkVerdict(photoCount: number): StubResult {
-  const count = Math.max(0, Math.floor(photoCount));
-  if (count === 0) {
-    return {
-      verdict: "ambiguous",
-      confidence: 0.4,
-      reason: "제출된 사진이 없어 완료 여부를 확인하기 어려워요. (자동 점검 미리보기)"
-    };
+// Anthropic 비전이 읽을 수 있는 형식만. 버킷 allowed_mime_types 와 같아야 한다.
+const VISION_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000; // 한 번에 넘기는 인자 수 제한을 피한다
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
-  return {
-    verdict: "pass",
-    confidence: 0.86,
-    reason: `사진 ${count}장에서 풀이 분량을 모두 채운 것으로 보여요. (자동 점검 미리보기)`
-  };
+  return btoa(binary);
+}
+
+/**
+ * 스냅샷 경로의 사진을 내려받는다. **경로 존재 검증을 겸한다** — 다운로드가 실패하면
+ * photos_missing 으로 끝내고, 없는 파일을 가리키는 제출로 AI 를 호출하지 않는다.
+ */
+async function downloadSnapshotImages(
+  service: SupabaseClient,
+  paths: string[]
+): Promise<Array<{ mediaType: string; base64: string }>> {
+  if (paths.length === 0) throw new CheckError("photos_missing", "스냅샷 경로가 비어 있다");
+
+  const images: Array<{ mediaType: string; base64: string }> = [];
+  for (const path of paths) {
+    const { data, error } = await service.storage.from(PHOTO_BUCKET).download(path);
+    if (error || !data) {
+      // 객체가 없으면 여기서 걸린다(버킷 정책은 service_role 을 막지 않는다).
+      throw new CheckError("photos_missing", `다운로드 실패: ${path}`);
+    }
+    const mediaType = VISION_MEDIA_TYPES.has(data.type) ? data.type : "image/jpeg";
+    try {
+      images.push({ mediaType, base64: toBase64(new Uint8Array(await data.arrayBuffer())) });
+    } catch (error) {
+      throw new CheckError("photo_download_failed", error instanceof Error ? error.message : String(error));
+    }
+  }
+  return images;
 }
 
 const jsonHeaders = { "Content-Type": "application/json" } as const;
@@ -194,40 +213,55 @@ Deno.serve(async (req: Request) => {
 
   // 이미 끝난 실행을 재전송한 경우엔 그 결과를 그대로 돌려준다(다시 판정하지 않는다 = 중복 과금 없음).
   if (attempt.status === "completed" || attempt.status === "failed") {
-    return new Response(JSON.stringify({ stub: true, reused: true, attempt }), { status: 200, headers: jsonHeaders });
+    return new Response(JSON.stringify({ reused: true, attempt }), { status: 200, headers: jsonHeaders });
   }
 
-  // 3) STUB 판정. 라이브 값이 아니라 **스냅샷**을 본다 — 검사 시작 후 사진이 바뀌어도
+  // 8) 판정. 라이브 값이 아니라 **스냅샷**을 본다 — 검사 시작 후 사진·범위가 바뀌어도
   //    판정 근거와 기록이 어긋나지 않아야 한다.
-  //    (실연동 시: const result = await callAnthropicVision(attempt.photo_paths_snapshot, attempt.scope_text_snapshot);)
   const snapshotPaths: unknown = attempt.photo_paths_snapshot;
-  const photoCount = Array.isArray(snapshotPaths) ? snapshotPaths.length : 0;
+  const paths = Array.isArray(snapshotPaths) ? (snapshotPaths as string[]) : [];
 
-  let result: StubResult;
+  // 실패는 반드시 attempt 에 남기고 슬롯을 비운다. 남기지 않으면 processing 이 영원히 남아
+  // 재시도가 check_already_in_progress 로 막힌다.
+  const failAttempt = async (code: CheckErrorCode) => {
+    await asService.rpc("fail_homework_check_attempt", { p_attempt_id: attempt.id, p_error_code: code });
+  };
+
+  let result: VisionResult;
   try {
-    result = getStubHomeworkVerdict(photoCount);
-  } catch (error) {
-    await asService.rpc("fail_homework_check_attempt", {
-      p_attempt_id: attempt.id,
-      p_error_code: "verdict_computation_failed"
+    // 8-1) 사진을 service_role 로 내려받는다. photo_paths 가 실제로 존재하는지 확인하는
+    //      단계이기도 하다 — 본인 폴더의 '없는 파일'을 가리키는 제출이 가능하기 때문이다.
+    const images = await downloadSnapshotImages(asService, paths);
+
+    // 8-2) Claude 비전 호출. 채점이 아니라 "다 했는지" 확인이다.
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!apiKey) throw new CheckError("auth_failed", "ANTHROPIC_API_KEY 미설정");
+    result = await callAnthropicVision({
+      apiKey,
+      model: Deno.env.get("ANTHROPIC_MODEL") ?? DEFAULT_MODEL,
+      scopeText: typeof attempt.scope_text_snapshot === "string" ? attempt.scope_text_snapshot : null,
+      images
     });
-    return new Response(JSON.stringify({ error: "verdict_failed", detail: String(error) }), {
-      status: 500,
+  } catch (error) {
+    const code: CheckErrorCode = error instanceof CheckError ? error.code : "unknown";
+    await failAttempt(code);
+    // 앱은 이 코드로 안내 문구를 고르고, 과외쌤 수동 검사로 넘어간다. 원문은 흘리지 않는다.
+    return new Response(JSON.stringify({ error: "check_failed", errorCode: code }), {
+      status: code === "rate_limited" ? 429 : 502,
       headers: jsonHeaders
     });
   }
 
-  // 4) 완료 기록 + homework_submissions.ai_* 캐시 갱신(구버전 앱 호환).
-  //    실연동에서는 model/토큰/비용을 실제 응답값으로 채운다 — 지금은 스텁이라 비용 0이다.
+  // 9) 완료 기록 + homework_submissions.ai_* 캐시 갱신(구버전 앱 호환).
   const { data: completed, error: writeError } = await asService.rpc("complete_homework_check_attempt", {
     p_attempt_id: attempt.id,
     p_verdict: result.verdict,
     p_confidence: result.confidence,
     p_reason: result.reason,
-    p_model: "stub-deterministic",
-    p_input_tokens: 0,
-    p_output_tokens: 0,
-    p_estimated_cost_usd_micros: 0
+    p_model: result.model,
+    p_input_tokens: result.inputTokens,
+    p_output_tokens: result.outputTokens,
+    p_estimated_cost_usd_micros: result.estimatedCostUsdMicros
   });
 
   if (writeError) {

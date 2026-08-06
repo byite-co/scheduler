@@ -22,6 +22,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -w lint
       - run: pnpm -w typecheck
+      # Edge Function 은 Deno 코드라 turbo typecheck 대상이 아니다. 배포되는 코드이므로
+      # 따로 검사한다. deno 는 레포 devDependency(npm 배포판)라 별도 setup 액션이 필요 없다 —
+      # 로컬과 CI 가 같은 방식으로 돈다.
+      - run: pnpm -w check:functions
       - run: pnpm -w test
       # 빌드는 Supabase 환경변수 없이 통과해야 한다(클라이언트가 지연 생성이므로).
       # 여기에 더미 값을 넣지 않는 것은 의도다 — 넣으면 "모듈 로드 시점에 클라이언트를 만들어

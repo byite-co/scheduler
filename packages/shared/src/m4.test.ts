@@ -6,9 +6,11 @@ import {
   getHomeworkConfidencePercent,
   HOMEWORK_PHOTO_MAX_BYTES,
   HOMEWORK_PHOTO_MAX_COUNT,
+  HOMEWORK_CHECK_ERROR_MESSAGES,
   buildHomeworkPhotoPath,
   decodeBase64,
   getAiCheckEntitlement,
+  getHomeworkCheckErrorMessage,
   getHomeworkResultView,
   getStubHomeworkVerdict,
   summarizeReviewQueue,
@@ -244,5 +246,36 @@ describe("M4 base64 decode (upload bytes)", () => {
   it("ignores whitespace and data-URI prefixes are the caller's job", () => {
     const b64 = encode([1, 2, 3]);
     expect(Array.from(decodeBase64(`${b64.slice(0, 2)}\n${b64.slice(2)}`))).toEqual([1, 2, 3]);
+  });
+});
+
+// AI 는 조수다 — 검사가 실패해도 학생을 막지 않고 과외쌤 수동 검사로 넘어간다.
+// 그래서 문구가 "실패"를 앞세우지 않고 다음 행동을 알려 주는지 확인한다.
+describe("M4 homework check error messages", () => {
+  it("has a message for every error code", () => {
+    for (const [code, message] of Object.entries(HOMEWORK_CHECK_ERROR_MESSAGES)) {
+      expect(message, code).toBeTruthy();
+      expect(message.length, code).toBeGreaterThan(10);
+    }
+  });
+
+  it("falls back to a safe message for unknown codes", () => {
+    expect(getHomeworkCheckErrorMessage(null)).toBe(HOMEWORK_CHECK_ERROR_MESSAGES.unknown);
+    expect(getHomeworkCheckErrorMessage("something_new_from_the_server")).toBe(
+      HOMEWORK_CHECK_ERROR_MESSAGES.unknown
+    );
+  });
+
+  it("tells the student their submission was kept when the server side failed", () => {
+    // 서버 문제로 막힌 경우 학생이 할 수 있는 게 없다 → 제출이 남았다는 사실을 알려야 한다.
+    for (const code of ["auth_failed", "upstream_error", "response_malformed", "unknown"] as const) {
+      expect(HOMEWORK_CHECK_ERROR_MESSAGES[code], code).toContain("제출은 저장");
+    }
+  });
+
+  it("gives an actionable next step when the student can fix it", () => {
+    expect(HOMEWORK_CHECK_ERROR_MESSAGES.photos_missing).toContain("다시 올려");
+    expect(HOMEWORK_CHECK_ERROR_MESSAGES.photo_too_large).toContain("작게");
+    expect(HOMEWORK_CHECK_ERROR_MESSAGES.rate_limited).toContain("잠시 후");
   });
 });
