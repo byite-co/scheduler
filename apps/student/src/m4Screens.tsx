@@ -342,7 +342,11 @@ export function HomeworkResultScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
-      <BackHeader eyebrow="검사 결과" title={data.todo?.title ?? "숙제"} />
+      {/* 검사를 안 한 상태에서 "검사 결과" 라고 하면 결과가 있는 줄 알고 찾게 된다. */}
+      <BackHeader
+        eyebrow={view.aiResultsHidden ? "제출 내역" : "검사 결과"}
+        title={data.todo?.title ?? "숙제"}
+      />
 
       {/* 판정을 가린 상태에서는 등급처럼 보이는 히어로·확신도·사유를 전부 빼고 제출 사실만 알린다.
           view 쪽에서 이미 verdict/confidence/reason 이 비워져 있으므로 여기서 새는 값은 없다. */}
