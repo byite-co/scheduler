@@ -187,3 +187,36 @@ export function summarizeReviewQueue(items: ReviewQueueItemLike[]): ReviewQueueS
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
+
+// ── AI 검사 과금 권한 ────────────────────────────────────────────────────────
+// 🚨 가격 구조의 핵심. 모든 AI 요청에 학생 프리미엄을 요구하면 안 된다.
+//
+//   source='teacher' → 과외쌤이 이미 앱 구독료를 내고 있다. 학생 프리미엄 **불필요**.
+//                      active 연결이면 충분하다. 이걸 틀리면 "쌤이 돈을 냈는데 그 학생이
+//                      검사를 못 받는" 상황이 된다.
+//   source='self'    → 학생 본인의 프리미엄 **필요**.
+//
+// 실제 게이트는 Edge Function(서버)이다. 이 함수는 그 규칙을 **단위 테스트 가능한 형태로
+// 고정**해 두기 위한 것이다 — Deno 런타임은 이 패키지를 import 할 수 없어 Edge Function 에
+// 같은 분기가 인라인되어 있고, 두 곳이 갈라지지 않도록 스키마 테스트가 대조한다.
+// (getStubHomeworkVerdict 도 같은 이유로 쌍둥이 구현을 유지한다.)
+export type AiCheckEntitlementInput = {
+  todoSource: "self" | "teacher";
+  hasActiveConnection: boolean;
+  hasStudentPremium: boolean;
+};
+
+export type AiCheckEntitlement =
+  | { allowed: true; via: "teacher_connection" | "student_premium" }
+  | { allowed: false; error: "connection_required" | "premium_required" };
+
+export function getAiCheckEntitlement(input: AiCheckEntitlementInput): AiCheckEntitlement {
+  if (input.todoSource === "teacher") {
+    return input.hasActiveConnection
+      ? { allowed: true, via: "teacher_connection" }
+      : { allowed: false, error: "connection_required" };
+  }
+  return input.hasStudentPremium
+    ? { allowed: true, via: "student_premium" }
+    : { allowed: false, error: "premium_required" };
+}

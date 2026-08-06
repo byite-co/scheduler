@@ -1,6 +1,7 @@
 // M5 — AI 공부량 추천 · 리포트 · 학부모 공유의 순수 로직.
 // 추천/리포트 초안은 키 준비 전까지 결정적 스텁(고정 응답). 실연동은 Edge Function으로 교체.
 
+import { hasActiveStudentPremium, type StudentSubscriptionLike } from "./m6";
 import { SUBJECT_LABELS, type SubjectCode } from "./subjects";
 
 export type UnlockFeature = "report" | "ai_check" | "ai_rec";
@@ -105,14 +106,23 @@ export type FeatureGateState = {
   reason: string;
 };
 
+/**
+ * 화면에 무엇을 보여줄지 정하는 **안내용** 게이트. 실제 과금 게이트는 서버다
+ * (Edge Function + DB 의 has_active_student_premium()). 클라이언트 판정은 우회 가능하다.
+ *
+ * `subscription` 을 그대로 받는다 — 예전에는 `isPremium: boolean` 을 받았고, 호출부가
+ * `status === "active"` 만 넘겨 **expires_at 을 무시**했다(만료된 구독이 계속 프리미엄으로
+ * 통과). 불리언을 받으면 그 실수를 막을 수 없으므로 구독 행을 받아 여기서 판정한다.
+ */
 export function getFeatureGateState(args: {
   feature: UnlockFeature;
-  isPremium: boolean;
+  subscription: StudentSubscriptionLike | null | undefined;
   unlocks: AdUnlockLike[];
   now?: string | Date;
 }): FeatureGateState {
   const now = toDate(args.now ?? new Date());
-  if (args.isPremium) {
+  const isPremium = hasActiveStudentPremium(args.subscription, now);
+  if (isPremium) {
     return {
       feature: args.feature,
       unlocked: true,

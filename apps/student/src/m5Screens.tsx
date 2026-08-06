@@ -59,14 +59,18 @@ function useGatedFeature(feature: UnlockFeature) {
         .select("*")
         .eq("student_id", userId)
         .gte("started_at", `${weekStart}T00:00:00.000Z`),
-      supabase.from("student_subscriptions").select("status").eq("student_id", userId).maybeSingle(),
+      // expires_at 까지 읽어야 만료된 구독을 프리미엄으로 오판하지 않는다.
+      // (예전에는 status 만 읽고 `status === "active"` 로 판정해 만료 구독이 통과했다.)
+      supabase.from("student_subscriptions").select("status, expires_at").eq("student_id", userId).maybeSingle(),
       supabase.from("ad_unlocks").select("feature, expires_at").eq("student_id", userId).eq("feature", feature)
     ]);
     setSessions(sessionResult.data ?? []);
     setGate(
       getFeatureGateState({
         feature,
-        isPremium: subResult.data?.status === "active",
+        // 판정은 shared 가 한다 — 불리언을 만들어 넘기면 expires_at 을 빼먹을 수 있다.
+        // 이 게이트는 화면 안내용이고 실제 과금 게이트는 서버(Edge Function)다.
+        subscription: subResult.data ?? null,
         unlocks: ((unlockResult.data as AdUnlockRow[] | null) ?? []).map((u) => ({ feature: u.feature, expires_at: u.expires_at }))
       })
     );

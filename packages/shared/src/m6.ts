@@ -68,14 +68,43 @@ export type StudentPremiumState = {
   label: string;
 };
 
+export type StudentSubscriptionLike = {
+  status: SubStatus;
+  expires_at: string | null;
+};
+
+/**
+ * 학생 프리미엄 "이용 권리" 판정 — DB 의 `has_active_student_premium()` 과 **같은 규칙**이다.
+ *   `status = 'active' AND expires_at > now()`
+ *
+ * ⚠️ 실제 게이트는 서버(Edge Function + DB 함수)다. 이 함수는 **안내용**이다 — 클라이언트
+ *    판정은 우회 가능하므로 이 결과로 과금 결정을 하면 안 된다. 화면 표시만 정한다.
+ *
+ * `expires_at IS NULL` 은 **권리 없음**으로 본다(fail-closed). DB 의 `expires_at > now()` 가
+ * NULL 에 대해 false 인 것과 맞춘 것이다. 만료일을 모르는 구독을 무기한 프리미엄으로 다루면
+ * 결제 버그가 곧 무료 이용이 된다.
+ *
+ * 상태 의미는 사업자 원본값이 아니라 "이용 권리"로 정규화한다:
+ *   `active` → 권리 있음 / `past_due`·`paused`·`canceled`·`none` → 권리 없음.
+ *   자동 갱신을 취소했지만 결제 기간이 남았으면 `status=active` 를 만료일까지 유지한다.
+ */
+export function hasActiveStudentPremium(
+  subscription: StudentSubscriptionLike | null | undefined,
+  now: string | Date = new Date()
+): boolean {
+  if (!subscription || subscription.status !== "active") return false;
+  if (!subscription.expires_at) return false;
+  const nowMs = (typeof now === "string" ? new Date(now) : now).getTime();
+  const expiresMs = new Date(subscription.expires_at).getTime();
+  return Number.isFinite(expiresMs) && expiresMs > nowMs;
+}
+
 export function getStudentPremiumState(
   status: SubStatus,
   expiresAt: string | null,
   now: string | Date = new Date()
 ): StudentPremiumState {
-  const nowMs = (typeof now === "string" ? new Date(now) : now).getTime();
-  const notExpired = !expiresAt || new Date(expiresAt).getTime() > nowMs;
-  const isPremium = status === "active" && notExpired;
+  const isPremium = hasActiveStudentPremium({ status, expires_at: expiresAt }, now);
   return { isPremium, label: isPremium ? "프리미엄" : "무료" };
 }
 

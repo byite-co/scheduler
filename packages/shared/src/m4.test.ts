@@ -4,6 +4,7 @@ import {
   canRequestResubmit,
   createTeacherReviewPatch,
   getHomeworkConfidencePercent,
+  getAiCheckEntitlement,
   getHomeworkResultView,
   getStubHomeworkVerdict,
   summarizeReviewQueue,
@@ -121,5 +122,43 @@ describe("M4 teacher review patch + queue", () => {
     expect(getHomeworkConfidencePercent(0.864)).toBe(86);
     expect(getHomeworkConfidencePercent(null)).toBeNull();
     expect(getHomeworkConfidencePercent(2)).toBe(100);
+  });
+});
+
+// 🚨 가격 구조. 과외쌤이 낸 숙제는 학생 프리미엄 없이도 검사돼야 한다 — 틀리면
+// "쌤이 돈을 냈는데 그 학생이 검사를 못 받는" 상황이 된다. 실제 게이트는 서버이고
+// 이 테스트는 그 규칙을 고정한다.
+describe("M4 AI check entitlement (과금 분기)", () => {
+  it("allows teacher homework without student premium when a connection is active", () => {
+    expect(
+      getAiCheckEntitlement({ todoSource: "teacher", hasActiveConnection: true, hasStudentPremium: false })
+    ).toEqual({ allowed: true, via: "teacher_connection" });
+  });
+
+  it("blocks teacher homework when the connection is gone", () => {
+    expect(
+      getAiCheckEntitlement({ todoSource: "teacher", hasActiveConnection: false, hasStudentPremium: false })
+    ).toEqual({ allowed: false, error: "connection_required" });
+  });
+
+  it("still allows teacher homework for a premium student (premium is simply not required)", () => {
+    expect(
+      getAiCheckEntitlement({ todoSource: "teacher", hasActiveConnection: true, hasStudentPremium: true })
+    ).toEqual({ allowed: true, via: "teacher_connection" });
+  });
+
+  it("requires student premium for self todos", () => {
+    expect(
+      getAiCheckEntitlement({ todoSource: "self", hasActiveConnection: false, hasStudentPremium: false })
+    ).toEqual({ allowed: false, error: "premium_required" });
+    expect(
+      getAiCheckEntitlement({ todoSource: "self", hasActiveConnection: true, hasStudentPremium: false })
+    ).toEqual({ allowed: false, error: "premium_required" });
+  });
+
+  it("allows self todos for a premium student", () => {
+    expect(
+      getAiCheckEntitlement({ todoSource: "self", hasActiveConnection: false, hasStudentPremium: true })
+    ).toEqual({ allowed: true, via: "student_premium" });
   });
 });

@@ -1084,6 +1084,8 @@ export type Database = {
       }
     }
     Functions: {
+      ai_check_max_attempts_per_day: { Args: never; Returns: number }
+      ai_check_max_attempts_per_submission: { Args: never; Returns: number }
       apply_homework_ai_verdict: {
         Args: {
           p_confidence: number
@@ -1225,6 +1227,7 @@ export type Database = {
         }[]
       }
       get_shared_report: { Args: { p_token: string }; Returns: Json }
+      has_active_student_premium: { Args: never; Returns: boolean }
       is_connected_active: {
         Args: { p_student: string; p_teacher: string }
         Returns: boolean
