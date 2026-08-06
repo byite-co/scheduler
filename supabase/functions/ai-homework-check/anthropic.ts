@@ -40,9 +40,10 @@ export class CheckError extends Error {
 
 // ── 요금 ─────────────────────────────────────────────────────────────────────
 // 요금이 바뀌면 이 상수만 고친다. 마이크로달러(1e-6 USD) 정수로 계산해 부동소수점 오차를 피한다.
-// Claude Sonnet 4.5/5 기준 100만 토큰당 입력 $3 / 출력 $15.
-const INPUT_MICROS_PER_MTOK = 3_000_000;
-const OUTPUT_MICROS_PER_MTOK = 15_000_000;
+// **모델을 바꾸면 이 값도 함께 바꿔야 한다** — 안 바꾸면 비용 기록이 조용히 틀린다.
+// Claude Haiku 4.5 기준 100만 토큰당 입력 $1 / 출력 $5 (Sonnet 의 1/3).
+const INPUT_MICROS_PER_MTOK = 1_000_000;
+const OUTPUT_MICROS_PER_MTOK = 5_000_000;
 
 export function estimateCostUsdMicros(inputTokens: number, outputTokens: number): number {
   const input = Math.round((inputTokens * INPUT_MICROS_PER_MTOK) / 1_000_000);
@@ -77,6 +78,7 @@ const SYSTEM_PROMPT = [
   "구간(-, ~)과 제외(제외, 빼고)를 해석해서 대조하세요.",
   "**페이지·문제 번호가 사진에서 안 보이면 범위 대조는 불가능합니다.** 억지로 판정하지 말고",
   "reason 에 '페이지 확인 어려움'을 적고, 빈칸 여부 등 확인 가능한 것만 판단하세요.",
+  "이때 reason 에 **'페이지 번호가 보이게 다시 찍어 주세요'** 처럼 학생이 할 행동을 반드시 넣으세요.",
   "",
   "## 판정 기준",
   "- pass: 범위를 다 한 것으로 보이고 빈칸이 없다",
