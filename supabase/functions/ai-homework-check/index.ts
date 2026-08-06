@@ -25,21 +25,19 @@ type Verdict = "pass" | "insufficient" | "ambiguous";
 
 type StubResult = { verdict: Verdict; confidence: number; reason: string };
 
-// shared/m4.ts의 getStubHomeworkVerdict와 동일한 결정적 로직(런타임이 Deno라 인라인).
-function getStubHomeworkVerdict(photoCount: number, markedLowEffort: boolean): StubResult {
+// 결정적 STUB 판정. 스냅샷의 사진 수만 본다.
+//
+// ⚠️ 예전에는 클라이언트가 보내는 markedLowEffort 플래그로 pass ↔ insufficient 를 뒤집었다.
+//    그건 **클라이언트가 AI 판정을 정하는 경로**라서 제거했다. 판정 입력은 서버가 DB에서
+//    읽은 것(스냅샷)만이어야 한다. 힌트로 저장만 하는 선택지도 있었지만, 쓰이지 않는 컬럼을
+//    늘리는 대신 실연동에서 필요해지면 그때 설계하는 편이 낫다고 판단했다.
+function getStubHomeworkVerdict(photoCount: number): StubResult {
   const count = Math.max(0, Math.floor(photoCount));
   if (count === 0) {
     return {
       verdict: "ambiguous",
       confidence: 0.4,
       reason: "제출된 사진이 없어 완료 여부를 확인하기 어려워요. (자동 점검 미리보기)"
-    };
-  }
-  if (markedLowEffort) {
-    return {
-      verdict: "insufficient",
-      confidence: 0.72,
-      reason: "일부 분량이 빠진 것으로 보여요. 남은 부분을 채워 다시 제출해볼까요? (자동 점검 미리보기)"
     };
   }
   return {
@@ -51,6 +49,10 @@ function getStubHomeworkVerdict(photoCount: number, markedLowEffort: boolean): S
 
 const jsonHeaders = { "Content-Type": "application/json" } as const;
 
+// 존재하지 않는 제출과 권한 없는 제출을 **같은 응답**으로 합친다. 구분해서 알려주면
+// 남의 submission_id를 넣어 보며 다른 학생의 데이터 존재 여부를 알아낼 수 있다.
+const NOT_FOUND = "submission_not_found" as const;
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: jsonHeaders });
@@ -61,13 +63,14 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "missing_authorization" }), { status: 401, headers: jsonHeaders });
   }
 
+  // 클라이언트에서 받는 것은 **ID와 idempotency 키뿐**이다. 범위·학생 ID·사진 경로는 절대
+  // 받지 않는다 — 받으면 그게 곧 판정 기준을 클라이언트가 정하는 경로가 된다. 나머지는 전부
+  // DB에서 직접 읽는다.
   let submissionId: string | undefined;
-  let markedLowEffort = false;
   let idempotencyKey: string | undefined;
   try {
     const body = await req.json();
     submissionId = body?.submissionId;
-    markedLowEffort = Boolean(body?.markedLowEffort);
     idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : undefined;
   } catch {
     return new Response(JSON.stringify({ error: "invalid_body" }), { status: 400, headers: jsonHeaders });
@@ -84,34 +87,85 @@ Deno.serve(async (req: Request) => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-  // 1) 호출자 권한으로 제출 소유 검증 + 사진 수 확인(RLS가 본인 것만 허용).
   const asUser = createClient(url, anonKey, { global: { headers: { Authorization: authHeader } } });
-  const { data: submission, error: readError } = await asUser
-    .from("homework_submissions")
-    .select("id, photo_paths")
-    .eq("id", submissionId)
-    .maybeSingle();
 
-  if (readError) {
-    return new Response(JSON.stringify({ error: "read_failed", detail: readError.message }), {
-      status: 403,
-      headers: jsonHeaders
-    });
-  }
-  if (!submission) {
-    return new Response(JSON.stringify({ error: "submission_not_found" }), { status: 404, headers: jsonHeaders });
-  }
-
+  // 1) JWT 검증.
   const { data: userData } = await asUser.auth.getUser();
   const requestedBy = userData?.user?.id;
   if (!requestedBy) {
     return new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401, headers: jsonHeaders });
   }
 
+  // 2) 호출자 RLS로 제출 + 숙제를 함께 읽는다. RLS가 본인 것만 허용하므로 이 조회 자체가
+  //    소유 검증이다.
+  //
+  // ⚠️ 남의 submission_id를 넣었을 때 "없음"과 "권한 없음"을 구분해서 알려주면 다른 학생의
+  //    데이터 존재 여부가 드러난다. 그래서 두 경우를 **하나의 응답**으로 합친다(NOT_FOUND).
+  const { data: submission, error: readError } = await asUser
+    .from("homework_submissions")
+    .select("id, student_id, photo_paths, todos!inner(id, source, ai_check_enabled, scope_text, connection_id)")
+    .eq("id", submissionId)
+    .maybeSingle();
+
+  if (readError) {
+    return new Response(JSON.stringify({ error: NOT_FOUND }), { status: 404, headers: jsonHeaders });
+  }
+  // 3) 학생 본인 소유 확인. RLS로도 걸러지지만 명시적으로 한 번 더 본다.
+  if (!submission || submission.student_id !== requestedBy) {
+    return new Response(JSON.stringify({ error: NOT_FOUND }), { status: 404, headers: jsonHeaders });
+  }
+
+  const todo = (Array.isArray(submission.todos) ? submission.todos[0] : submission.todos) as
+    | { id: string; source: string; ai_check_enabled: boolean; scope_text: string | null; connection_id: string | null }
+    | null
+    | undefined;
+  if (!todo) {
+    return new Response(JSON.stringify({ error: NOT_FOUND }), { status: 404, headers: jsonHeaders });
+  }
+
+  // 4) AI 검사 대상인지. 범위가 없으면 AI가 무엇과 대조할지 알 수 없다.
+  if (!todo.ai_check_enabled) {
+    return new Response(JSON.stringify({ error: "ai_check_disabled" }), { status: 409, headers: jsonHeaders });
+  }
+  if (!todo.scope_text || todo.scope_text.trim().length === 0) {
+    return new Response(JSON.stringify({ error: "scope_text_required" }), { status: 409, headers: jsonHeaders });
+  }
+
+  // 5) 과금 권한 분기 — 가격 구조상 가장 중요한 부분이다.
+  //
+  //    source='teacher' → 과외쌤이 이미 앱 구독료를 내고 있다. 학생 프리미엄을 요구하면
+  //                       "쌤이 돈을 냈는데 그 학생이 검사를 못 받는" 상황이 된다.
+  //                       active 연결이면 충분하다.
+  //    source='self'    → 학생 본인의 프리미엄이 필요하다.
+  if (todo.source === "teacher") {
+    const { data: connection, error: connError } = await asUser
+      .from("connections")
+      .select("id")
+      .eq("student_id", requestedBy)
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle();
+    if (connError || !connection) {
+      return new Response(JSON.stringify({ error: "connection_required" }), { status: 403, headers: jsonHeaders });
+    }
+  } else {
+    // has_active_student_premium()은 auth.uid()만 본다 → 반드시 사용자 컨텍스트로 호출한다.
+    // (service_role로 부르면 auth.uid()가 null이라 언제나 false다.)
+    const { data: isPremium, error: premiumError } = await asUser.rpc("has_active_student_premium");
+    if (premiumError) {
+      return new Response(JSON.stringify({ error: "premium_check_failed" }), { status: 500, headers: jsonHeaders });
+    }
+    if (!isPremium) {
+      // 작업 6의 UI가 이 코드를 보고 프리미엄 안내를 띄운다 — 명확히 구분해서 알려준다.
+      return new Response(JSON.stringify({ error: "premium_required" }), { status: 402, headers: jsonHeaders });
+    }
+  }
+
   const asService = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-  // 2) 실행 슬롯 확보 + 스냅샷 고정. 같은 요청 재전송이면 기존 attempt가 그대로 돌아온다.
-  //    같은 제출에 이미 진행 중인 검사가 있으면 check_already_in_progress로 막힌다.
+  // 6+7) 사용량 한도 확인과 슬롯 확보는 **한 트랜잭션 안에서** 일어난다(RPC 내부).
+  //      따로 하면 동시 요청이 각각 "아직 한도 안 넘었다"를 보고 둘 다 통과할 수 있다.
+  //      한도 초과로 거부되면 슬롯도 만들어지지 않는다(같은 트랜잭션이 롤백된다).
   const { data: attempt, error: startError } = await asService.rpc("start_homework_check_attempt", {
     p_submission_id: submissionId,
     p_requested_by: requestedBy,
@@ -119,11 +173,23 @@ Deno.serve(async (req: Request) => {
   });
 
   if (startError || !attempt) {
-    const alreadyRunning = (startError?.message ?? "").includes("check_already_in_progress");
-    return new Response(
-      JSON.stringify({ error: alreadyRunning ? "check_already_in_progress" : "attempt_start_failed", detail: startError?.message }),
-      { status: alreadyRunning ? 409 : 500, headers: jsonHeaders }
-    );
+    // DB가 올린 예외를 사용자에게 의미 있는 코드로 옮긴다. detail(원문)은 흘리지 않는다 —
+    // 원문에 다른 행의 정보가 섞일 수 있다.
+    const message = startError?.message ?? "";
+    const mapped: { error: string; status: number } = message.includes("check_already_in_progress")
+      ? { error: "check_already_in_progress", status: 409 }
+      : message.includes("check_limit_submission_exceeded")
+        ? { error: "check_limit_submission_exceeded", status: 429 }
+        : message.includes("check_limit_daily_exceeded")
+          ? { error: "check_limit_daily_exceeded", status: 429 }
+          : message.includes("ai_check_disabled_for_todo")
+            ? { error: "ai_check_disabled", status: 409 }
+            : message.includes("scope_text_required_for_check")
+              ? { error: "scope_text_required", status: 409 }
+              : message.includes("homework_submission_not_found")
+                ? { error: NOT_FOUND, status: 404 }
+                : { error: "attempt_start_failed", status: 500 };
+    return new Response(JSON.stringify({ error: mapped.error }), { status: mapped.status, headers: jsonHeaders });
   }
 
   // 이미 끝난 실행을 재전송한 경우엔 그 결과를 그대로 돌려준다(다시 판정하지 않는다 = 중복 과금 없음).
@@ -139,7 +205,7 @@ Deno.serve(async (req: Request) => {
 
   let result: StubResult;
   try {
-    result = getStubHomeworkVerdict(photoCount, markedLowEffort);
+    result = getStubHomeworkVerdict(photoCount);
   } catch (error) {
     await asService.rpc("fail_homework_check_attempt", {
       p_attempt_id: attempt.id,

@@ -56,7 +56,8 @@ describe("M5 report draft stub", () => {
 
 describe("M5 feature gating (free=ad unlock / premium=unlimited)", () => {
   it("premium is always unlocked", () => {
-    expect(getFeatureGateState({ feature: "report", isPremium: true, unlocks: [] })).toMatchObject({
+    const active = { status: "active" as const, expires_at: "2099-01-01T00:00:00.000Z" };
+    expect(getFeatureGateState({ feature: "report", subscription: active, unlocks: [] })).toMatchObject({
       unlocked: true,
       canUnlockByAd: false
     });
@@ -64,14 +65,14 @@ describe("M5 feature gating (free=ad unlock / premium=unlimited)", () => {
 
   it("free user is locked until an active ad unlock exists", () => {
     const now = "2026-06-23T00:00:00.000Z";
-    expect(getFeatureGateState({ feature: "ai_rec", isPremium: false, unlocks: [], now })).toMatchObject({
+    expect(getFeatureGateState({ feature: "ai_rec", subscription: null, unlocks: [], now })).toMatchObject({
       unlocked: false,
       canUnlockByAd: true
     });
     expect(
       getFeatureGateState({
         feature: "ai_rec",
-        isPremium: false,
+        subscription: null,
         unlocks: [{ feature: "ai_rec", expires_at: "2026-06-24T00:00:00.000Z" }],
         now
       })
@@ -79,11 +80,45 @@ describe("M5 feature gating (free=ad unlock / premium=unlimited)", () => {
     expect(
       getFeatureGateState({
         feature: "ai_rec",
-        isPremium: false,
+        subscription: null,
         unlocks: [{ feature: "ai_rec", expires_at: "2026-06-22T00:00:00.000Z" }],
         now
       })
     ).toMatchObject({ unlocked: false });
+  });
+
+  // 원래 구멍: 호출부가 `status === "active"` 만 넘겨 만료된 구독이 프리미엄으로 통과했다.
+  // 이제 게이트가 구독 행을 받아 직접 판정하므로 그 실수를 만들 수 없다.
+  it("does not treat an expired subscription as premium", () => {
+    expect(
+      getFeatureGateState({
+        feature: "ai_check",
+        subscription: { status: "active", expires_at: "2026-08-05T00:00:00.000Z" },
+        unlocks: [],
+        now: "2026-08-06T00:00:00.000Z"
+      })
+    ).toMatchObject({ unlocked: false, isPremium: false });
+  });
+
+  // expires_at 이 비면 "만료일을 모르는 구독"이다 → fail-closed(권리 없음).
+  // DB 의 `expires_at > now()` 가 NULL 에 false 인 것과 같은 규칙이어야 한다.
+  it("treats a missing expiry as no entitlement (fail-closed, matches the DB rule)", () => {
+    expect(
+      getFeatureGateState({ feature: "ai_check", subscription: { status: "active", expires_at: null }, unlocks: [] })
+    ).toMatchObject({ isPremium: false });
+  });
+
+  it("rejects every non-active status regardless of expiry", () => {
+    for (const status of ["past_due", "paused", "canceled", "none"] as const) {
+      expect(
+        getFeatureGateState({
+          feature: "ai_check",
+          subscription: { status, expires_at: "2099-01-01T00:00:00.000Z" },
+          unlocks: []
+        }),
+        status
+      ).toMatchObject({ isPremium: false });
+    }
   });
 });
 
