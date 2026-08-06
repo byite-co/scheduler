@@ -10,6 +10,7 @@ import {
   buildHomeworkPhotoPath,
   decodeBase64,
   getAiCheckEntitlement,
+  getHomeworkAiDisplay,
   getHomeworkCheckErrorMessage,
   getHomeworkResultView,
   getStubHomeworkVerdict,
@@ -17,6 +18,7 @@ import {
   validateHomeworkPhotos,
   type HomeworkSubmissionLike
 } from "./m4";
+import { AI_CHECK_RESULTS_ENABLED, getAiCheckPausedStudentNotice } from "./featureFlags";
 
 function submission(overrides: Partial<HomeworkSubmissionLike> = {}): HomeworkSubmissionLike {
   return {
@@ -54,7 +56,7 @@ describe("M4 result view — tutored vs solo", () => {
   it("includes teacher section for tutored students", () => {
     const view = getHomeworkResultView(
       submission({ teacher_status: "rejected", teacher_comment: "다시 풀어볼까요", resubmit_requested: true }),
-      { isTutored: true }
+      { isTutored: true, aiResultsEnabled: true }
     );
     expect(view.showTeacherSection).toBe(true);
     expect(view.teacherStatusLabel).toBe("다시 제출 요청");
@@ -66,7 +68,7 @@ describe("M4 result view — tutored vs solo", () => {
   it("hides any teacher mention for solo (혼공) students — AI only", () => {
     const view = getHomeworkResultView(
       submission({ teacher_status: "rejected", teacher_comment: "쌤 코멘트", resubmit_requested: true }),
-      { isTutored: false }
+      { isTutored: false, aiResultsEnabled: true }
     );
     expect(view.showTeacherSection).toBe(false);
     expect(view.teacherStatus).toBeNull();
@@ -78,7 +80,7 @@ describe("M4 result view — tutored vs solo", () => {
   it("represents the not-yet-checked state", () => {
     const view = getHomeworkResultView(
       submission({ ai_verdict: null, ai_confidence: null, ai_reason: null }),
-      { isTutored: false }
+      { isTutored: false, aiResultsEnabled: true }
     );
     expect(view.hasVerdict).toBe(false);
     expect(view.verdictLabel).toBe("검사 대기 중");
@@ -277,5 +279,84 @@ describe("M4 homework check error messages", () => {
     expect(HOMEWORK_CHECK_ERROR_MESSAGES.photos_missing).toContain("다시 올려");
     expect(HOMEWORK_CHECK_ERROR_MESSAGES.photo_too_large).toContain("작게");
     expect(HOMEWORK_CHECK_ERROR_MESSAGES.rate_limited).toContain("잠시 후");
+  });
+});
+
+// ── AI 판정 노출 차단 플래그 ─────────────────────────────────────────────────
+// 2026-08-07 실사진 측정에서 다 푼 페이지를 "3·4·5번 미작성" 으로 confidence 0.95 에
+// 단정했다. 재설계 전까지 판정을 사용자에게 보여주지 않는다.
+describe("M4 AI 판정 노출 차단(AI_CHECK_RESULTS_ENABLED)", () => {
+  it("defaults to off — 켜는 것은 제품 결정이라 기본값이 안전한 쪽이어야 한다", () => {
+    expect(AI_CHECK_RESULTS_ENABLED).toBe(false);
+  });
+
+  it("strips verdict, confidence and reason from the result view", () => {
+    const view = getHomeworkResultView(
+      submission({ ai_verdict: "insufficient", ai_confidence: 0.95, ai_reason: "3번, 4번, 5번이 미작성 상태입니다." }),
+      { isTutored: true, aiResultsEnabled: false }
+    );
+    expect(view.aiResultsHidden).toBe(true);
+    expect(view.verdict).toBeNull();
+    expect(view.hasVerdict).toBe(false);
+    expect(view.confidencePercent).toBeNull();
+    expect(view.reason).toBeNull();
+    expect(view.verdictTone).toBe("muted");
+    // "검사 대기 중" 은 곧 결과가 온다는 뜻이라 여기서 쓰면 안 된다.
+    expect(view.verdictLabel).not.toContain("검사");
+  });
+
+  it("keeps the teacher section and resubmit flow intact when hidden", () => {
+    // 재제출 요청은 선생님의 판단이라 AI 와 무관하다 → 막으면 정상 흐름이 끊긴다.
+    const view = getHomeworkResultView(
+      submission({ teacher_status: "rejected", teacher_comment: "다시 풀어볼까요", resubmit_requested: true }),
+      { isTutored: true, aiResultsEnabled: false }
+    );
+    expect(view.showTeacherSection).toBe(true);
+    expect(view.teacherComment).toBe("다시 풀어볼까요");
+    expect(view.teacherStatusLabel).toBe("다시 제출 요청");
+    expect(view.canRequestResubmit).toBe(true);
+  });
+
+  it("distinguishes hidden from not-yet-checked", () => {
+    const notChecked = getHomeworkResultView(
+      submission({ ai_verdict: null, ai_confidence: null, ai_reason: null }),
+      { isTutored: false, aiResultsEnabled: true }
+    );
+    expect(notChecked.aiResultsHidden).toBe(false);
+    expect(notChecked.verdictLabel).toBe("검사 대기 중");
+  });
+
+  it("gives the teacher queue nothing to render when hidden", () => {
+    const hidden = getHomeworkAiDisplay(
+      { ai_verdict: "pass", ai_confidence: 0.95, ai_reason: "빈칸 없이 완성된 상태입니다." },
+      { aiResultsEnabled: false }
+    );
+    expect(hidden.show).toBe(false);
+    // show: false 면 판정 값이 객체에 **아예 없어야** 한다 — 있으면 컴포넌트가 실수로 쓸 수 있다.
+    expect(Object.keys(hidden)).toEqual(["show"]);
+
+    const shown = getHomeworkAiDisplay(
+      { ai_verdict: "pass", ai_confidence: 0.95, ai_reason: "빈칸 없이 완성된 상태입니다." },
+      { aiResultsEnabled: true }
+    );
+    expect(shown).toEqual({
+      show: true,
+      verdict: "pass",
+      confidencePercent: 95,
+      reason: "빈칸 없이 완성된 상태입니다."
+    });
+  });
+
+  it("tells solo students something true — 선생님이 확인한다고 할 수 없다", () => {
+    const tutored = getAiCheckPausedStudentNotice({ isTutored: true });
+    const solo = getAiCheckPausedStudentNotice({ isTutored: false });
+    expect(tutored).toContain("선생님");
+    // 혼공생에게는 확인해 줄 선생님이 없다.
+    expect(solo).not.toContain("선생님");
+    for (const notice of [tutored, solo]) {
+      expect(notice).toContain("제출");
+      // "실패" 로 읽히면 학생이 다시 제출하려 한다.
+      expect(notice).not.toContain("실패");
+    }
   });
 });

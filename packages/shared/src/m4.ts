@@ -39,6 +39,12 @@ export type HomeworkResultView = {
   teacherStatusLabel: string | null;
   teacherComment: string | null;
   canRequestResubmit: boolean;
+  /**
+   * AI_CHECK_RESULTS_ENABLED 가 꺼져 판정을 **가린** 상태.
+   * `hasVerdict === false` 와 구분해야 한다 — 그건 "아직 검사 안 됨"이고, 이건 "안 보여준다"다.
+   * 화면은 이 값이 true 면 판정 UI 대신 안내를 띄운다.
+   */
+  aiResultsHidden: boolean;
 };
 
 export type HomeworkVerdictTone = "success" | "warning" | "danger" | "muted";
@@ -105,13 +111,41 @@ export function canRequestResubmit(submission: HomeworkSubmissionLike): boolean 
 
 // isTutored: 과외생(active 연결 보유) = true → 선생님 코멘트 포함.
 // 혼공생 = false → AI 단독(선생님 언급 없음).
+//
+// aiResultsEnabled 는 **필수 인자**다. 기본값을 주면 새로 생기는 호출부가 조용히 판정을
+// 노출할 수 있다. 필수로 두면 빼먹었을 때 타입 오류가 나서 CI 가 잡는다(fail-safe).
+// 값은 보통 shared 의 AI_CHECK_RESULTS_ENABLED 를 그대로 넘긴다 — 테스트만 직접 지정한다.
 export function getHomeworkResultView(
   submission: HomeworkSubmissionLike,
-  options: { isTutored: boolean }
+  options: { isTutored: boolean; aiResultsEnabled: boolean }
 ): HomeworkResultView {
   const verdict = submission.ai_verdict;
   const hasVerdict = verdict !== null && verdict !== undefined;
   const showTeacherSection = options.isTutored;
+  const aiResultsHidden = !options.aiResultsEnabled;
+
+  // 판정을 가릴 때는 verdict·확신도·reason 을 **여기서** 비운다. 화면에서 각각 감추면
+  // 표시 지점이 늘어날 때마다 빠뜨릴 수 있다 — 이 함수를 통과한 값은 항상 안전해야 한다.
+  if (aiResultsHidden) {
+    return {
+      hasVerdict: false,
+      verdict: null,
+      // "검사 대기 중" 은 곧 결과가 온다는 뜻이라 여기서 쓰면 안 된다.
+      verdictLabel: "제출 완료",
+      verdictTone: "muted",
+      confidencePercent: null,
+      reason: null,
+      showTeacherSection,
+      teacherStatus: showTeacherSection ? submission.teacher_status : null,
+      teacherStatusLabel: showTeacherSection
+        ? HOMEWORK_REVIEW_STATUS_LABELS[submission.teacher_status]
+        : null,
+      teacherComment: showTeacherSection ? submission.teacher_comment : null,
+      // 재제출 요청은 선생님의 판단이라 AI 와 무관하다 → 그대로 유지한다.
+      canRequestResubmit: showTeacherSection && canRequestResubmit(submission),
+      aiResultsHidden: true
+    };
+  }
 
   return {
     hasVerdict,
@@ -126,7 +160,31 @@ export function getHomeworkResultView(
       ? HOMEWORK_REVIEW_STATUS_LABELS[submission.teacher_status]
       : null,
     teacherComment: showTeacherSection ? submission.teacher_comment : null,
-    canRequestResubmit: showTeacherSection && canRequestResubmit(submission)
+    canRequestResubmit: showTeacherSection && canRequestResubmit(submission),
+    aiResultsHidden: false
+  };
+}
+
+/**
+ * 과외쌤 검사 화면의 AI 칸. 목록은 `getHomeworkResultView` 를 쓰지 않으므로 별도 관문이 필요하다.
+ *
+ * `show: false` 면 판정·확신도·사유가 **애초에 담기지 않는다**. 컴포넌트가 조건문을
+ * 빠뜨려도 노출될 값이 없다.
+ */
+export type HomeworkAiDisplay =
+  | { show: true; verdict: HomeworkVerdict | null; confidencePercent: number | null; reason: string | null }
+  | { show: false };
+
+export function getHomeworkAiDisplay(
+  submission: { ai_verdict: HomeworkVerdict | null; ai_confidence: number | null; ai_reason: string | null },
+  options: { aiResultsEnabled: boolean }
+): HomeworkAiDisplay {
+  if (!options.aiResultsEnabled) return { show: false };
+  return {
+    show: true,
+    verdict: submission.ai_verdict,
+    confidencePercent: getHomeworkConfidencePercent(submission.ai_confidence),
+    reason: submission.ai_reason
   };
 }
 

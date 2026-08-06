@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 
 import {
+  AI_CHECK_PAUSED_TEACHER_NOTICE,
+  AI_CHECK_RESULTS_ENABLED,
   HOMEWORK_REVIEW_STATUS_LABELS,
   HOMEWORK_VERDICT_LABELS,
   SUBJECT_LABELS,
@@ -11,7 +13,7 @@ import {
   TODO_SCOPE_TEXT_MAX_LENGTH,
   countTodoScopeTextLength,
   createTeacherReviewPatch,
-  getHomeworkConfidencePercent,
+  getHomeworkAiDisplay,
   getTodoScopeTextForDisplay,
   isTodoScopeTextRequired,
   normalizeTodoScopeText,
@@ -142,12 +144,25 @@ export function TeacherHomeworkReview() {
         </a>
       }
     >
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryCard label="확인 대기" value={summary.awaitingTeacher} tone="warning" />
-        <SummaryCard label="통과" value={summary.pass} tone="success" />
-        <SummaryCard label="미흡" value={summary.insufficient} tone="danger" />
-        <SummaryCard label="애매" value={summary.ambiguous} tone="warning" />
-      </section>
+      {/* 통과·미흡·애매는 AI 판정 집계다 — 판정을 가릴 때는 이것도 같이 가려야 한다.
+          카드만 남기고 숫자를 0 으로 두면 "전부 통과 0건" 으로 잘못 읽힌다. */}
+      {AI_CHECK_RESULTS_ENABLED ? (
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <SummaryCard label="확인 대기" value={summary.awaitingTeacher} tone="warning" />
+          <SummaryCard label="통과" value={summary.pass} tone="success" />
+          <SummaryCard label="미흡" value={summary.insufficient} tone="danger" />
+          <SummaryCard label="애매" value={summary.ambiguous} tone="warning" />
+        </section>
+      ) : (
+        <>
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <SummaryCard label="확인 대기" value={summary.awaitingTeacher} tone="warning" />
+          </section>
+          <p className="rounded-card border border-line bg-surface px-4 py-3 text-sm font-bold text-muted">
+            {AI_CHECK_PAUSED_TEACHER_NOTICE}
+          </p>
+        </>
+      )}
 
       <section className="flex flex-col gap-4">
           {!loading && items.length === 0 ? (
@@ -161,8 +176,16 @@ export function TeacherHomeworkReview() {
           ) : null}
 
           {items.map((item) => {
-            const verdict = item.ai_verdict as HomeworkVerdict | null;
-            const confidence = getHomeworkConfidencePercent(item.ai_confidence);
+            // 관문을 shared 헬퍼로 둔다. show: false 면 verdict·확신도·사유가 애초에 담기지
+            // 않아서, 아래 JSX 에서 조건을 빠뜨려도 노출될 값이 없다.
+            const ai = getHomeworkAiDisplay(
+              {
+                ai_verdict: item.ai_verdict as HomeworkVerdict | null,
+                ai_confidence: item.ai_confidence,
+                ai_reason: item.ai_reason
+              },
+              { aiResultsEnabled: AI_CHECK_RESULTS_ENABLED }
+            );
             return (
               <article key={item.id} className="grid gap-3 rounded-card border border-line bg-surface p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -180,9 +203,17 @@ export function TeacherHomeworkReview() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {verdict ? <VerdictBadge verdict={verdict} /> : <span className="text-sm font-bold text-muted">검사 대기</span>}
-                    {confidence !== null ? (
-                      <span className="font-mono text-sm font-bold text-muted">확신도 {confidence}%</span>
+                    {ai.show ? (
+                      <>
+                        {ai.verdict ? (
+                          <VerdictBadge verdict={ai.verdict} />
+                        ) : (
+                          <span className="text-sm font-bold text-muted">검사 대기</span>
+                        )}
+                        {ai.confidencePercent !== null ? (
+                          <span className="font-mono text-sm font-bold text-muted">확신도 {ai.confidencePercent}%</span>
+                        ) : null}
+                      </>
                     ) : null}
                   </div>
                 </div>
@@ -193,7 +224,7 @@ export function TeacherHomeworkReview() {
                     공개범위가 꺼져 있으면 여기서 URL 이 발급되지 않아 사진이 안 보인다. */}
                 <SubmissionPhotos paths={item.photo_paths} />
 
-                {item.ai_reason ? <p className="text-sm font-semibold text-ink">{item.ai_reason}</p> : null}
+                {ai.show && ai.reason ? <p className="text-sm font-semibold text-ink">{ai.reason}</p> : null}
 
                 <p className="text-xs font-bold text-muted">
                   현재 상태: {HOMEWORK_REVIEW_STATUS_LABELS[item.teacher_status]}

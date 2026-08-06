@@ -80,9 +80,27 @@ function fail(code: string, status: number, extra?: Record<string, unknown>): Re
   return new Response(JSON.stringify({ error: code, errorCode: code, ...extra }), { status, headers: jsonHeaders });
 }
 
+// packages/shared 의 AI_CHECK_RESULTS_ENABLED 와 **같은 값이어야 한다**.
+// Deno 는 그 패키지를 import 할 수 없어 쌍둥이 상수이고, 스키마 테스트가 두 값을 대조한다
+// (이 파일의 과금 분기와 shared 헬퍼를 대조하는 것과 같은 방식).
+//
+// 이건 2차 방어선이다. 플래그가 꺼져 있으면 학생 앱이 애초에 호출하지 않지만,
+// 구버전 클라이언트·직접 호출은 여기서 막아야 비용이 0 이 된다.
+const AI_CHECK_RESULTS_ENABLED = false;
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return fail("method_not_allowed", 405);
+  }
+
+  // 판정을 보여주지 않는 동안은 **아무것도 하지 않는다.**
+  // 여기서 끝내야 attempt 슬롯도, 사진 다운로드도, Anthropic 호출도 일어나지 않는다
+  // (한도 카운터도 소모되지 않는다). 제출 자체는 클라이언트가 이미 저장했으므로 영향 없다.
+  if (!AI_CHECK_RESULTS_ENABLED) {
+    return new Response(JSON.stringify({ error: "ai_check_paused", errorCode: "ai_check_paused" }), {
+      status: 503,
+      headers: jsonHeaders
+    });
   }
 
   const authHeader = req.headers.get("Authorization");

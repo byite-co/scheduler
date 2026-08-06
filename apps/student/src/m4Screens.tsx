@@ -6,11 +6,13 @@ import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View
 
 import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
+  AI_CHECK_RESULTS_ENABLED,
   HOMEWORK_CHECK_DISCLAIMER,
   HOMEWORK_PHOTO_ERROR_MESSAGES,
   HOMEWORK_PHOTO_MAX_COUNT,
   HOMEWORK_PHOTO_TIPS,
   SUBJECT_LABELS,
+  getAiCheckPausedStudentNotice,
   getHomeworkCheckErrorMessage,
   getHomeworkResultView,
   getTodoScopeTextForDisplay,
@@ -168,6 +170,15 @@ export function HomeworkSubmitScreen() {
       return;
     }
 
+    // 판정 노출이 꺼져 있으면 **호출하지 않는다** — 보여주지 않을 결과에 돈을 쓸 이유가 없다.
+    // (호출을 막는 것이 비용 0 의 조건이다. Edge Function 도 같은 플래그로 스스로 거절하지만,
+    //  그건 우회·구버전 클라이언트용 2차 방어선이다.)
+    if (!AI_CHECK_RESULTS_ENABLED) {
+      await data.refresh();
+      router.replace({ pathname: "/homework/[id]/result", params: { id: todoId } });
+      return;
+    }
+
     setSubmitState("checking");
     const checked = await supabase.functions.invoke("ai-homework-check", {
       body: { submissionId: inserted.data.id, idempotencyKey: `${inserted.data.id}:${submissionKey}` }
@@ -201,7 +212,10 @@ export function HomeworkSubmitScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
-      <BackHeader eyebrow={data.isTutored ? "선생님 숙제" : "AI 완료검사"} title="숙제 제출" />
+      <BackHeader
+        eyebrow={data.isTutored ? "선생님 숙제" : AI_CHECK_RESULTS_ENABLED ? "AI 완료검사" : "숙제 기록"}
+        title="숙제 제출"
+      />
 
       <View style={styles.metaRow}>
         <SubjectChip label={subjectLabel} />
@@ -246,9 +260,12 @@ export function HomeworkSubmitScreen() {
       ) : null}
       {submitState === "idle" && !errorText ? (
         <View style={styles.infoBanner}>
-          <AppIcon name="ai" size={16} color={colors.brand} />
+          <AppIcon name={AI_CHECK_RESULTS_ENABLED ? "ai" : "check"} size={16} color={colors.brand} />
           <Text style={styles.infoBannerText}>
-            AI 1차 확인 · 사진이 잘 보여요. {data.isTutored ? "제출하면 선생님이 최종 확인해요." : "제출하면 바로 결과를 보여드려요."}
+            {AI_CHECK_RESULTS_ENABLED
+              ? `AI 1차 확인 · 사진이 잘 보여요. ${data.isTutored ? "제출하면 선생님이 최종 확인해요." : "제출하면 바로 결과를 보여드려요."}`
+              : // AI 안내를 그대로 두면 오지 않을 결과를 기다리게 된다.
+                `사진이 잘 보여요. ${data.isTutored ? "제출하면 선생님이 확인해요." : "제출하면 사진이 그대로 저장돼요."}`}
           </Text>
         </View>
       ) : null}
@@ -298,7 +315,13 @@ export function HomeworkResultScreen() {
   const data = useHomeworkData(todoId);
 
   const view: HomeworkResultView | null = useMemo(
-    () => (data.submission ? getHomeworkResultView(data.submission, { isTutored: data.isTutored }) : null),
+    () =>
+      data.submission
+        ? getHomeworkResultView(data.submission, {
+            isTutored: data.isTutored,
+            aiResultsEnabled: AI_CHECK_RESULTS_ENABLED
+          })
+        : null,
     [data.submission, data.isTutored]
   );
 
@@ -321,20 +344,38 @@ export function HomeworkResultScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
       <BackHeader eyebrow="검사 결과" title={data.todo?.title ?? "숙제"} />
 
-      <View style={styles.verdictHero}>
-        <View style={[styles.verdictRing, verdictRingStyle(view.verdictTone)]}>
-          <AppIcon name={ringIconName} size={34} color={ringIconColor} />
+      {/* 판정을 가린 상태에서는 등급처럼 보이는 히어로·확신도·사유를 전부 빼고 제출 사실만 알린다.
+          view 쪽에서 이미 verdict/confidence/reason 이 비워져 있으므로 여기서 새는 값은 없다. */}
+      {view.aiResultsHidden ? (
+        <View style={styles.verdictHero}>
+          <View style={[styles.verdictRing, verdictRingStyle("muted")]}>
+            <AppIcon name="check" size={34} color={colors.muted} />
+          </View>
+          <Text style={styles.verdictHeadline}>제출됐어요</Text>
+          <Text style={styles.verdictSub}>
+            {(data.todo?.subject ? SUBJECT_LABELS[data.todo.subject as SubjectCode] : "")} · {view.verdictLabel}
+          </Text>
         </View>
-        <Text style={styles.verdictHeadline}>{headline}</Text>
-        <Text style={styles.verdictSub}>
-          {(data.todo?.subject ? SUBJECT_LABELS[data.todo.subject as SubjectCode] : "")} · {view.verdictLabel}
-        </Text>
-        {view.confidencePercent !== null ? (
-          <Text style={styles.verdictConfidence}>AI 확신도 {view.confidencePercent}%</Text>
-        ) : null}
-      </View>
+      ) : (
+        <View style={styles.verdictHero}>
+          <View style={[styles.verdictRing, verdictRingStyle(view.verdictTone)]}>
+            <AppIcon name={ringIconName} size={34} color={ringIconColor} />
+          </View>
+          <Text style={styles.verdictHeadline}>{headline}</Text>
+          <Text style={styles.verdictSub}>
+            {(data.todo?.subject ? SUBJECT_LABELS[data.todo.subject as SubjectCode] : "")} · {view.verdictLabel}
+          </Text>
+          {view.confidencePercent !== null ? (
+            <Text style={styles.verdictConfidence}>AI 확신도 {view.confidencePercent}%</Text>
+          ) : null}
+        </View>
+      )}
 
-      {view.reason ? (
+      {view.aiResultsHidden ? (
+        <View style={styles.reasonCard}>
+          <Text style={styles.reasonCardBody}>{getAiCheckPausedStudentNotice({ isTutored: data.isTutored })}</Text>
+        </View>
+      ) : view.reason ? (
         <View style={[styles.reasonCard, badgeToneStyle(view.verdictTone)]}>
           <Text style={[styles.reasonCardTitle, badgeTextToneStyle(view.verdictTone)]}>
             {view.verdictTone === "success" ? "확인됐어요" : "부족한 부분"}
@@ -353,11 +394,12 @@ export function HomeworkResultScreen() {
             <Text style={styles.teacherCardBody}>{view.teacherComment ? view.teacherComment : view.teacherStatusLabel}</Text>
           </View>
         </View>
-      ) : (
+      ) : view.aiResultsHidden ? null : (
         <Text style={styles.aiOnlyNote}>혼자 공부 중이라 AI 검사 결과만 보여드려요.</Text>
       )}
 
-      <Text style={styles.disclaimer}>{HOMEWORK_CHECK_DISCLAIMER}</Text>
+      {/* "확인했어요" 라는 뜻이라, 아무 확인도 하지 않은 상태에서 붙이면 거짓말이 된다. */}
+      {view.aiResultsHidden ? null : <Text style={styles.disclaimer}>{HOMEWORK_CHECK_DISCLAIMER}</Text>}
 
       {view.canRequestResubmit ? (
         <Pressable
@@ -383,8 +425,11 @@ export function HomeworkDetailScreen() {
   if (!data.session) return <CenterCard text="로그인이 필요해요." />;
   if (!data.todo) return <CenterCard text="숙제를 찾을 수 없어요." />;
 
-  const waitingForTeacher =
-    data.isTutored && data.submission?.ai_verdict != null && data.submission?.teacher_status === "pending";
+  // 판정 노출이 꺼져 있으면 ai_verdict 가 채워지지 않으므로(호출 자체를 안 한다) 이 조건이
+  // 영원히 false 가 된다 → 제출했는데 '쌤 확인 대기' 안내가 사라진다. 제출 존재로 판단한다.
+  const waitingForTeacher = AI_CHECK_RESULTS_ENABLED
+    ? data.isTutored && data.submission?.ai_verdict != null && data.submission?.teacher_status === "pending"
+    : data.isTutored && data.submission != null && data.submission.teacher_status === "pending";
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}>
