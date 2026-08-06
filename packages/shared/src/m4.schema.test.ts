@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { HOMEWORK_CHECK_ERROR_MESSAGES } from "./m4";
+import {
+  AI_CHECK_LIMITS,
+  ANTHROPIC_CHECK_ERROR_CODES,
+  HOMEWORK_CHECK_ERROR_MESSAGES,
+  HOMEWORK_CHECK_GATE_ERROR_CODES,
+  HOMEWORK_PHOTO_QUOTA
+} from "./m4";
 
 const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
 const migration = readFileSync(
@@ -228,8 +234,32 @@ describe("M4 edge function ↔ shared 대조", () => {
   it("keeps the CheckErrorCode set identical on both sides", () => {
     const denoCodes = [...anthropicModule.matchAll(/^\s*\|\s*"([a-z_]+)"/gm)].map((m) => m[1]);
     expect(denoCodes.length).toBeGreaterThan(5);
-    const sharedCodes = Object.keys(HOMEWORK_CHECK_ERROR_MESSAGES);
-    expect([...denoCodes].sort()).toEqual([...sharedCodes].sort());
+    // Anthropic 호출에서 나오는 코드만 대조한다. 게이트·한도 코드는 판정 **전에** 나오므로
+    // anthropic.ts 에 있을 수가 없다 — 한 집합으로 묶으면 없는 코드를 억지로 넣어야 한다.
+    expect([...denoCodes].sort()).toEqual([...ANTHROPIC_CHECK_ERROR_CODES].sort());
+  });
+
+  it("has a user-facing message for every code either side can emit", () => {
+    const messages = Object.keys(HOMEWORK_CHECK_ERROR_MESSAGES);
+    for (const code of [...ANTHROPIC_CHECK_ERROR_CODES, ...HOMEWORK_CHECK_GATE_ERROR_CODES]) {
+      expect(messages, code).toContain(code);
+    }
+  });
+
+  it("actually sends errorCode on gate and limit rejections", () => {
+    // 회귀 방어. 게이트·한도 응답이 { error } 만 담으면 클라이언트(body.errorCode)가 코드를
+    // 못 읽어 전부 "확인 중 문제가 생겼어요"(unknown)로 표시된다. 실제로 그 상태였고,
+    // 그래서 한도 안내가 한 번도 보이지 않았다.
+    expect(edgeFunction).toContain("errorCode: code");
+    // 에러 응답은 fail() 을 거쳐야 한다 — 직접 Response 를 만들면 errorCode 가 빠진다.
+    // (fail() 본체 1건과 check_failed 1건만 허용. check_failed 는 errorCode 를 직접 담는다.)
+    const rawErrorResponses = [...edgeFunction.matchAll(/JSON\.stringify\(\{ error: /g)].length;
+    expect(rawErrorResponses, "fail() 을 우회한 에러 응답이 있다").toBeLessThanOrEqual(2);
+
+    // 서버가 내보내는 게이트·한도 코드가 shared 목록과 어긋나면 문구 없는 코드가 생긴다.
+    for (const code of HOMEWORK_CHECK_GATE_ERROR_CODES) {
+      expect(edgeFunction, code).toContain(`"${code}"`);
+    }
   });
 
   it("keeps the AI as an assistant, not a grader", () => {
@@ -266,5 +296,134 @@ describe("M4 edge function ↔ shared 대조", () => {
   it("no longer contains the stub verdict", () => {
     expect(edgeFunction).not.toContain("getStubHomeworkVerdict");
     expect(edgeFunction).not.toContain("stub-deterministic");
+  });
+});
+
+// ── 숙제 사진 업로드 한도(20260807010000) ────────────────────────────────────
+// 조사에서 "비용이 발생하는데 게이트가 하나도 없는" 유일한 기능으로 확인된 곳이다.
+describe("M4 homework photo upload quota", () => {
+  const quotaMigration = readFileSync(
+    new URL("../../../supabase/migrations/20260807010000_homework_photo_quota.sql", import.meta.url),
+    "utf8"
+  );
+
+  it("enforces the quota in the storage INSERT policy, not only in the client", () => {
+    for (const source of [schema, quotaMigration]) {
+      expect(source).toContain("create policy homework_photos_student_insert on storage.objects");
+      expect(source).toContain("homework_photo_upload_allowed(name)");
+    }
+  });
+
+  it("keeps the shared quota copy in sync with the DB (DB is authoritative)", () => {
+    // 함수 이름까지 묶어서 본다 — 값만 보면 우연히 같은 숫자를 쓰는 다른 상수에 걸린다
+    // (ai_check_window_days 도 30 이다). schema.sql 은 CRLF 라 \s+ 로 잇는다.
+    const quotaDef = (name: string, value: number) =>
+      new RegExp(`${name}\\(\\) returns \\w+\\s+language sql immutable as \\$\\$ select ${value} \\$\\$`);
+    for (const source of [schema, quotaMigration]) {
+      expect(source).toMatch(quotaDef("homework_photo_quota_window_days", HOMEWORK_PHOTO_QUOTA.windowDays));
+      expect(source).toMatch(quotaDef("homework_photo_quota_objects", HOMEWORK_PHOTO_QUOTA.maxObjects));
+      expect(source).toMatch(quotaDef("homework_photo_quota_bytes", HOMEWORK_PHOTO_QUOTA.maxBytes));
+      expect(source).toMatch(quotaDef("homework_photo_retention_days", HOMEWORK_PHOTO_QUOTA.retentionDays));
+    }
+  });
+
+  it("uses security definer so the policy does not recurse into itself", () => {
+    // invoker 로 두면 storage.objects 정책이 자기 자신을 다시 평가해
+    // "infinite recursion detected in policy" 가 난다.
+    const fnStart = quotaMigration.indexOf("create or replace function homework_photo_upload_allowed");
+    const definerAt = quotaMigration.indexOf("security definer", fnStart);
+    expect(fnStart).toBeGreaterThan(0);
+    expect(definerAt).toBeGreaterThan(fnStart);
+  });
+
+  it("takes no student_id argument so nobody can probe another student's usage", () => {
+    expect(quotaMigration).toContain("create or replace function homework_photo_usage()");
+    expect(quotaMigration).toContain("auth.uid()::text");
+    expect(quotaMigration).not.toMatch(/homework_photo_usage\(\s*p_/);
+  });
+
+  it("requires the path to belong to an existing todo of the caller", () => {
+    // 제출 행은 요구할 수 없다(사진이 먼저 올라간다) — 대신 내 할 일 실재를 요구한다.
+    for (const source of [schema, quotaMigration]) {
+      expect(source).toContain("from public.todos");
+      expect(source).toContain("student_id = v_uid");
+    }
+  });
+
+  it("guards the empty-array array_length trap", () => {
+    // 폴더가 없는 이름이면 storage.foldername 이 빈 배열을 주고
+    // array_length(빈 배열, 1) 은 0 이 아니라 NULL 이다.
+    expect(quotaMigration).toContain("coalesce(array_length(parts, 1), 0)");
+  });
+
+  it("does not pretend SQL alone can delete the files", () => {
+    // storage.objects 행만 지우면 실제 파일은 남는다. 목록만 돌려주고 삭제는 Storage API 가 한다.
+    expect(quotaMigration).toContain("homework_photos_expired_paths");
+    expect(quotaMigration).toContain("grant execute on function homework_photos_expired_paths(integer) to service_role");
+    expect(quotaMigration).toContain("revoke all on function homework_photos_expired_paths(integer) from authenticated");
+  });
+});
+
+// ── AI 검사 한도 재산정(20260807020000) ──────────────────────────────────────
+describe("M4 AI check limits rebalance", () => {
+  const limitsMigration = readFileSync(
+    new URL("../../../supabase/migrations/20260807020000_ai_check_limits_rebalance.sql", import.meta.url),
+    "utf8"
+  );
+
+  it("keeps the shared limit copy in sync with the DB (DB is authoritative)", () => {
+    // schema.sql 은 CRLF 다 — 줄바꿈에 무관하게 \s+ 로 잇는다.
+    const limitDef = (name: string, value: number) =>
+      new RegExp(`${name}\\(\\) returns integer\\s+language sql immutable as \\$\\$ select ${value} \\$\\$`);
+    for (const source of [schema, limitsMigration]) {
+      expect(source).toMatch(limitDef("ai_check_max_attempts_per_submission", AI_CHECK_LIMITS.maxPerSubmission));
+      expect(source).toMatch(limitDef("ai_check_max_attempts_per_day", AI_CHECK_LIMITS.maxPerDay));
+      expect(source).toMatch(limitDef("ai_check_max_attempts_per_month", AI_CHECK_LIMITS.maxPerWindow));
+      expect(source).toMatch(limitDef("ai_check_max_photos_per_month", AI_CHECK_LIMITS.maxPhotosPerWindow));
+      expect(source).toMatch(limitDef("ai_check_window_days", AI_CHECK_LIMITS.windowDays));
+    }
+  });
+
+  it("adds a window limit so the daily limit cannot be spent every day", () => {
+    // 하루 한도만 있으면 하루 최대치 × 30일을 쓸 수 있다. 그게 기존 구멍이었다.
+    expect(AI_CHECK_LIMITS.maxPerDay * AI_CHECK_LIMITS.windowDays).toBeGreaterThan(AI_CHECK_LIMITS.maxPerWindow);
+  });
+
+  it("caps photos as well as calls, because cost is dominated by image tokens", () => {
+    for (const source of [schema, limitsMigration]) {
+      expect(source).toContain("check_limit_photos_monthly_exceeded");
+      // 지금 요청할 사진까지 더해서 봐야 마지막 요청이 상한을 넘기지 않는다.
+      expect(source).toContain("photos_window + photos_requested > ai_check_max_photos_per_month()");
+    }
+  });
+
+  it("keeps the worst-case monthly cost inside 30% of student revenue", () => {
+    // 실측(2026-08-06): 프롬프트 936토큰 · 사진 1장 ≈ 1,600토큰 · 출력 ≤130토큰,
+    // Haiku 단가 입력 $1/Mtok · 출력 $5/Mtok, 환율 약 1,370원/$.
+    const KRW_PER_MICRO_USD = 1370 / 1_000_000;
+    const perCallMicros = 936 + 130 * 5; // 프롬프트 + 출력
+    const perPhotoMicros = 1600;
+    const worstKrw =
+      (AI_CHECK_LIMITS.maxPerWindow * perCallMicros + AI_CHECK_LIMITS.maxPhotosPerWindow * perPhotoMicros) *
+      KRW_PER_MICRO_USD;
+    expect(worstKrw).toBeLessThanOrEqual(2900 * 0.3);
+  });
+
+  it("checks the window limits before the daily limit", () => {
+    // 창이 소진됐는데 "오늘 다 썼어요"라고 하면 사용자가 내일 다시 시도해 또 막힌다.
+    const fnStart = limitsMigration.indexOf("create or replace function start_homework_check_attempt");
+    const monthAt = limitsMigration.indexOf("check_limit_monthly_exceeded", fnStart);
+    const dayAt = limitsMigration.indexOf("check_limit_daily_exceeded", fnStart);
+    const insertAt = limitsMigration.indexOf("insert into homework_check_attempts", fnStart);
+    expect(monthAt).toBeGreaterThan(fnStart);
+    expect(monthAt).toBeLessThan(dayAt);
+    expect(dayAt).toBeLessThan(insertAt);
+  });
+
+  it("still checks limits inside the slot-acquiring transaction", () => {
+    expect(limitsMigration).toContain("pg_advisory_xact_lock");
+    const lockAt = limitsMigration.indexOf("pg_advisory_xact_lock");
+    const insertAt = limitsMigration.indexOf("insert into homework_check_attempts", lockAt);
+    expect(insertAt).toBeGreaterThan(lockAt);
   });
 });

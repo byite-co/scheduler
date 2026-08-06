@@ -72,14 +72,22 @@ const jsonHeaders = { "Content-Type": "application/json" } as const;
 // 남의 submission_id를 넣어 보며 다른 학생의 데이터 존재 여부를 알아낼 수 있다.
 const NOT_FOUND = "submission_not_found" as const;
 
+// 클라이언트(getHomeworkCheckErrorMessage)는 body.errorCode 로 안내 문구를 고른다.
+// 예전에는 게이트·한도 응답이 { error } 만 담아 errorCode 가 항상 undefined 였고,
+// 그 결과 "한도 초과"가 "확인 중 문제가 생겼어요"라는 일반 문구로 표시됐다.
+// 두 필드를 함께 담아 그 구멍을 막는다(error 는 기존 호출부 호환용으로 유지).
+function fail(code: string, status: number, extra?: Record<string, unknown>): Response {
+  return new Response(JSON.stringify({ error: code, errorCode: code, ...extra }), { status, headers: jsonHeaders });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: jsonHeaders });
+    return fail("method_not_allowed", 405);
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response(JSON.stringify({ error: "missing_authorization" }), { status: 401, headers: jsonHeaders });
+    return fail("missing_authorization", 401);
   }
 
   // 클라이언트에서 받는 것은 **ID와 idempotency 키뿐**이다. 범위·학생 ID·사진 경로는 절대
@@ -92,10 +100,10 @@ Deno.serve(async (req: Request) => {
     submissionId = body?.submissionId;
     idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : undefined;
   } catch {
-    return new Response(JSON.stringify({ error: "invalid_body" }), { status: 400, headers: jsonHeaders });
+    return fail("invalid_body", 400);
   }
   if (!submissionId) {
-    return new Response(JSON.stringify({ error: "missing_submission_id" }), { status: 400, headers: jsonHeaders });
+    return fail("missing_submission_id", 400);
   }
   // 키를 안 보내는 구버전 클라이언트도 중복 과금은 막아야 한다. 제출 ID로 결정적 키를 만들면
   // **같은 제출에 대한 네트워크 재시도**가 자동으로 같은 attempt 로 합쳐진다.
@@ -112,7 +120,7 @@ Deno.serve(async (req: Request) => {
   const { data: userData } = await asUser.auth.getUser();
   const requestedBy = userData?.user?.id;
   if (!requestedBy) {
-    return new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401, headers: jsonHeaders });
+    return fail("unauthenticated", 401);
   }
 
   // 2) 호출자 RLS로 제출 + 숙제를 함께 읽는다. RLS가 본인 것만 허용하므로 이 조회 자체가
@@ -127,11 +135,11 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (readError) {
-    return new Response(JSON.stringify({ error: NOT_FOUND }), { status: 404, headers: jsonHeaders });
+    return fail(NOT_FOUND, 404);
   }
   // 3) 학생 본인 소유 확인. RLS로도 걸러지지만 명시적으로 한 번 더 본다.
   if (!submission || submission.student_id !== requestedBy) {
-    return new Response(JSON.stringify({ error: NOT_FOUND }), { status: 404, headers: jsonHeaders });
+    return fail(NOT_FOUND, 404);
   }
 
   const todo = (Array.isArray(submission.todos) ? submission.todos[0] : submission.todos) as
@@ -139,15 +147,15 @@ Deno.serve(async (req: Request) => {
     | null
     | undefined;
   if (!todo) {
-    return new Response(JSON.stringify({ error: NOT_FOUND }), { status: 404, headers: jsonHeaders });
+    return fail(NOT_FOUND, 404);
   }
 
   // 4) AI 검사 대상인지. 범위가 없으면 AI가 무엇과 대조할지 알 수 없다.
   if (!todo.ai_check_enabled) {
-    return new Response(JSON.stringify({ error: "ai_check_disabled" }), { status: 409, headers: jsonHeaders });
+    return fail("ai_check_disabled", 409);
   }
   if (!todo.scope_text || todo.scope_text.trim().length === 0) {
-    return new Response(JSON.stringify({ error: "scope_text_required" }), { status: 409, headers: jsonHeaders });
+    return fail("scope_text_required", 409);
   }
 
   // 5) 과금 권한 분기 — 가격 구조상 가장 중요한 부분이다.
@@ -165,18 +173,18 @@ Deno.serve(async (req: Request) => {
       .limit(1)
       .maybeSingle();
     if (connError || !connection) {
-      return new Response(JSON.stringify({ error: "connection_required" }), { status: 403, headers: jsonHeaders });
+      return fail("connection_required", 403);
     }
   } else {
     // has_active_student_premium()은 auth.uid()만 본다 → 반드시 사용자 컨텍스트로 호출한다.
     // (service_role로 부르면 auth.uid()가 null이라 언제나 false다.)
     const { data: isPremium, error: premiumError } = await asUser.rpc("has_active_student_premium");
     if (premiumError) {
-      return new Response(JSON.stringify({ error: "premium_check_failed" }), { status: 500, headers: jsonHeaders });
+      return fail("premium_check_failed", 500);
     }
     if (!isPremium) {
       // 작업 6의 UI가 이 코드를 보고 프리미엄 안내를 띄운다 — 명확히 구분해서 알려준다.
-      return new Response(JSON.stringify({ error: "premium_required" }), { status: 402, headers: jsonHeaders });
+      return fail("premium_required", 402);
     }
   }
 
@@ -195,20 +203,21 @@ Deno.serve(async (req: Request) => {
     // DB가 올린 예외를 사용자에게 의미 있는 코드로 옮긴다. detail(원문)은 흘리지 않는다 —
     // 원문에 다른 행의 정보가 섞일 수 있다.
     const message = startError?.message ?? "";
-    const mapped: { error: string; status: number } = message.includes("check_already_in_progress")
-      ? { error: "check_already_in_progress", status: 409 }
-      : message.includes("check_limit_submission_exceeded")
-        ? { error: "check_limit_submission_exceeded", status: 429 }
-        : message.includes("check_limit_daily_exceeded")
-          ? { error: "check_limit_daily_exceeded", status: 429 }
-          : message.includes("ai_check_disabled_for_todo")
-            ? { error: "ai_check_disabled", status: 409 }
-            : message.includes("scope_text_required_for_check")
-              ? { error: "scope_text_required", status: 409 }
-              : message.includes("homework_submission_not_found")
-                ? { error: NOT_FOUND, status: 404 }
-                : { error: "attempt_start_failed", status: 500 };
-    return new Response(JSON.stringify({ error: mapped.error }), { status: mapped.status, headers: jsonHeaders });
+    // DB 예외 → [클라이언트 코드, HTTP]. 한도는 429, 구조적 전제 위반은 409.
+    // 표로 두는 이유: 한도가 4종(제출당·하루·30일 호출·30일 사진)이라 삼항 중첩으로는
+    // 새 한도를 넣을 때 실수하기 쉽다.
+    const DB_ERROR_MAP: Array<[needle: string, code: string, status: number]> = [
+      ["check_already_in_progress", "check_already_in_progress", 409],
+      ["check_limit_submission_exceeded", "check_limit_submission_exceeded", 429],
+      ["check_limit_monthly_exceeded", "check_limit_monthly_exceeded", 429],
+      ["check_limit_photos_monthly_exceeded", "check_limit_photos_monthly_exceeded", 429],
+      ["check_limit_daily_exceeded", "check_limit_daily_exceeded", 429],
+      ["ai_check_disabled_for_todo", "ai_check_disabled", 409],
+      ["scope_text_required_for_check", "scope_text_required", 409],
+      ["homework_submission_not_found", NOT_FOUND, 404]
+    ];
+    const hit = DB_ERROR_MAP.find(([needle]) => message.includes(needle));
+    return hit ? fail(hit[1], hit[2]) : fail("attempt_start_failed", 500);
   }
 
   // 이미 끝난 실행을 재전송한 경우엔 그 결과를 그대로 돌려준다(다시 판정하지 않는다 = 중복 과금 없음).
@@ -269,10 +278,7 @@ Deno.serve(async (req: Request) => {
       p_attempt_id: attempt.id,
       p_error_code: "attempt_complete_failed"
     });
-    return new Response(JSON.stringify({ error: "write_failed", detail: writeError.message }), {
-      status: 500,
-      headers: jsonHeaders
-    });
+    return fail("write_failed", 500, { detail: writeError.message });
   }
 
   return new Response(JSON.stringify({ stub: true, verdict: result, attempt: completed }), {

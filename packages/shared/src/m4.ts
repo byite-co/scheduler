@@ -303,22 +303,55 @@ export const HOMEWORK_PHOTO_TIPS = [
 ] as const;
 
 // ── AI 검사 실패 코드 → 사용자 메시지 ───────────────────────────────────────
-// Edge Function 이 attempt.error_code 에 남기는 값이다(supabase/functions/.../anthropic.ts 의
-// CheckErrorCode 와 같은 집합이어야 한다 — Deno 는 이 패키지를 import 할 수 없어 쌍둥이 구현이고
-// 스키마 테스트가 두 곳을 대조한다).
 //
 // 원칙: **실패해도 학생을 막지 않는다.** AI 는 조수이므로 못 봤으면 과외쌤 수동 검사로 넘어간다.
 // 문구에 "실패"를 앞세우지 않고 다음 행동을 알려 준다.
-export type HomeworkCheckErrorCode =
-  | "photos_missing"
-  | "photo_download_failed"
-  | "photo_too_large"
-  | "auth_failed"
-  | "rate_limited"
-  | "upstream_timeout"
-  | "upstream_error"
-  | "response_malformed"
-  | "unknown";
+
+/**
+ * Anthropic 호출에서 나오는 코드. Edge Function 이 `attempt.error_code` 에 남긴다.
+ * supabase/functions/ai-homework-check/anthropic.ts 의 `CheckErrorCode` 와 **같은 집합**이어야
+ * 한다(Deno 는 이 패키지를 import 할 수 없어 쌍둥이 구현이고, 스키마 테스트가 대조한다).
+ */
+export const ANTHROPIC_CHECK_ERROR_CODES = [
+  "photos_missing",
+  "photo_download_failed",
+  "photo_too_large",
+  "auth_failed",
+  "rate_limited",
+  "upstream_timeout",
+  "upstream_error",
+  "response_malformed",
+  "unknown"
+] as const;
+
+export type AnthropicCheckErrorCode = (typeof ANTHROPIC_CHECK_ERROR_CODES)[number];
+
+/**
+ * 서버가 **판정 전에** 거절할 때의 코드(과금 권한·사용량 한도·구조적 전제).
+ * Anthropic 오류가 아니므로 위 집합과 섞지 않는다 — 섞으면 Deno 쪽 쌍둥이에 없는 코드를
+ * 억지로 넣어야 한다.
+ *
+ * ⚠️ 이 문구들이 사용자에게 보이려면 Edge Function 응답에 `errorCode` 가 들어 있어야 한다.
+ *    예전에는 게이트·한도 응답이 `{ error }` 만 담았고 클라이언트는 `errorCode` 를 읽어서,
+ *    한도 초과가 **한 번도 제대로 표시되지 않았다**(전부 `unknown` 으로 떨어졌다).
+ *    스키마 테스트가 그 회귀를 막는다.
+ */
+export const HOMEWORK_CHECK_GATE_ERROR_CODES = [
+  "premium_required",
+  "connection_required",
+  "check_limit_submission_exceeded",
+  "check_limit_daily_exceeded",
+  "check_limit_monthly_exceeded",
+  "check_limit_photos_monthly_exceeded",
+  "check_already_in_progress",
+  "ai_check_disabled",
+  "scope_text_required",
+  "submission_not_found"
+] as const;
+
+export type HomeworkCheckGateErrorCode = (typeof HOMEWORK_CHECK_GATE_ERROR_CODES)[number];
+
+export type HomeworkCheckErrorCode = AnthropicCheckErrorCode | HomeworkCheckGateErrorCode;
 
 export const HOMEWORK_CHECK_ERROR_MESSAGES: Record<HomeworkCheckErrorCode, string> = {
   photos_missing: "올린 사진을 찾지 못했어요. 사진을 다시 올려 제출해 주세요.",
@@ -330,8 +363,51 @@ export const HOMEWORK_CHECK_ERROR_MESSAGES: Record<HomeworkCheckErrorCode, strin
   upstream_timeout: "확인이 오래 걸려 멈췄어요. 제출은 저장됐어요. 다시 시도하거나 결과를 기다려 주세요.",
   upstream_error: "확인 중 문제가 생겼어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
   response_malformed: "확인 결과를 읽지 못했어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
-  unknown: "확인 중 문제가 생겼어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요."
+  unknown: "확인 중 문제가 생겼어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
+
+  // ── 과금 권한 ──
+  premium_required: "혼자 만든 할 일의 AI 검사는 프리미엄에서 쓸 수 있어요. 제출은 저장됐어요.",
+  connection_required: "선생님과 연결되면 AI 검사를 쓸 수 있어요. 제출은 저장됐어요.",
+
+  // ── 사용량 한도 ── 왜 막혔는지와 언제 다시 되는지를 함께 알려준다.
+  check_limit_submission_exceeded:
+    "이 제출은 검사 횟수를 모두 사용했어요. 사진을 다시 찍어 새로 제출하면 검사할 수 있어요.",
+  check_limit_daily_exceeded: "오늘 검사 횟수를 모두 사용했어요. 내일 다시 시도해 주세요. 제출은 저장됐어요.",
+  check_limit_monthly_exceeded:
+    "최근 30일 검사 횟수를 모두 사용했어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
+  check_limit_photos_monthly_exceeded:
+    "최근 30일 검사 사진 장수를 모두 사용했어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
+
+  // ── 구조적 전제 ──
+  check_already_in_progress: "이미 검사가 진행 중이에요. 잠시 후 결과를 확인해 주세요.",
+  ai_check_disabled: "이 숙제는 AI 검사를 쓰지 않아요. 제출은 저장됐어요.",
+  scope_text_required: "검사할 범위가 없어요. 선생님께 범위를 확인해 주세요. 제출은 저장됐어요.",
+  submission_not_found: "제출을 찾지 못했어요. 다시 제출해 주세요."
 };
+
+/**
+ * AI 검사 사용량 한도. **DB 가 최종 권위**다(ai_check_max_* 함수).
+ * 여기 값은 안내 문구·테스트를 위한 사본이고, 스키마 테스트가 마이그레이션과 대조한다.
+ */
+export const AI_CHECK_LIMITS = {
+  windowDays: 30,
+  maxPerSubmission: 3,
+  maxPerDay: 8,
+  maxPerWindow: 70,
+  maxPhotosPerWindow: 280
+} as const;
+
+/**
+ * 숙제 사진 업로드 한도. **DB 가 최종 권위**다(homework_photo_quota_* 함수).
+ * 누적 총량이 아니라 최근 `windowDays` 일 업로드량에 걸린다 — 누적으로 걸면 보관 정리가
+ * 붙기 전에 정상 사용자가 막힌다.
+ */
+export const HOMEWORK_PHOTO_QUOTA = {
+  windowDays: 30,
+  maxObjects: 1000,
+  maxBytes: 1073741824,
+  retentionDays: 180
+} as const;
 
 export function getHomeworkCheckErrorMessage(code: string | null | undefined): string {
   if (code && code in HOMEWORK_CHECK_ERROR_MESSAGES) {
