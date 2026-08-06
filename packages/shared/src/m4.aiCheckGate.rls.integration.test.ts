@@ -130,7 +130,7 @@ describeIfRemote("M4 서버측 AI 검사 게이트", () => {
       assertOk(teacherTodo);
       const teacherSubmission = await admin
         .from("homework_submissions")
-        .insert({ todo_id: assertData(teacherTodo.data).id, student_id: studentId, photo_paths: ["a/1.jpg"] })
+        .insert({ todo_id: assertData(teacherTodo.data).id, student_id: studentId, photo_paths: [`${studentId}/p1.jpg`] })
         .select("id")
         .single();
       assertOk(teacherSubmission);
@@ -245,7 +245,7 @@ describeIfRemote("M4 서버측 AI 검사 게이트", () => {
       assertOk(offTodo);
       const offSubmission = await admin
         .from("homework_submissions")
-        .insert({ todo_id: assertData(offTodo.data).id, student_id: soloId, photo_paths: ["b/1.jpg"] })
+        .insert({ todo_id: assertData(offTodo.data).id, student_id: soloId, photo_paths: [`${soloId}/p1.jpg`] })
         .select("id")
         .single();
       assertOk(offSubmission);

@@ -188,6 +188,120 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+// ── 숙제 사진 업로드 ────────────────────────────────────────────────────────
+// 규칙은 DB·버킷에도 걸려 있고(20260806060000), 아래 상수·함수는 같은 규칙을 앱에서 미리
+// 적용해 저장 전에 안내하기 위한 것이다. 갈라지면 앱이 통과시킨 파일을 서버가 거부한다.
+
+/** 한 제출의 사진 장수. `subs_photo_count` 제약과 같은 값이어야 한다. */
+export const HOMEWORK_PHOTO_MIN_COUNT = 1;
+export const HOMEWORK_PHOTO_MAX_COUNT = 9;
+
+/**
+ * 업로드 파일 하나의 최대 바이트. 버킷의 `file_size_limit` 과 같은 값이어야 한다.
+ *
+ * 5MB 근거: Claude 비전은 이미지를 긴 변 ~1568px 로 리사이즈해서 읽는다. 그보다 큰 원본을
+ * 올려도 판독 품질이 좋아지지 않고 업로드·저장 비용만 늘어난다. 앱은 업로드 전에 줄여 보내므로
+ * 실제 파일은 보통 1MB 미만이고, 5MB 는 "클라이언트를 우회한 요청까지 막는 상한"이다.
+ */
+export const HOMEWORK_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+/** 리사이즈 목표 긴 변(px). Claude 비전이 내부적으로 줄이는 크기에 맞춘다. */
+export const HOMEWORK_PHOTO_MAX_LONG_EDGE = 1568;
+
+/** 리사이즈 후 JPEG 품질. 텍스트(문제 번호·풀이) 판독에 충분하면서 용량을 줄인다. */
+export const HOMEWORK_PHOTO_JPEG_QUALITY = 0.8;
+
+/** 버킷 `allowed_mime_types` 와 같아야 한다. HEIC 는 비전 API 가 못 읽어 제외 — 앱이 JPEG 로 변환한다. */
+export const HOMEWORK_PHOTO_ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+
+export type HomeworkPhotoError =
+  | "photo_count_out_of_range"
+  | "photo_too_large"
+  | "photo_mime_not_allowed";
+
+export const HOMEWORK_PHOTO_ERROR_MESSAGES: Record<HomeworkPhotoError, string> = {
+  photo_count_out_of_range: `사진은 ${HOMEWORK_PHOTO_MIN_COUNT}~${HOMEWORK_PHOTO_MAX_COUNT}장까지 올릴 수 있어요.`,
+  photo_too_large: `사진 한 장이 너무 커요. ${Math.round(HOMEWORK_PHOTO_MAX_BYTES / (1024 * 1024))}MB 아래로 줄여 주세요.`,
+  photo_mime_not_allowed: "JPG · PNG · WEBP 사진만 올릴 수 있어요."
+};
+
+export type HomeworkPhotoLike = {
+  /** 바이트 수. 알 수 없으면 undefined — 그 경우 용량 검사는 건너뛰고 서버가 막는다. */
+  bytes?: number;
+  mimeType?: string | null;
+};
+
+export function isAllowedHomeworkPhotoMime(mimeType: string | null | undefined): boolean {
+  if (!mimeType) return false;
+  const normalized = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return (HOMEWORK_PHOTO_ALLOWED_MIME_TYPES as readonly string[]).includes(normalized);
+}
+
+/** 업로드 직전 검증. 서버(버킷 제한 + subs_photo_count)와 같은 규칙이다. */
+export function validateHomeworkPhotos(photos: HomeworkPhotoLike[]): HomeworkPhotoError | undefined {
+  if (photos.length < HOMEWORK_PHOTO_MIN_COUNT || photos.length > HOMEWORK_PHOTO_MAX_COUNT) {
+    return "photo_count_out_of_range";
+  }
+  for (const photo of photos) {
+    if (!isAllowedHomeworkPhotoMime(photo.mimeType)) return "photo_mime_not_allowed";
+    if (typeof photo.bytes === "number" && photo.bytes > HOMEWORK_PHOTO_MAX_BYTES) return "photo_too_large";
+  }
+  return undefined;
+}
+
+/**
+ * Storage 경로. 첫 폴더가 학생 uid 여야 한다 —
+ * Storage 정책(`(storage.foldername(name))[1] = auth.uid()`)과
+ * 제출 가드(`photo_paths_must_be_in_own_folder`)가 그 규칙을 강제한다.
+ *
+ * 재제출마다 폴더가 달라지도록 submissionKey 를 끼운다. 같은 경로에 덮어쓰면 이전 제출의
+ * 사진이 사라져 그 제출의 AI 판정 근거가 없어진다(attempt 는 경로 스냅샷만 갖는다).
+ */
+export function buildHomeworkPhotoPath(input: {
+  studentId: string;
+  todoId: string;
+  submissionKey: string;
+  index: number;
+}): string {
+  return `${input.studentId}/${input.todoId}/${input.submissionKey}/page-${input.index + 1}.jpg`;
+}
+
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * base64 → 바이트. Storage 업로드에 쓴다.
+ *
+ * `atob` 을 쓰지 않는 이유: React Native(Hermes)에 있다는 보장이 없어 플랫폼마다 갈린다.
+ * 순수 구현이면 웹·기기에서 같게 동작하고 단위 테스트로 확인할 수 있다.
+ */
+export function decodeBase64(base64: string): Uint8Array {
+  const clean = base64.replace(/[^A-Za-z0-9+/]/g, "");
+  const byteLength = Math.floor((clean.length * 3) / 4);
+  const bytes = new Uint8Array(byteLength);
+  let buffer = 0;
+  let bits = 0;
+  let out = 0;
+
+  for (const char of clean) {
+    const value = BASE64_ALPHABET.indexOf(char);
+    if (value < 0) continue;
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes[out++] = (buffer >> bits) & 0xff;
+    }
+  }
+  return out === byteLength ? bytes : bytes.subarray(0, out);
+}
+
+/** 촬영 안내 — AI 정확도가 촬영 품질에 직결된다. 카탈로그 C4 에는 안내가 없어 새로 만들었다. */
+export const HOMEWORK_PHOTO_TIPS = [
+  "페이지 번호가 보이게 찍어요 — 범위를 맞춰 보는 기준이에요.",
+  "한 페이지씩 한 장으로 찍어요.",
+  "밝은 곳에서 똑바로, 그림자 없이 찍어요."
+] as const;
+
 // ── AI 검사 과금 권한 ────────────────────────────────────────────────────────
 // 🚨 가격 구조의 핵심. 모든 AI 요청에 학생 프리미엄을 요구하면 안 된다.
 //

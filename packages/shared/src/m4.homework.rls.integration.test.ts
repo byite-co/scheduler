@@ -132,7 +132,7 @@ describeIfRemote("M4 homework AI-check RLS against linked Supabase", () => {
       const forgedVerdict = await studentClient.from("homework_submissions").insert({
         todo_id: teacherTodoId,
         student_id: studentId,
-        photo_paths: ["homework-photos/forged.jpg"],
+        photo_paths: [`${studentId}/forged.jpg`],
         ai_verdict: "pass"
       });
       expect(forgedVerdict.error).not.toBeNull();
@@ -142,7 +142,7 @@ describeIfRemote("M4 homework AI-check RLS against linked Supabase", () => {
         .insert({
           todo_id: teacherTodoId,
           student_id: studentId,
-          photo_paths: ["homework-photos/p1.jpg", "homework-photos/p2.jpg"]
+          photo_paths: [`${studentId}/p1.jpg`, `${studentId}/p2.jpg`]
         })
         .select("id, ai_verdict")
         .single();
@@ -230,7 +230,7 @@ describeIfRemote("M4 homework AI-check RLS against linked Supabase", () => {
       // 혼공생 제출은 연결된 과외쌤이 없어 어떤 과외쌤에게도 안 보인다(AI 단독).
       const soloSubmission = await soloClient
         .from("homework_submissions")
-        .insert({ todo_id: soloTodoId, student_id: soloId, photo_paths: ["homework-photos/solo.jpg"] })
+        .insert({ todo_id: soloTodoId, student_id: soloId, photo_paths: [`${soloId}/solo.jpg`] })
         .select("id")
         .single();
       assertOk(soloSubmission);

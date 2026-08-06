@@ -4,10 +4,15 @@ import {
   canRequestResubmit,
   createTeacherReviewPatch,
   getHomeworkConfidencePercent,
+  HOMEWORK_PHOTO_MAX_BYTES,
+  HOMEWORK_PHOTO_MAX_COUNT,
+  buildHomeworkPhotoPath,
+  decodeBase64,
   getAiCheckEntitlement,
   getHomeworkResultView,
   getStubHomeworkVerdict,
   summarizeReviewQueue,
+  validateHomeworkPhotos,
   type HomeworkSubmissionLike
 } from "./m4";
 
@@ -160,5 +165,84 @@ describe("M4 AI check entitlement (과금 분기)", () => {
     expect(
       getAiCheckEntitlement({ todoSource: "self", hasActiveConnection: false, hasStudentPremium: true })
     ).toEqual({ allowed: true, via: "student_premium" });
+  });
+});
+
+// 사진 업로드 규칙 — 서버(버킷 제한 + subs_photo_count)와 같아야 한다.
+describe("M4 homework photo upload rules", () => {
+  const jpeg = { bytes: 1024, mimeType: "image/jpeg" };
+
+  it("accepts 1~9 image photos", () => {
+    expect(validateHomeworkPhotos([jpeg])).toBeUndefined();
+    expect(validateHomeworkPhotos(Array.from({ length: HOMEWORK_PHOTO_MAX_COUNT }, () => jpeg))).toBeUndefined();
+  });
+
+  it("rejects 0 and 10+ photos", () => {
+    expect(validateHomeworkPhotos([])).toBe("photo_count_out_of_range");
+    expect(validateHomeworkPhotos(Array.from({ length: HOMEWORK_PHOTO_MAX_COUNT + 1 }, () => jpeg))).toBe(
+      "photo_count_out_of_range"
+    );
+  });
+
+  it("rejects non-image and disallowed image types", () => {
+    // HEIC 는 비전 API 가 못 읽어 버킷도 받지 않는다 — 앱이 업로드 전에 JPEG 로 바꾼다.
+    for (const mimeType of ["application/pdf", "image/heic", "text/plain", null, undefined]) {
+      expect(validateHomeworkPhotos([{ bytes: 1024, mimeType }]), String(mimeType)).toBe("photo_mime_not_allowed");
+    }
+    for (const mimeType of ["image/jpeg", "image/png", "image/webp", "image/jpeg; charset=binary", "IMAGE/JPEG"]) {
+      expect(validateHomeworkPhotos([{ bytes: 1024, mimeType }]), mimeType).toBeUndefined();
+    }
+  });
+
+  it("rejects a photo over the size limit and accepts one at the limit", () => {
+    expect(validateHomeworkPhotos([{ bytes: HOMEWORK_PHOTO_MAX_BYTES, mimeType: "image/jpeg" }])).toBeUndefined();
+    expect(validateHomeworkPhotos([{ bytes: HOMEWORK_PHOTO_MAX_BYTES + 1, mimeType: "image/jpeg" }])).toBe(
+      "photo_too_large"
+    );
+  });
+
+  it("skips the size check when the size is unknown (the server still enforces it)", () => {
+    expect(validateHomeworkPhotos([{ mimeType: "image/jpeg" }])).toBeUndefined();
+  });
+
+  // 첫 폴더가 학생 uid 여야 Storage 정책과 제출 가드를 통과한다.
+  it("builds a path inside the student's own folder, split per submission", () => {
+    const path = buildHomeworkPhotoPath({
+      studentId: "stu-1",
+      todoId: "todo-9",
+      submissionKey: "1700000000000",
+      index: 0
+    });
+    expect(path).toBe("stu-1/todo-9/1700000000000/page-1.jpg");
+    expect(path.startsWith("stu-1/")).toBe(true);
+    // 제출마다 폴더가 갈려야 재제출이 이전 사진을 덮어쓰지 않는다.
+    const other = buildHomeworkPhotoPath({
+      studentId: "stu-1",
+      todoId: "todo-9",
+      submissionKey: "1700000000001",
+      index: 0
+    });
+    expect(other).not.toBe(path);
+  });
+});
+
+// atob 은 React Native 에 있다는 보장이 없어 순수 구현을 쓴다 → 그 구현을 테스트로 고정한다.
+describe("M4 base64 decode (upload bytes)", () => {
+  const encode = (bytes: number[]) => Buffer.from(bytes).toString("base64");
+
+  it("decodes bytes exactly, including padding cases", () => {
+    for (const sample of [[0], [0, 255], [1, 2, 3], [1, 2, 3, 4], [1, 2, 3, 4, 5], [72, 101, 108, 108, 111]]) {
+      expect(Array.from(decodeBase64(encode(sample))), sample.join(",")).toEqual(sample);
+    }
+  });
+
+  it("matches Buffer for a JPEG-like byte run", () => {
+    const bytes = Array.from({ length: 300 }, (_, i) => (i * 7) % 256);
+    expect(Array.from(decodeBase64(encode(bytes)))).toEqual(bytes);
+  });
+
+  it("ignores whitespace and data-URI prefixes are the caller's job", () => {
+    const b64 = encode([1, 2, 3]);
+    expect(Array.from(decodeBase64(`${b64.slice(0, 2)}\n${b64.slice(2)}`))).toEqual([1, 2, 3]);
   });
 });

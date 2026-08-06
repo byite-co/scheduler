@@ -2,20 +2,31 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { router, useLocalSearchParams } from "expo-router";
 import type { Session } from "@supabase/supabase-js";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
   HOMEWORK_CHECK_DISCLAIMER,
+  HOMEWORK_PHOTO_ERROR_MESSAGES,
+  HOMEWORK_PHOTO_MAX_COUNT,
+  HOMEWORK_PHOTO_TIPS,
   SUBJECT_LABELS,
   getHomeworkResultView,
   getTodoScopeTextForDisplay,
+  validateHomeworkPhotos,
   type HomeworkResultView,
   type HomeworkVerdictTone
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
 import { AppIcon } from "./icons";
+import {
+  pickHomeworkPhotos,
+  removeHomeworkPhotos,
+  uploadHomeworkPhotos,
+  type PickSource,
+  type PickedPhoto
+} from "./homeworkPhotos";
 import { supabase } from "./supabaseClient";
 
 type TodoRow = Database["public"]["Tables"]["todos"]["Row"];
@@ -84,29 +95,73 @@ export function HomeworkSubmitScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
   const todoId = typeof params.id === "string" ? params.id : undefined;
   const data = useHomeworkData(todoId);
-  const [photoCount, setPhotoCount] = useState(1);
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [errorText, setErrorText] = useState<string | null>(null);
 
   const busy = submitState === "uploading" || submitState === "checking";
 
+  async function addPhotos(source: PickSource) {
+    setErrorText(null);
+    try {
+      const picked = await pickHomeworkPhotos(source, HOMEWORK_PHOTO_MAX_COUNT - photos.length);
+      if (picked.length === 0) return;
+      // 서버(버킷 제한 + subs_photo_count)와 같은 규칙을 미리 적용해 고른 직후에 알려준다.
+      const invalid = validateHomeworkPhotos([...photos, ...picked]);
+      if (invalid) {
+        setErrorText(HOMEWORK_PHOTO_ERROR_MESSAGES[invalid]);
+        return;
+      }
+      setPhotos((current) => [...current, ...picked]);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "사진을 불러오지 못했어요.");
+    }
+  }
+
+  function removePhotoAt(index: number) {
+    setPhotos((current) => current.filter((_, i) => i !== index));
+  }
+
   async function submit() {
     if (!data.session || !todoId) return;
     setErrorText(null);
-    setSubmitState("uploading");
 
+    const invalid = validateHomeworkPhotos(photos);
+    if (invalid) {
+      setErrorText(HOMEWORK_PHOTO_ERROR_MESSAGES[invalid]);
+      return;
+    }
+
+    setSubmitState("uploading");
     const userId = data.session.user.id;
-    // NOTE(stub): 실제 사진 캡처/업로드는 디바이스 전용. 이 빌드에서는 첨부 장수만 경로 메타로 남긴다.
-    // homework-photos 버킷/정책은 준비됨(20260624010000) — 실기기에서 바이트 업로드로 교체.
-    const photoPaths = Array.from({ length: photoCount }, (_, index) => `${userId}/${todoId}/page-${index + 1}.jpg`);
+
+    // 제출마다 폴더를 나눈다 — 재제출이 이전 제출의 사진을 덮어쓰면 그 제출의 AI 판정 근거가
+    // 사라진다(attempt 는 경로 스냅샷만 갖는다).
+    const submissionKey = `${Date.now()}`;
+    let uploadedPaths: string[] = [];
+    try {
+      const uploaded = await uploadHomeworkPhotos({
+        studentId: userId,
+        todoId,
+        submissionKey,
+        photos
+      });
+      uploadedPaths = uploaded.map((item) => item.path);
+    } catch (error) {
+      setSubmitState("upload_failed");
+      setErrorText(error instanceof Error ? error.message : "사진을 올리지 못했어요.");
+      return;
+    }
 
     const inserted = await supabase
       .from("homework_submissions")
-      .insert({ todo_id: todoId, student_id: userId, photo_paths: photoPaths })
+      .insert({ todo_id: todoId, student_id: userId, photo_paths: uploadedPaths })
       .select("id")
       .single();
 
     if (inserted.error || !inserted.data) {
+      // 제출 레코드가 안 생겼으면 올린 파일은 아무것도 가리키지 않는 고아가 된다 → 되돌린다.
+      await removeHomeworkPhotos(uploadedPaths);
       setSubmitState("upload_failed");
       setErrorText(inserted.error?.message ?? "제출을 저장하지 못했어요.");
       return;
@@ -150,11 +205,22 @@ export function HomeworkSubmitScreen() {
       </View>
 
       <Text style={styles.sectionLabel}>푼 사진을 올려주세요</Text>
+      {/* 카탈로그 C4 에는 촬영 안내가 없다. AI 정확도가 촬영 품질에 직결되므로 새로 넣었다.
+          주황은 "지금/시작/연속/긴급" 전용이라 쓰지 않고 중립 톤으로 둔다. */}
+      <View style={styles.tipCard}>
+        {HOMEWORK_PHOTO_TIPS.map((tip) => (
+          <View key={tip} style={styles.tipRow}>
+            <AppIcon name="camera" size={14} color={colors.muted} />
+            <Text style={styles.tipText}>{tip}</Text>
+          </View>
+        ))}
+      </View>
       <PhotoSlots
         busy={busy}
-        count={photoCount}
-        onAdd={() => setPhotoCount((n) => Math.min(9, n + 1))}
-        onRemove={() => setPhotoCount((n) => Math.max(0, n - 1))}
+        photos={photos}
+        onPickCamera={() => void addPhotos("camera")}
+        onPickLibrary={() => void addPhotos("library")}
+        onRemove={removePhotoAt}
       />
 
       {submitState === "upload_failed" ? (
@@ -163,7 +229,12 @@ export function HomeworkSubmitScreen() {
       {submitState === "check_failed" ? (
         <StatusBanner tone="warning" title="검사 실패" body={errorText ?? "다시 시도해 주세요."} />
       ) : null}
-      {submitState === "idle" ? (
+      {/* 사진 선택·검증 단계의 안내는 submitState 가 idle 인 채로 생긴다. 여기서 보여주지 않으면
+          "장수 초과"·"권한 없음" 같은 메시지가 화면에 아예 나타나지 않는다. */}
+      {submitState === "idle" && errorText ? (
+        <StatusBanner tone="warning" title="사진을 확인해 주세요" body={errorText} />
+      ) : null}
+      {submitState === "idle" && !errorText ? (
         <View style={styles.infoBanner}>
           <AppIcon name="ai" size={16} color={colors.brand} />
           <Text style={styles.infoBannerText}>
@@ -336,7 +407,6 @@ export function HomeworkDetailScreen() {
   );
 }
 
-const PHOTO_SLOT_IDS = ["p1", "p2", "p3"] as const;
 
 function BackHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
@@ -362,35 +432,55 @@ function SubjectChip({ label }: { label: string }) {
 
 function PhotoSlots({
   busy,
-  count,
-  onAdd,
+  photos,
+  onPickCamera,
+  onPickLibrary,
   onRemove
 }: {
   busy: boolean;
-  count: number;
-  onAdd: () => void;
-  onRemove: () => void;
+  photos: PickedPhoto[];
+  onPickCamera: () => void;
+  onPickLibrary: () => void;
+  onRemove: (index: number) => void;
 }) {
-  const filled = PHOTO_SLOT_IDS.slice(0, Math.min(count, PHOTO_SLOT_IDS.length));
   return (
-    <View style={styles.slotRow}>
-      {filled.map((id) => (
+    <>
+      <View style={styles.slotRow}>
+        {photos.map((photo, index) => (
+          <Pressable
+            accessibilityLabel={`${index + 1}번째 사진 빼기`}
+            disabled={busy}
+            key={`${photo.uri}-${index}`}
+            onPress={() => onRemove(index)}
+            style={styles.slotFilled}
+          >
+            {/* 고른 사진을 바로 보여준다 — 업로드 전에는 로컬 URI 다(서명 URL 불필요). */}
+            <Image source={{ uri: photo.uri }} style={styles.slotImage} />
+            <View style={styles.slotRemoveBadge}>
+              <Text style={styles.slotRemoveText}>×</Text>
+            </View>
+          </Pressable>
+        ))}
+        {photos.length < HOMEWORK_PHOTO_MAX_COUNT ? (
+          <Pressable accessibilityLabel="사진 추가" disabled={busy} onPress={onPickCamera} style={styles.slotAdd}>
+            <Text style={styles.slotAddText}>＋{"\n"}촬영</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <View style={styles.slotActions}>
         <Pressable
-          accessibilityLabel="사진 빼기"
-          disabled={busy}
-          key={id}
-          onPress={onRemove}
-          style={styles.slotFilled}
+          accessibilityRole="button"
+          disabled={busy || photos.length >= HOMEWORK_PHOTO_MAX_COUNT}
+          onPress={onPickLibrary}
+          style={styles.ghostButton}
         >
-          <AppIcon name="camera" size={22} color={colors.muted} />
+          <Text style={styles.ghostButtonText}>갤러리에서 고르기</Text>
         </Pressable>
-      ))}
-      {count < 9 ? (
-        <Pressable accessibilityLabel="사진 추가" disabled={busy} onPress={onAdd} style={styles.slotAdd}>
-          <Text style={styles.slotAddText}>＋{"\n"}추가</Text>
-        </Pressable>
-      ) : null}
-    </View>
+        <Text style={styles.slotCountText}>
+          {photos.length} / {HOMEWORK_PHOTO_MAX_COUNT}장
+        </Text>
+      </View>
+    </>
   );
 }
 
@@ -562,6 +652,34 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface
   },
   slotAddText: { color: colors.muted, fontSize: 13, fontWeight: "900", textAlign: "center", lineHeight: 18 },
+  slotImage: { width: "100%", height: "100%", borderRadius: radii.control },
+  slotRemoveBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 11,
+    backgroundColor: colors.ink
+  },
+  slotRemoveText: { color: colors.surface, fontSize: 14, fontWeight: "900", lineHeight: 16 },
+  slotActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm
+  },
+  slotCountText: { color: colors.muted, fontSize: 12, fontWeight: "800" },
+  tipCard: {
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radii.control,
+    backgroundColor: colors.canvas
+  },
+  tipRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  tipText: { color: colors.muted, fontSize: 12, fontWeight: "700", flex: 1 },
   infoBanner: {
     flexDirection: "row",
     alignItems: "flex-start",
