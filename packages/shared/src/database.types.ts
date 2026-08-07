@@ -312,19 +312,26 @@ export type Database = {
           completed_at: string | null
           confidence: number | null
           created_at: string
+          discard_reason: string | null
           error_code: string | null
           estimated_cost_usd_micros: number | null
           id: string
           idempotency_key: string
           input_tokens: number | null
+          latency_ms: number | null
           model: string | null
           output_tokens: number | null
           photo_paths_snapshot: string[]
+          prompt_version: string | null
+          raw_ai_observation: Json | null
           reason: string | null
           requested_by: string
+          schema_version: string | null
+          scope_included: boolean | null
           scope_text_snapshot: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["check_attempt_status"]
+          stop_reason: string | null
           submission_id: string
           updated_at: string
           verdict: Database["public"]["Enums"]["submission_verdict"] | null
@@ -333,19 +340,26 @@ export type Database = {
           completed_at?: string | null
           confidence?: number | null
           created_at?: string
+          discard_reason?: string | null
           error_code?: string | null
           estimated_cost_usd_micros?: number | null
           id?: string
           idempotency_key: string
           input_tokens?: number | null
+          latency_ms?: number | null
           model?: string | null
           output_tokens?: number | null
           photo_paths_snapshot: string[]
+          prompt_version?: string | null
+          raw_ai_observation?: Json | null
           reason?: string | null
           requested_by: string
+          schema_version?: string | null
+          scope_included?: boolean | null
           scope_text_snapshot?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["check_attempt_status"]
+          stop_reason?: string | null
           submission_id: string
           updated_at?: string
           verdict?: Database["public"]["Enums"]["submission_verdict"] | null
@@ -354,19 +368,26 @@ export type Database = {
           completed_at?: string | null
           confidence?: number | null
           created_at?: string
+          discard_reason?: string | null
           error_code?: string | null
           estimated_cost_usd_micros?: number | null
           id?: string
           idempotency_key?: string
           input_tokens?: number | null
+          latency_ms?: number | null
           model?: string | null
           output_tokens?: number | null
           photo_paths_snapshot?: string[]
+          prompt_version?: string | null
+          raw_ai_observation?: Json | null
           reason?: string | null
           requested_by?: string
+          schema_version?: string | null
+          scope_included?: boolean | null
           scope_text_snapshot?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["check_attempt_status"]
+          stop_reason?: string | null
           submission_id?: string
           updated_at?: string
           verdict?: Database["public"]["Enums"]["submission_verdict"] | null
@@ -1085,7 +1106,22 @@ export type Database = {
     }
     Functions: {
       ai_check_max_attempts_per_day: { Args: never; Returns: number }
+      ai_check_max_attempts_per_month: { Args: never; Returns: number }
       ai_check_max_attempts_per_submission: { Args: never; Returns: number }
+      ai_check_max_photos_per_month: { Args: never; Returns: number }
+      ai_check_usage: {
+        Args: never
+        Returns: {
+          attempts_today: number
+          attempts_window: number
+          max_per_day: number
+          max_per_window: number
+          max_photos: number
+          photos_window: number
+          window_days: number
+        }[]
+      }
+      ai_check_window_days: { Args: never; Returns: number }
       apply_homework_ai_verdict: {
         Args: {
           p_confidence: number
@@ -1133,19 +1169,26 @@ export type Database = {
           completed_at: string | null
           confidence: number | null
           created_at: string
+          discard_reason: string | null
           error_code: string | null
           estimated_cost_usd_micros: number | null
           id: string
           idempotency_key: string
           input_tokens: number | null
+          latency_ms: number | null
           model: string | null
           output_tokens: number | null
           photo_paths_snapshot: string[]
+          prompt_version: string | null
+          raw_ai_observation: Json | null
           reason: string | null
           requested_by: string
+          schema_version: string | null
+          scope_included: boolean | null
           scope_text_snapshot: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["check_attempt_status"]
+          stop_reason: string | null
           submission_id: string
           updated_at: string
           verdict: Database["public"]["Enums"]["submission_verdict"] | null
@@ -1172,19 +1215,26 @@ export type Database = {
           completed_at: string | null
           confidence: number | null
           created_at: string
+          discard_reason: string | null
           error_code: string | null
           estimated_cost_usd_micros: number | null
           id: string
           idempotency_key: string
           input_tokens: number | null
+          latency_ms: number | null
           model: string | null
           output_tokens: number | null
           photo_paths_snapshot: string[]
+          prompt_version: string | null
+          raw_ai_observation: Json | null
           reason: string | null
           requested_by: string
+          schema_version: string | null
+          scope_included: boolean | null
           scope_text_snapshot: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["check_attempt_status"]
+          stop_reason: string | null
           submission_id: string
           updated_at: string
           verdict: Database["public"]["Enums"]["submission_verdict"] | null
@@ -1228,6 +1278,31 @@ export type Database = {
       }
       get_shared_report: { Args: { p_token: string }; Returns: Json }
       has_active_student_premium: { Args: never; Returns: boolean }
+      homework_photo_quota_bytes: { Args: never; Returns: number }
+      homework_photo_quota_objects: { Args: never; Returns: number }
+      homework_photo_quota_window_days: { Args: never; Returns: number }
+      homework_photo_retention_days: { Args: never; Returns: number }
+      homework_photo_upload_allowed: {
+        Args: { p_name: string }
+        Returns: boolean
+      }
+      homework_photo_usage: {
+        Args: never
+        Returns: {
+          bytes: number
+          max_bytes: number
+          max_objects: number
+          objects: number
+          window_days: number
+        }[]
+      }
+      homework_photos_expired_paths: {
+        Args: { p_limit?: number }
+        Returns: {
+          created_at: string
+          path: string
+        }[]
+      }
       is_connected_active: {
         Args: { p_student: string; p_teacher: string }
         Returns: boolean
@@ -1270,6 +1345,56 @@ export type Database = {
         }
       }
       price_per_student_krw: { Args: never; Returns: number }
+      record_homework_check_observation: {
+        Args: {
+          p_attempt_id: string
+          p_cost_usd_micros?: number
+          p_discard_reason?: string
+          p_input_tokens?: number
+          p_latency_ms?: number
+          p_model?: string
+          p_output_tokens?: number
+          p_prompt_version: string
+          p_raw_observation: Json
+          p_schema_version: string
+          p_scope_included: boolean
+          p_stop_reason?: string
+        }
+        Returns: {
+          completed_at: string | null
+          confidence: number | null
+          created_at: string
+          discard_reason: string | null
+          error_code: string | null
+          estimated_cost_usd_micros: number | null
+          id: string
+          idempotency_key: string
+          input_tokens: number | null
+          latency_ms: number | null
+          model: string | null
+          output_tokens: number | null
+          photo_paths_snapshot: string[]
+          prompt_version: string | null
+          raw_ai_observation: Json | null
+          reason: string | null
+          requested_by: string
+          schema_version: string | null
+          scope_included: boolean | null
+          scope_text_snapshot: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["check_attempt_status"]
+          stop_reason: string | null
+          submission_id: string
+          updated_at: string
+          verdict: Database["public"]["Enums"]["submission_verdict"] | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "homework_check_attempts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       request_connection_by_invite: {
         Args: { p_code: string }
         Returns: {
@@ -1308,19 +1433,26 @@ export type Database = {
           completed_at: string | null
           confidence: number | null
           created_at: string
+          discard_reason: string | null
           error_code: string | null
           estimated_cost_usd_micros: number | null
           id: string
           idempotency_key: string
           input_tokens: number | null
+          latency_ms: number | null
           model: string | null
           output_tokens: number | null
           photo_paths_snapshot: string[]
+          prompt_version: string | null
+          raw_ai_observation: Json | null
           reason: string | null
           requested_by: string
+          schema_version: string | null
+          scope_included: boolean | null
           scope_text_snapshot: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["check_attempt_status"]
+          stop_reason: string | null
           submission_id: string
           updated_at: string
           verdict: Database["public"]["Enums"]["submission_verdict"] | null

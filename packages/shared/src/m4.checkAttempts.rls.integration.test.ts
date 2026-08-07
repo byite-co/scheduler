@@ -201,12 +201,37 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
       });
       expect(dupInsert.error?.message ?? "").toMatch(/duplicate key|idempotency/i);
 
-      // ── (6) completed 인데 verdict 없음 → 거부 ───────────────────────────
-      const completedWithoutVerdict = await admin
+      // ── (6) completed 인데 결과가 아무것도 없음 → 거부 ───────────────────
+      // 20260807030000 이후 "결과"는 판정 **또는** 관찰이다(관찰 전용 실행에는 verdict 가 없다).
+      // 둘 다 없는 completed 는 여전히 거부돼야 한다 — 아니면 빈 완료가 성공으로 읽힌다.
+      const completedWithoutResult = await admin
         .from("homework_check_attempts")
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", attemptId);
-      expect(completedWithoutVerdict.error?.message ?? "").toContain("attempts_verdict_only_when_completed");
+      expect(completedWithoutResult.error?.message ?? "").toContain("attempts_completed_has_result");
+
+      // 반대로 관찰만 있는 completed 는 허용돼야 한다(AI 는 판정하지 않는다).
+      const completedWithObservation = await admin
+        .from("homework_check_attempts")
+        .update({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          raw_ai_observation: { schema_version: "obs-1", images: [] },
+          prompt_version: "obs-prompt-1",
+          schema_version: "obs-1",
+          scope_included: true,
+          stop_reason: "end_turn",
+          latency_ms: 1234
+        })
+        .eq("id", attemptId);
+      assertOk(completedWithObservation);
+
+      // 아래 단계들이 이 실행을 계속 쓰므로 열린 상태로 되돌린다(제약 검증만이 목적이었다).
+      const reopen = await admin
+        .from("homework_check_attempts")
+        .update({ status: "processing", completed_at: null, raw_ai_observation: null })
+        .eq("id", attemptId);
+      assertOk(reopen);
 
       // ── (7) 사진 0개 / 10개 → 거부 ───────────────────────────────────────
       for (const [label, paths] of [

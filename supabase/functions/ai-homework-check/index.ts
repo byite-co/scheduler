@@ -1,19 +1,24 @@
 // Edge Function: ai-homework-check
-// 숙제 제출 사진 → AI 완료검사 → {verdict, confidence, reason}. 채점이 아니라 "다 했는지" 확인.
+// 숙제 제출 사진 → **채점표시 관찰** → 표시 1건당 { 문제번호, 표시종류, 위치 }.
 //
-// Claude 비전 실연동(작업 5b-2). 서버 키는 Supabase 함수 시크릿(ANTHROPIC_API_KEY)에서만 읽는다.
-// 판정 로직·프롬프트·요금 계산은 ./anthropic.ts 에 있다.
+// 🚨 AI 는 판정하지 않는다. 보이는 표시만 기록하고, 최종 상태는 서버가 계산한다(2단계).
+//    이전 설계는 전역 판정(pass/insufficient)을 시켰고 다 푼 페이지를 "3·4·5번 미작성"으로
+//    confidence 0.95 에 단정했다. 프롬프트·스키마·검증은 ./observation.ts 에 있다.
+//
+// 서버 키는 Supabase 함수 시크릿(ANTHROPIC_API_KEY)에서만 읽는다.
 //
 // 권한 모델(M4):
 //  - 호출자는 본인 제출만 검사할 수 있다(JWT로 소유 검증, RLS로 강제).
-//  - AI 판정 결과는 "서버 권위적"이라 service_role RPC를 통해서만 기록한다.
-//    (학생/과외쌤은 ai_* 컬럼과 homework_check_attempts를 직접 못 쓴다 — RLS + 가드 트리거)
+//  - 관찰 기록은 "서버 권위적"이라 service_role RPC를 통해서만 남긴다.
+//    (학생/과외쌤은 homework_check_attempts 를 직접 못 쓴다 — RLS + 가드 트리거)
 //
-// 실행 레코드(20260806040000): homework_check_attempts가 원본이다. 세 단계로 기록한다.
-//   1) start_homework_check_attempt    — 슬롯 확보 + 범위·사진 스냅샷 고정 + 중복 요청 차단
-//   2) complete_homework_check_attempt — 판정 기록 + homework_submissions.ai_* 캐시 갱신
-//   3) fail_homework_check_attempt     — 실패 기록(슬롯을 비워 재시도 가능하게)
-// apply_homework_ai_verdict는 DEPRECATED다 — attempt 없이 ai_*만 덮어써서 이력이 남지 않는다.
+// 실행 레코드(20260806040000 + 20260807030000): homework_check_attempts 가 원본이다.
+//   1) start_homework_check_attempt        — 슬롯 확보 + 범위·사진 스냅샷 고정 + 중복 요청 차단
+//   2) record_homework_check_observation   — 관찰 원본 JSON + 버전/토큰/지연/폐기사유 기록
+//   3) fail_homework_check_attempt         — 실패 기록(슬롯을 비워 재시도 가능하게)
+//
+// 판정 기록 경로(complete_homework_check_attempt / apply_homework_ai_verdict)는 쓰지 않는다.
+// 관찰은 판정이 아니므로 화면 캐시(homework_submissions 의 판정 컬럼)를 건드릴 값이 없다.
 //
 // 사진은 photo_paths_snapshot 을 service_role 로 내려받는다 — 그 과정이 "경로가 실제로
 // 존재하는지" 검증도 겸한다(본인 폴더의 없는 파일을 가리키는 제출이 가능하다).
@@ -21,11 +26,34 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
-import { CheckError, callAnthropicVision, type CheckErrorCode, type VisionResult } from "./anthropic.ts";
+import { CheckError, type CheckErrorCode } from "./anthropic.ts";
+import {
+  OBSERVATION_PROMPT_VERSION,
+  OBSERVATION_SCHEMA_VERSION,
+  OBSERVATION_SCOPE_INCLUDED_DEFAULT,
+  buildObservationImageId,
+  callObservationBatch,
+  chunkObservationImages,
+  validateObservationBatch,
+  type ObservationImage,
+  type ObservationInputImage
+} from "./observation.ts";
 
 // 시크릿이 없을 때의 대비값. 실제 값은 함수 시크릿(ANTHROPIC_MODEL)에서 온다.
+//
+// ⚠️ 모델을 올릴 때 ./observation.ts 의 요금 상수와 temperature 사용을 함께 확인해야 한다
+//    (Opus 4.7+ · Sonnet 5 · Fable 5 는 temperature 를 거부한다).
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const PHOTO_BUCKET = "homework-photos";
+
+// 검사 범위를 요청에 넣을지. **A/B 용 스위치**다 — 관찰에 범위가 필요한지 측정으로 정한다.
+// 기본은 "보낸다". 함수 시크릿 AI_OBSERVATION_INCLUDE_SCOPE=false 로 끌 수 있다
+// (환경 스위치로 둔 이유: A/B 는 본질적으로 환경 실험이고, 판정 노출 차단 플래그와 달리
+//  코드 상태에 묶이지 않는다).
+const OBSERVATION_SCOPE_INCLUDED =
+  (Deno.env.get("AI_OBSERVATION_INCLUDE_SCOPE") ?? "").toLowerCase() === "false"
+    ? false
+    : OBSERVATION_SCOPE_INCLUDED_DEFAULT;
 
 // packages/shared 의 AI_CHECK_RESULTS_ENABLED 와 **같은 값이어야 한다**.
 // Deno 는 그 패키지를 import 할 수 없어 쌍둥이 상수이고, 스키마 테스트가 두 값을 대조한다
@@ -240,8 +268,8 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ reused: true, attempt }), { status: 200, headers: jsonHeaders });
   }
 
-  // 8) 판정. 라이브 값이 아니라 **스냅샷**을 본다 — 검사 시작 후 사진·범위가 바뀌어도
-  //    판정 근거와 기록이 어긋나지 않아야 한다.
+  // 8) 관찰. 라이브 값이 아니라 **스냅샷**을 본다 — 검사 시작 후 사진·범위가 바뀌어도
+  //    관찰 근거와 기록이 어긋나지 않아야 한다.
   const snapshotPaths: unknown = attempt.photo_paths_snapshot;
   const paths = Array.isArray(snapshotPaths) ? (snapshotPaths as string[]) : [];
 
@@ -251,21 +279,78 @@ Deno.serve(async (req: Request) => {
     await asService.rpc("fail_homework_check_attempt", { p_attempt_id: attempt.id, p_error_code: code });
   };
 
-  let result: VisionResult;
+  const scopeText = typeof attempt.scope_text_snapshot === "string" ? attempt.scope_text_snapshot : null;
+  const calls: Array<Record<string, unknown>> = [];
+  let discard: { reason: string; detail: string } | null = null;
+  let observedImages: ObservationImage[] = [];
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCost = 0;
+  let totalLatency = 0;
+  let lastModel: string | null = null;
+  let lastStopReason: string | null = null;
+
   try {
     // 8-1) 사진을 service_role 로 내려받는다. photo_paths 가 실제로 존재하는지 확인하는
     //      단계이기도 하다 — 본인 폴더의 '없는 파일'을 가리키는 제출이 가능하기 때문이다.
-    const images = await downloadSnapshotImages(asService, paths);
-
-    // 8-2) Claude 비전 호출. 채점이 아니라 "다 했는지" 확인이다.
+    const downloaded = await downloadSnapshotImages(asService, paths);
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) throw new CheckError("auth_failed", "ANTHROPIC_API_KEY 미설정");
-    result = await callAnthropicVision({
-      apiKey,
-      model: Deno.env.get("ANTHROPIC_MODEL") ?? DEFAULT_MODEL,
-      scopeText: typeof attempt.scope_text_snapshot === "string" ? attempt.scope_text_snapshot : null,
-      images
-    });
+    const model = Deno.env.get("ANTHROPIC_MODEL") ?? DEFAULT_MODEL;
+
+    // image_id 는 **순서에서** 만든다. 같은 사진이 두 번 들어와도 ID 는 달라야 하고,
+    // 그래야 배치 안에서 어느 결과가 어느 사진인지 격리된다.
+    const labelled: ObservationInputImage[] = downloaded.map((image, index) => ({
+      imageId: buildObservationImageId(index),
+      mediaType: image.mediaType,
+      base64: image.base64
+    }));
+
+    // 8-2) 최대 4장씩 나눠 호출한다. 한 배치라도 검증에 실패하면 부분 저장하지 않고
+    //      전체를 폐기한다 — 절반만 살리면 그 절반이 "관찰된 전부"로 읽힌다.
+    for (const batch of chunkObservationImages(labelled)) {
+      const result = await callObservationBatch({
+        apiKey,
+        model,
+        images: batch,
+        scopeText,
+        scopeIncluded: OBSERVATION_SCOPE_INCLUDED
+      });
+
+      totalInput += result.inputTokens;
+      totalOutput += result.outputTokens;
+      totalCost += result.estimatedCostUsdMicros;
+      totalLatency += result.latencyMs;
+      lastModel = result.model;
+      lastStopReason = result.stopReason;
+
+      const validation = validateObservationBatch({
+        expectedImageIds: result.imageIds,
+        stopReason: result.stopReason,
+        parsed: result.raw
+      });
+
+      calls.push({
+        image_ids: result.imageIds,
+        model: result.model,
+        stop_reason: result.stopReason,
+        input_tokens: result.inputTokens,
+        output_tokens: result.outputTokens,
+        estimated_cost_usd_micros: result.estimatedCostUsdMicros,
+        latency_ms: result.latencyMs,
+        accepted: validation.ok,
+        discard_reason: validation.ok ? null : validation.reason,
+        discard_detail: validation.ok ? null : validation.detail,
+        // 폐기한 원본도 남긴다 — 무엇이 왜 폐기됐는지 못 보면 프롬프트를 고칠 근거가 없다.
+        raw: result.raw
+      });
+
+      if (!validation.ok) {
+        discard = { reason: validation.reason, detail: validation.detail };
+        break;
+      }
+      observedImages = observedImages.concat(validation.images);
+    }
   } catch (error) {
     const code: CheckErrorCode = error instanceof CheckError ? error.code : "unknown";
     await failAttempt(code);
@@ -276,16 +361,30 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // 9) 완료 기록 + homework_submissions.ai_* 캐시 갱신(구버전 앱 호환).
-  const { data: completed, error: writeError } = await asService.rpc("complete_homework_check_attempt", {
+  // 9) 원본 관찰을 기록한다. **확정 사실로 저장하지 않는다** — 서버 계산값·사람 확인값은
+  //    2단계/4단계에서 별도 컬럼에 들어간다. ai_* 캐시는 건드리지 않는다(관찰은 판정이 아니다).
+  const rawObservation = {
+    prompt_version: OBSERVATION_PROMPT_VERSION,
+    schema_version: OBSERVATION_SCHEMA_VERSION,
+    scope_included: OBSERVATION_SCOPE_INCLUDED,
+    calls,
+    // 폐기된 배치가 있으면 병합 결과를 두지 않는다. 부분 결과가 전부로 읽히면 안 된다.
+    images: discard ? null : observedImages
+  };
+
+  const { data: recorded, error: writeError } = await asService.rpc("record_homework_check_observation", {
     p_attempt_id: attempt.id,
-    p_verdict: result.verdict,
-    p_confidence: result.confidence,
-    p_reason: result.reason,
-    p_model: result.model,
-    p_input_tokens: result.inputTokens,
-    p_output_tokens: result.outputTokens,
-    p_estimated_cost_usd_micros: result.estimatedCostUsdMicros
+    p_raw_observation: rawObservation,
+    p_prompt_version: OBSERVATION_PROMPT_VERSION,
+    p_schema_version: OBSERVATION_SCHEMA_VERSION,
+    p_scope_included: OBSERVATION_SCOPE_INCLUDED,
+    p_stop_reason: lastStopReason,
+    p_model: lastModel,
+    p_input_tokens: totalInput,
+    p_output_tokens: totalOutput,
+    p_cost_usd_micros: totalCost,
+    p_latency_ms: totalLatency,
+    p_discard_reason: discard ? `${discard.reason}: ${discard.detail}` : null
   });
 
   if (writeError) {
@@ -296,7 +395,12 @@ Deno.serve(async (req: Request) => {
     return fail("write_failed", 500, { detail: writeError.message });
   }
 
-  return new Response(JSON.stringify({ stub: true, verdict: result, attempt: completed }), {
+  if (discard) {
+    // 검증 실패는 실패로 알린다. 고쳐 살리지 않는다.
+    return fail("observation_discarded", 502, { attempt: recorded });
+  }
+
+  return new Response(JSON.stringify({ observation: observedImages, attempt: recorded }), {
     status: 200,
     headers: jsonHeaders
   });
