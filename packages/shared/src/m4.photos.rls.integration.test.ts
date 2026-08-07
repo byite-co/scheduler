@@ -164,6 +164,41 @@ describeIfRemote("M4 숙제 사진 Storage 업로드·열람", () => {
         .upload(`${otherId}/${todoId}/${submissionKey}/page-1.jpg`, TINY_JPEG, { contentType: "image/jpeg" });
       expect(intoOthersFolder.error).toBeTruthy();
 
+      // ── (3-1) 경로 규약을 벗어나면 거부 ──────────────────────────────────
+      // 예전 정책은 첫 폴더만 봤다 → `${uid}/아무거나.jpg` 로 무제한 적재가 가능했다.
+      const flatPath = await studentClient.storage
+        .from(BUCKET)
+        .upload(`${studentId}/loose-${submissionKey}.jpg`, TINY_JPEG, { contentType: "image/jpeg" });
+      expect(flatPath.error, "폴더 3단이 아닌 경로는 거부해야 한다").toBeTruthy();
+
+      // ── (3-2) 내 할 일이 아닌 todo_id 로는 거부 ──────────────────────────
+      // 제출 행은 요구할 수 없다(사진이 먼저 올라간다). 대신 할 일 실재를 요구한다.
+      const unknownTodo = await studentClient.storage
+        .from(BUCKET)
+        .upload(`${studentId}/${randomUUID()}/${submissionKey}/page-1.jpg`, TINY_JPEG, { contentType: "image/jpeg" });
+      expect(unknownTodo.error, "존재하지 않는 할 일로는 업로드할 수 없어야 한다").toBeTruthy();
+
+      const notMyTodo = await otherClient.storage
+        .from(BUCKET)
+        .upload(`${otherId}/${todoId}/${submissionKey}/page-1.jpg`, TINY_JPEG, { contentType: "image/jpeg" });
+      expect(notMyTodo.error, "남의 할 일 id 로는 업로드할 수 없어야 한다").toBeTruthy();
+
+      // ── (3-3) 용량 한도의 전제: metadata.size 가 실제로 채워진다 ──────────
+      // 한도는 기존 객체의 metadata->>'size' 합으로 계산한다. 이 값이 비면 바이트 한도가
+      // 조용히 무력화되므로(개수 한도만 남는다) 실제로 채워지는지 확인한다.
+      const sizes = await runSql(
+        env,
+        `select coalesce(sum((metadata->>'size')::bigint), 0)::text as bytes,
+                count(*)::int as objects,
+                count(metadata->>'size')::int as with_size
+           from storage.objects
+          where bucket_id = 'homework-photos'
+            and (storage.foldername(name))[1] = '${studentId}'`
+      );
+      expect(Number(sizes[0].objects)).toBeGreaterThan(0);
+      expect(sizes[0].with_size).toBe(sizes[0].objects);
+      expect(Number(sizes[0].bytes)).toBe(TINY_JPEG.length);
+
       // ── (4) 남의 사진 조회 → 거부(서명 URL 미발급) ───────────────────────
       const otherReads = await otherClient.storage.from(BUCKET).createSignedUrl(path, 60);
       expect(otherReads.error).toBeTruthy();
@@ -291,4 +326,20 @@ function assertOk(result: { error: unknown }): void {
 function assertData<T>(data: T | null): T {
   if (!data) throw new Error("Expected Supabase response data");
   return data;
+}
+
+// storage 스키마는 PostgREST 로 노출되지 않는다 — metadata.size 같은 내부 값을 확인하려면
+// Management API 의 쿼리 엔드포인트를 쓴다(읽기 전용 확인 용도).
+async function runSql(env: TestEnv, query: string): Promise<Array<Record<string, never>>> {
+  const response = await fetch(`https://api.supabase.com/v1/projects/${env.projectRef}/database/query`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.accessToken}`
+    },
+    body: JSON.stringify({ query })
+  });
+  if (!response.ok) throw new Error(`SQL failed ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  return response.json() as Promise<Array<Record<string, never>>>;
 }

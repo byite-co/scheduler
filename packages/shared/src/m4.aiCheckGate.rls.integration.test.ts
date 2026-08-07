@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { Database } from "./database.types";
-import { getAiCheckEntitlement } from "./m4";
+import { AI_CHECK_LIMITS, getAiCheckEntitlement } from "./m4";
 import { assertNoLeakedTestUsers, deleteTestUsers } from "./rlsTestCleanup";
 
 type ApiKey = { api_key: string; name: string };
@@ -257,8 +257,10 @@ describeIfRemote("M4 서버측 AI 검사 게이트", () => {
       expect(offRun.error?.message ?? "").toContain("ai_check_disabled_for_todo");
 
       // ── (7) 한도 초과 → 거부, 슬롯이 점유되지 않는다 ──────────────────────
-      // 같은 제출 재검사 상한(5). 이미 1건이 processing 이므로 완료 후 4건 더 만든다.
-      const limitPerSubmission = 5;
+      // 같은 제출 재검사 상한. 이미 1건이 processing 이므로 완료 후 나머지를 만든다.
+      // 값을 하드코딩하면 한도를 바꿀 때 테스트가 조용히 의미를 잃는다 —
+      // shared 사본을 쓰고, 그 사본이 DB 와 같은지는 스키마 테스트가 지킨다.
+      const limitPerSubmission = AI_CHECK_LIMITS.maxPerSubmission;
       let openAttemptId = (teacherRun.data as Record<string, unknown>).id as string;
       for (let i = 1; i < limitPerSubmission; i++) {
         assertOk(
@@ -308,10 +310,141 @@ describeIfRemote("M4 서버측 AI 검사 게이트", () => {
       assertOk(afterOver);
       expect(afterOver.data).toHaveLength(limitPerSubmission);
       expect((afterOver.data ?? []).some((row) => row.status === "processing")).toBe(false);
+
+      // ── (8) 30일 창 호출 한도 → 거부 ──────────────────────────────────────
+      // 하루 한도만 있으면 매일 최대치를 쓸 수 있어 누적을 못 막는다. 창 한도를 확인한다.
+      //
+      // 과거분은 직접 INSERT 로 만든다(RPC 를 70번 부르면 느리고, created_at 을 과거로
+      // 둘 수도 없다). 가드 트리거는 auth.uid() 가 null 인 service_role 쓰기를 허용한다.
+      const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+      const backfill = (count: number, requestedBy: string, submissionId: string, photos: number, tag: string) =>
+        Array.from({ length: count }, (_, i) => ({
+          submission_id: submissionId,
+          requested_by: requestedBy,
+          status: "completed" as const,
+          verdict: "pass" as const,
+          confidence: 0.9,
+          reason: "backfill",
+          scope_text_snapshot: "쎈 112~118p",
+          photo_paths_snapshot: Array.from({ length: photos }, (_, p) => `${requestedBy}/page-${p + 1}.jpg`),
+          idempotency_key: `${tag}-${i}`,
+          // 창 안이지만 오늘은 아니어야 한다 — 오늘로 두면 하루 한도가 먼저 걸려 무엇을
+          // 검증하는지 알 수 없게 된다.
+          created_at: daysAgo(5),
+          started_at: daysAgo(5),
+          // status in ('completed','failed') 이면 completed_at 이 반드시 있어야 한다(CHECK).
+          completed_at: daysAgo(5)
+        }));
+
+      assertOk(
+        await admin
+          .from("homework_check_attempts")
+          .insert(backfill(AI_CHECK_LIMITS.maxPerWindow, studentId, teacherSubmissionId, 1, `win-${suffix}`))
+      );
+
+      // 재검사 상한에 걸리지 않도록 새 제출을 만든다.
+      const freshTodo = await admin
+        .from("todos")
+        .insert({
+          student_id: studentId,
+          connection_id: connectionId,
+          title: "다음 단원",
+          scope_text: "쎈 119~125p",
+          subject: "math",
+          source: "teacher",
+          ai_check_enabled: true,
+          locked: true,
+          created_by: teacherId
+        })
+        .select("id")
+        .single();
+      assertOk(freshTodo);
+      const freshSubmission = await admin
+        .from("homework_submissions")
+        .insert({
+          todo_id: assertData(freshTodo.data).id,
+          student_id: studentId,
+          photo_paths: [`${studentId}/page-1.jpg`]
+        })
+        .select("id")
+        .single();
+      assertOk(freshSubmission);
+
+      const overWindow = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: assertData(freshSubmission.data).id,
+        p_requested_by: studentId,
+        p_idempotency_key: `win-over-${suffix}`
+      });
+      // 창 한도를 하루 한도보다 먼저 봐야 한다 — "오늘 다 썼어요"라고 하면 내일 또 막힌다.
+      expect(overWindow.error?.message ?? "").toContain("check_limit_monthly_exceeded");
+
+      // ── (9) 30일 창 사진 장수 한도 → 경계에서 정확히 갈린다 ────────────────
+      // 원가는 사진 토큰이 지배하므로 호출 수만 제한하면 예산을 못 지킨다.
+      const soloTodo = await admin
+        .from("todos")
+        .insert({
+          student_id: soloId,
+          title: "혼공 수학",
+          scope_text: "쎈 30~38p",
+          subject: "math",
+          source: "self",
+          ai_check_enabled: true,
+          created_by: soloId
+        })
+        .select("id")
+        .single();
+      assertOk(soloTodo);
+      const soloTodoId = assertData(soloTodo.data).id;
+
+      const makeSoloSubmission = async (photos: number) => {
+        const row = await admin
+          .from("homework_submissions")
+          .insert({
+            todo_id: soloTodoId,
+            student_id: soloId,
+            photo_paths: Array.from({ length: photos }, (_, p) => `${soloId}/page-${p + 1}.jpg`)
+          })
+          .select("id")
+          .single();
+        assertOk(row);
+        return assertData(row.data).id;
+      };
+
+      // 상한 280 에 딱 1장 모자란 279장을 창 안에 쌓는다(9장 × 31회).
+      const perRow = 9;
+      const rows = Math.floor((AI_CHECK_LIMITS.maxPhotosPerWindow - 1) / perRow); // 31
+      const filledPhotos = rows * perRow; // 279
+      expect(filledPhotos).toBeLessThan(AI_CHECK_LIMITS.maxPhotosPerWindow);
+      expect(rows).toBeLessThan(AI_CHECK_LIMITS.maxPerWindow); // 호출 한도가 먼저 걸리면 안 된다
+
+      const anchorSubmission = await makeSoloSubmission(perRow);
+      assertOk(
+        await admin
+          .from("homework_check_attempts")
+          .insert(backfill(rows, soloId, anchorSubmission, perRow, `pho-${suffix}`))
+      );
+
+      // 9장을 더 요청하면 279 + 9 = 288 > 280 → 거부.
+      const overPhotos = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: await makeSoloSubmission(perRow),
+        p_requested_by: soloId,
+        p_idempotency_key: `pho-over-${suffix}`
+      });
+      expect(overPhotos.error?.message ?? "").toContain("check_limit_photos_monthly_exceeded");
+
+      // 1장이면 279 + 1 = 280 → 정확히 상한이라 통과해야 한다.
+      // (경계를 >= 로 쓰면 여기서 막힌다 — 정상 사용을 한 장 앞에서 끊는 실수다.)
+      const atPhotoBoundary = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: await makeSoloSubmission(1),
+        p_requested_by: soloId,
+        p_idempotency_key: `pho-edge-${suffix}`
+      });
+      assertOk(atPhotoBoundary);
+      expect((atPhotoBoundary.data as Record<string, unknown>).status).toBe("processing");
     } finally {
       await deleteTestUsers(admin, [studentId, soloId, teacherId]);
     }
-  }, 120_000);
+  }, 180_000);
 });
 
 async function signIn(client: ReturnType<typeof createClient<Database>>, email: string, password: string): Promise<void> {
