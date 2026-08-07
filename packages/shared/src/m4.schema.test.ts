@@ -300,7 +300,6 @@ describe("M4 edge function ↔ shared 대조", () => {
   });
 });
 
-<<<<<<< HEAD
 // ── 숙제 사진 업로드 한도(20260807010000) ────────────────────────────────────
 // 조사에서 "비용이 발생하는데 게이트가 하나도 없는" 유일한 기능으로 확인된 곳이다.
 describe("M4 homework photo upload quota", () => {
@@ -428,7 +427,8 @@ describe("M4 AI check limits rebalance", () => {
     const insertAt = limitsMigration.indexOf("insert into homework_check_attempts", lockAt);
     expect(insertAt).toBeGreaterThan(lockAt);
   });
-=======
+});
+
 // ── AI 판정 노출 차단 플래그의 쌍둥이 일치 ───────────────────────────────────
 // Deno 는 packages/shared 를 import 할 수 없어 Edge Function 에 같은 상수가 복제돼 있다.
 // 한쪽만 바꾸면 "표시는 막았는데 호출은 계속돼 돈이 나간다" 또는 그 반대가 된다.
@@ -460,7 +460,9 @@ describe("AI 판정 노출 차단 플래그 (shared ↔ edge function)", () => {
 
   it("sends errorCode so a stale client shows a real message", () => {
     // 클라이언트는 body.errorCode 로 문구를 고른다. error 만 담으면 일반 문구로 떨어진다.
-    expect(edgeFunction).toContain('errorCode: "ai_check_paused"');
+    // fail() 이 두 필드를 함께 담으므로 그 헬퍼를 거치는지만 확인한다 —
+    // 직접 Response 를 만들면 errorCode 가 빠지고, 원시 응답 개수 검사에도 걸린다.
+    expect(edgeFunction).toContain('fail("ai_check_paused", 503)');
   });
 
   it("does not touch stored attempts or ai_* caches", () => {
@@ -469,5 +471,4 @@ describe("AI 판정 노출 차단 플래그 (shared ↔ edge function)", () => {
       expect(edgeFunction, forbidden).not.toContain(forbidden);
     }
   });
->>>>>>> f1051fa (fix(ai): AI 숙제검사 판정 노출을 기능 플래그로 차단 (P0))
 });

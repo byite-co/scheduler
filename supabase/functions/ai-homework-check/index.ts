@@ -97,10 +97,7 @@ Deno.serve(async (req: Request) => {
   // 여기서 끝내야 attempt 슬롯도, 사진 다운로드도, Anthropic 호출도 일어나지 않는다
   // (한도 카운터도 소모되지 않는다). 제출 자체는 클라이언트가 이미 저장했으므로 영향 없다.
   if (!AI_CHECK_RESULTS_ENABLED) {
-    return new Response(JSON.stringify({ error: "ai_check_paused", errorCode: "ai_check_paused" }), {
-      status: 503,
-      headers: jsonHeaders
-    });
+    return fail("ai_check_paused", 503);
   }
 
   const authHeader = req.headers.get("Authorization");
