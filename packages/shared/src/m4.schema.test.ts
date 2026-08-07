@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { AI_CHECK_RESULTS_ENABLED } from "./featureFlags";
 import {
   AI_CHECK_LIMITS,
   ANTHROPIC_CHECK_ERROR_CODES,
@@ -425,5 +426,49 @@ describe("M4 AI check limits rebalance", () => {
     const lockAt = limitsMigration.indexOf("pg_advisory_xact_lock");
     const insertAt = limitsMigration.indexOf("insert into homework_check_attempts", lockAt);
     expect(insertAt).toBeGreaterThan(lockAt);
+  });
+});
+
+// ── AI 판정 노출 차단 플래그의 쌍둥이 일치 ───────────────────────────────────
+// Deno 는 packages/shared 를 import 할 수 없어 Edge Function 에 같은 상수가 복제돼 있다.
+// 한쪽만 바꾸면 "표시는 막았는데 호출은 계속돼 돈이 나간다" 또는 그 반대가 된다.
+describe("AI 판정 노출 차단 플래그 (shared ↔ edge function)", () => {
+  it("keeps the flag value identical on both sides", () => {
+    const match = edgeFunction.match(/const AI_CHECK_RESULTS_ENABLED = (true|false);/);
+    expect(match, "Edge Function 에 AI_CHECK_RESULTS_ENABLED 상수가 없다").toBeTruthy();
+    expect(match?.[1]).toBe(String(AI_CHECK_RESULTS_ENABLED));
+  });
+
+  it("refuses before spending anything when the flag is off", () => {
+    // 조기 반환이 반드시 **모든 작업보다 앞**이어야 비용이 0 이 된다.
+    // 뒤에 있으면 attempt 슬롯을 잡거나 사진을 내려받은 뒤에 거절해 한도·대역폭이 소모된다.
+    const guardAt = edgeFunction.indexOf("if (!AI_CHECK_RESULTS_ENABLED)");
+    expect(guardAt).toBeGreaterThan(0);
+    // **호출부** 문자열을 봐야 한다 — downloadSnapshotImages 는 함수 정의가 Deno.serve 보다
+    // 위에 있어서 이름만 찾으면 정의에 걸린다(실제로 한 번 걸렸다).
+    for (const laterCall of [
+      'rpc("start_homework_check_attempt"',
+      "await downloadSnapshotImages(asService",
+      "await callAnthropicVision({",
+      "await asUser.auth.getUser()"
+    ]) {
+      const at = edgeFunction.indexOf(laterCall);
+      expect(at, `${laterCall} 를 찾지 못했다`).toBeGreaterThan(0);
+      expect(at, `${laterCall} 가 플래그 검사보다 앞에 있다`).toBeGreaterThan(guardAt);
+    }
+  });
+
+  it("sends errorCode so a stale client shows a real message", () => {
+    // 클라이언트는 body.errorCode 로 문구를 고른다. error 만 담으면 일반 문구로 떨어진다.
+    // fail() 이 두 필드를 함께 담으므로 그 헬퍼를 거치는지만 확인한다 —
+    // 직접 Response 를 만들면 errorCode 가 빠지고, 원시 응답 개수 검사에도 걸린다.
+    expect(edgeFunction).toContain('fail("ai_check_paused", 503)');
+  });
+
+  it("does not touch stored attempts or ai_* caches", () => {
+    // 표시만 막는다 — 기록을 지우는 코드가 들어오면 되돌릴 수 없다.
+    for (const forbidden of [".delete()", "ai_verdict: null", "delete from homework_check_attempts"]) {
+      expect(edgeFunction, forbidden).not.toContain(forbidden);
+    }
   });
 });
