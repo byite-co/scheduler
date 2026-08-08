@@ -25,6 +25,58 @@ const edgeFunction = readFileSync(
   "utf8"
 );
 
+// ── AI 채점표시 관찰 저장(20260807030000) ────────────────────────────────────
+// AI 원본을 확정 사실로 저장하면 되돌릴 근거가 사라진다. 원본 + 버전 정보로만 남긴다.
+describe("AI 관찰 저장 구조 (schema ↔ migration)", () => {
+  const observationMigration = readFileSync(
+    new URL("../../../supabase/migrations/20260807030000_homework_check_observation.sql", import.meta.url),
+    "utf8"
+  );
+
+  it("stores the raw observation plus everything an A/B comparison needs", () => {
+    for (const source of [schema, observationMigration]) {
+      expect(source).toContain("raw_ai_observation");
+      for (const column of [
+        "prompt_version",
+        "schema_version",
+        // scope_included 를 안 남기면 "범위를 넣은 게 나은가"를 나중에 비교할 수 없다.
+        "scope_included",
+        "stop_reason",
+        "latency_ms",
+        "discard_reason"
+      ]) {
+        expect(source, column).toContain(column);
+      }
+    }
+  });
+
+  it("keeps the observation RPC server-only", () => {
+    for (const source of [schema, observationMigration]) {
+      expect(source).toContain("create or replace function record_homework_check_observation");
+      expect(source).toMatch(/revoke all on function record_homework_check_observation\([\s\S]*?\) from authenticated/);
+      expect(source).toMatch(/grant execute on function record_homework_check_observation\([\s\S]*?\) to service_role/);
+    }
+  });
+
+  it("keeps the discarded original instead of quietly dropping it", () => {
+    // 폐기 사유만 남기고 원본을 지우면 프롬프트를 고칠 근거가 없어진다.
+    expect(observationMigration).toContain("raw_ai_observation  = p_raw_observation");
+    expect(observationMigration).toContain("case when p_discard_reason is null then 'completed' else 'failed' end");
+    expect(observationMigration).toContain("'observation_discarded'");
+  });
+
+  it("does not touch the display cache — an observation is not a verdict", () => {
+    expect(observationMigration).not.toContain("update homework_submissions");
+    expect(observationMigration).not.toContain("ai_verdict =");
+  });
+
+  it("marks the old verdict RPC deprecated without deleting it", () => {
+    // 지우면 옛 경로가 남은 코드에서 깨지고, 되돌릴 때 근거가 없어진다.
+    expect(observationMigration).toContain("DEPRECATED");
+    expect(observationMigration).not.toMatch(/drop function\s+complete_homework_check_attempt/);
+  });
+});
+
 describe("M4 homework AI-check schema coverage", () => {
   it("keeps AI verdict writes server-authoritative (service_role only)", () => {
     for (const source of [schema, migration]) {
@@ -77,11 +129,17 @@ describe("M4 homework_check_attempts (실행 레코드)", () => {
       // 한 제출에 진행 중인 검사는 하나만(부분 유니크 인덱스).
       expect(source).toContain("homework_check_attempts_one_active_idx");
       expect(source).toContain("where status in ('queued', 'processing')");
-      // completed 일 때만 verdict 가 있다(양방향).
-      expect(source).toContain("check ((status = 'completed') = (verdict is not null))");
       // 사진 1~9개. coalesce 가 없으면 빈 배열의 array_length 가 NULL 이라 제약이 통과해 버린다.
       expect(source).toContain("check (coalesce(array_length(photo_paths_snapshot, 1), 0) between 1 and 9)");
     }
+    // "완료면 결과가 있다"는 양방향 불변식은 유지되지만, 20260807030000 에서 결과의 정의가
+    // 넓어졌다(판정 → 판정 **또는** 관찰). 마이그레이션은 역사이므로 옛 문장을 그대로 두고,
+    // 현재 상태(schema.sql)만 새 문장이어야 한다.
+    expect(attemptsMigration).toContain("check ((status = 'completed') = (verdict is not null))");
+    expect(schema).toContain(
+      "check ((status = 'completed') = (verdict is not null or raw_ai_observation is not null))"
+    );
+    expect(schema).not.toContain("constraint attempts_verdict_only_when_completed");
   });
 
   it("keeps attempts read-only for clients and writable only by the server", () => {
@@ -231,6 +289,12 @@ describe("M4 edge function ↔ shared 대조", () => {
     new URL("../../../supabase/functions/ai-homework-check/anthropic.ts", import.meta.url),
     "utf8"
   );
+  // 프롬프트·스키마·검증 계약은 test/m4Observation.test.ts 가 모듈을 직접 import 해서 본다.
+  // 여기서는 "판정 코드가 되살아나지 않았는지"만 텍스트로 확인한다.
+  const observationModule = readFileSync(
+    new URL("../../../supabase/functions/ai-homework-check/observation.ts", import.meta.url),
+    "utf8"
+  );
 
   it("keeps the CheckErrorCode set identical on both sides", () => {
     const denoCodes = [...anthropicModule.matchAll(/^\s*\|\s*"([a-z_]+)"/gm)].map((m) => m[1]);
@@ -263,13 +327,15 @@ describe("M4 edge function ↔ shared 대조", () => {
     }
   });
 
-  it("keeps the AI as an assistant, not a grader", () => {
-    // 제품 원칙 §3-2. 프롬프트가 정답 채점을 하지 않는다고 못박아야 한다.
-    expect(anthropicModule).toContain("정답 여부를 판정하지 않습니다");
-    expect(anthropicModule).toContain("확신할 수 없는 것을 단정하지 않습니다");
-    expect(anthropicModule).toContain("추측으로 채우지 않습니다");
-    // 페이지 번호가 안 보이면 억지 판정 금지.
-    expect(anthropicModule).toContain("페이지 확인 어려움");
+  it("no longer asks the model for a verdict at all", () => {
+    // 2026-08-07 재설계: 전역 판정(pass/insufficient)을 시키던 프롬프트를 관찰 전용으로
+    // 교체했다. 판정 프롬프트가 되살아나면 여기서 잡는다.
+    // 관찰 프롬프트·스키마·검증 자체는 test/m4Observation.test.ts 가 모듈을 직접 import 해서 본다.
+    expect(anthropicModule).not.toContain("SYSTEM_PROMPT");
+    expect(anthropicModule).not.toContain("callAnthropicVision");
+    expect(anthropicModule).not.toContain("parseVerdictJson");
+    expect(edgeFunction).not.toContain("callAnthropicVision");
+    expect(edgeFunction).not.toContain('rpc("complete_homework_check_attempt"');
   });
 
   it("keeps pricing in integer micros so costs can be summed without drift", () => {
@@ -281,7 +347,8 @@ describe("M4 edge function ↔ shared 대조", () => {
   it("sets a timeout and an image size ceiling", () => {
     expect(anthropicModule).toContain("REQUEST_TIMEOUT_MS");
     expect(anthropicModule).toContain("MAX_TOTAL_IMAGE_BYTES");
-    expect(anthropicModule).toContain("AbortController");
+    // AbortController 는 호출부(observation.ts)로 옮겼다.
+    expect(observationModule).toContain("AbortController");
   });
 
   it("verifies snapshot photos exist before calling the model", () => {
@@ -297,6 +364,32 @@ describe("M4 edge function ↔ shared 대조", () => {
   it("no longer contains the stub verdict", () => {
     expect(edgeFunction).not.toContain("getStubHomeworkVerdict");
     expect(edgeFunction).not.toContain("stub-deterministic");
+  });
+
+  it("stores the AI output as raw observation, not as a settled fact", () => {
+    // AI 원본을 확정 사실로 저장하면 되돌릴 근거가 사라진다.
+    expect(edgeFunction).toContain('rpc("record_homework_check_observation"');
+    expect(edgeFunction).toContain("p_raw_observation");
+    // 버전 정보 없이 저장하면 나중에 A/B 비교가 불가능하다.
+    expect(edgeFunction).toContain("p_prompt_version");
+    expect(edgeFunction).toContain("p_schema_version");
+    expect(edgeFunction).toContain("p_scope_included");
+    // 관찰은 판정이 아니므로 화면 캐시(ai_*)를 갱신하는 RPC 를 부르지 않는다.
+    expect(edgeFunction).not.toContain('rpc("apply_homework_ai_verdict"');
+    expect(edgeFunction).not.toContain("p_verdict");
+    expect(edgeFunction).not.toContain("p_confidence");
+  });
+
+  it("logs everything a later A/B comparison needs", () => {
+    for (const field of ["stop_reason", "input_tokens", "output_tokens", "latency_ms", "discard_reason"]) {
+      expect(edgeFunction, field).toContain(field);
+    }
+  });
+
+  it("discards a failed batch instead of partially saving it", () => {
+    // 절반만 살리면 그 절반이 "관찰된 전부"로 읽힌다.
+    expect(edgeFunction).toContain("images: discard ? null : observedImages");
+    expect(edgeFunction).toContain('"observation_discarded"');
   });
 });
 
@@ -449,7 +542,7 @@ describe("AI 판정 노출 차단 플래그 (shared ↔ edge function)", () => {
     for (const laterCall of [
       'rpc("start_homework_check_attempt"',
       "await downloadSnapshotImages(asService",
-      "await callAnthropicVision({",
+      "await callObservationBatch({",
       "await asUser.auth.getUser()"
     ]) {
       const at = edgeFunction.indexOf(laterCall);

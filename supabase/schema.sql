@@ -390,9 +390,22 @@ create table homework_check_attempts (
   -- 달라진다. 검사 슬롯을 확보하는 순간 범위·사진 경로를 함께 고정한다.
   scope_text_snapshot       text,
   photo_paths_snapshot      text[] not null,
+  -- verdict/confidence/reason 은 **구 판정 경로**의 컬럼이다(20260807030000 이후 새로 쓰지 않는다).
+  -- 지우지 않는 이유: 이전 실행 이력이 남아 있고, 되돌릴 때 근거가 된다.
   verdict                   submission_verdict,   -- 완료 전에는 NULL
   confidence                numeric,
   reason                    text,
+  -- 관찰 원본(20260807030000). AI 는 판정하지 않고 보이는 표시만 기록한다 —
+  -- 이건 **확정 사실이 아니다.** 서버 계산값·사람 확인값은 다음 단계에서 별도 컬럼에 둔다.
+  raw_ai_observation        jsonb,
+  -- 어느 프롬프트/스키마/범위설정에서 나온 관찰인지. 없으면 A/B 비교가 불가능하다.
+  prompt_version            text,
+  schema_version            text,
+  scope_included            boolean,
+  -- 정상 관찰로 인정한 근거(end_turn 아니면 폐기) + 검증 실패로 폐기한 이유.
+  stop_reason               text,
+  discard_reason            text,
+  latency_ms                integer,
   idempotency_key           text not null,
   model                     text,
   input_tokens              integer,
@@ -410,9 +423,12 @@ create table homework_check_attempts (
     unique (requested_by, idempotency_key),
   constraint attempts_idempotency_key_not_blank
     check (btrim(idempotency_key) <> ''),
-  -- verdict 는 완료일 때만 있고, 완료면 반드시 있다(양방향).
-  constraint attempts_verdict_only_when_completed
-    check ((status = 'completed') = (verdict is not null)),
+  -- 완료된 실행에는 결과가 하나는 있어야 하고, 완료가 아니면 없어야 한다(양방향).
+  -- 20260807030000 에서 완화: 관찰 전용 실행에는 verdict 가 없고 raw_ai_observation 만 있다.
+  constraint attempts_completed_has_result
+    check ((status = 'completed') = (verdict is not null or raw_ai_observation is not null)),
+  constraint attempts_latency_non_negative
+    check (latency_ms is null or latency_ms >= 0),
   -- 사진 1~9개. array_length 는 빈 배열에 NULL 을 돌려주므로 coalesce 가 없으면
   -- `NULL between 1 and 9` → NULL → 제약이 통과해 버린다(0개가 그대로 들어간다).
   constraint attempts_photo_count
@@ -1889,6 +1905,89 @@ revoke all on function start_homework_check_attempt(uuid, uuid, text) from publi
 revoke all on function start_homework_check_attempt(uuid, uuid, text) from anon;
 revoke all on function start_homework_check_attempt(uuid, uuid, text) from authenticated;
 grant execute on function start_homework_check_attempt(uuid, uuid, text) to service_role;
+
+-- ============================================================================
+-- AI 채점표시 **관찰** 기록 (20260807030000)
+-- ============================================================================
+-- [왜] 이전 설계는 AI 에게 전역 판정(pass/insufficient)을 시켰고, 그 판정을 verdict 에
+--   "확정 사실"로 저장했다. 실사진 측정에서 다 푼 페이지를 "3·4·5번 미작성"으로
+--   confidence 0.95 에 단정했다 — 결론을 만들어야 한다는 압박이 환각을 유발했다.
+--   그래서 AI 출력은 확정 사실이 아니라 **원본 관찰**로만 보관한다.
+--   프롬프트·출력 스키마·서버 의미 검증은
+--   supabase/functions/ai-homework-check/observation.ts 에 있다.
+--
+-- 성공(폐기 사유 없음) → status='completed', raw_ai_observation 저장.
+-- 폐기(폐기 사유 있음) → status='failed', 원본은 그대로 남기고 discard_reason 을 적는다.
+--   폐기한 원본도 보관하는 이유: 무엇이 왜 폐기됐는지 못 보면 프롬프트를 고칠 근거가 없다.
+--
+-- ⚠️ 두 경우 모두 homework_submissions.ai_* 를 건드리지 않는다.
+--    관찰은 판정이 아니므로 화면에 캐시할 값이 없다.
+create or replace function record_homework_check_observation(
+  p_attempt_id uuid,
+  p_raw_observation jsonb,
+  p_prompt_version text,
+  p_schema_version text,
+  p_scope_included boolean,
+  p_stop_reason text default null,
+  p_model text default null,
+  p_input_tokens integer default null,
+  p_output_tokens integer default null,
+  p_cost_usd_micros bigint default null,
+  p_latency_ms integer default null,
+  p_discard_reason text default null
+)
+returns homework_check_attempts
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  result homework_check_attempts%rowtype;
+begin
+  update homework_check_attempts
+     set status              = case when p_discard_reason is null then 'completed' else 'failed' end,
+         raw_ai_observation  = p_raw_observation,
+         prompt_version      = p_prompt_version,
+         schema_version      = p_schema_version,
+         scope_included      = p_scope_included,
+         stop_reason         = p_stop_reason,
+         model               = coalesce(p_model, model),
+         input_tokens        = coalesce(p_input_tokens, input_tokens),
+         output_tokens       = coalesce(p_output_tokens, output_tokens),
+         estimated_cost_usd_micros = coalesce(p_cost_usd_micros, estimated_cost_usd_micros),
+         latency_ms          = p_latency_ms,
+         discard_reason      = p_discard_reason,
+         -- error_code 는 status='failed' 일 때만 허용된다(attempts_error_only_when_failed).
+         error_code          = case when p_discard_reason is null then null else 'observation_discarded' end,
+         completed_at        = now(),
+         updated_at          = now()
+   where id = p_attempt_id
+     and status in ('queued', 'processing')
+  returning * into result;
+
+  if not found then
+    raise exception 'check_attempt_not_open';
+  end if;
+
+  return result;
+end;
+$$;
+
+revoke all on function record_homework_check_observation(
+  uuid, jsonb, text, text, boolean, text, text, integer, integer, bigint, integer, text
+) from public;
+revoke all on function record_homework_check_observation(
+  uuid, jsonb, text, text, boolean, text, text, integer, integer, bigint, integer, text
+) from anon;
+revoke all on function record_homework_check_observation(
+  uuid, jsonb, text, text, boolean, text, text, integer, integer, bigint, integer, text
+) from authenticated;
+grant execute on function record_homework_check_observation(
+  uuid, jsonb, text, text, boolean, text, text, integer, integer, bigint, integer, text
+) to service_role;
+
+-- complete_homework_check_attempt(판정 기록)은 DEPRECATED(2026-08-07)다. 지우지 않는 이유:
+-- 옛 경로가 남은 코드에서 깨지고, 되돌릴 때 근거가 없어진다. 2단계에서 정리한다.
 
 -- ============================================================================
 -- Storage 버킷(앱에서 생성):

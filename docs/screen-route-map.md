@@ -4,6 +4,12 @@
 > 같은 코드의 변형(예: C2 오늘/제로/혼공)은 **같은 라우트의 상태**로 처리한다(별도 경로 아님).
 > 라우트는 권장값 — 학생=Expo Router, 과외쌤=Next.js App Router. 스택 변경 시 경로 규칙만 맞춰 조정.
 
+> 🚨 **AI 검사 결과 화면(J9 · 혼공 결과 · B5 검사 큐)의 "통과/미흡/애매" 상태 구성은 구 설계다
+> (2026-08-07).** 라우트는 그대로 쓰지만 표시 내용은 바뀐다 — 현행 설계는
+> [`docs/ai-observation-design.md`](ai-observation-design.md) 이고, AI 는 판정하지 않는다.
+> 결과 확인·수정 화면은 4단계에서 정의한다. 현재 결과 노출은 기능 플래그로 차단돼 있다
+> (`AI_CHECK_RESULTS_ENABLED = false`).
+
 ## 학생 앱 (Expo Router) — 탭: today · planner · class · ai · records
 
 | 코드 | 화면 | 라우트 | 상태/변형 | 주요 데이터 |
