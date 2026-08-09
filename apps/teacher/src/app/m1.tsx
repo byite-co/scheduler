@@ -616,6 +616,38 @@ export function TeacherSettingsContent() {
           <p className="text-xs font-bold text-muted">앱 구독료와 수업·수업료는 별개예요.</p>
         </Panel>
       </div>
+
+      {/*
+        🚨 알림 센터와 회원 탈퇴로 가는 **유일한** 진입점이다. 지우지 마라.
+        두 화면 모두 구현은 끝나 있었지만 링크가 0건이라 URL 직접 입력으로만 열렸다.
+        회원 탈퇴 도달 불가는 AGENTS.md 절대 규칙 위반이자 심사 리젝 사유다.
+        (/notifications 는 이미 TeacherShell 에 active="/settings" 로 들어온다 — 즉
+         설정 하위로 설계돼 있었는데 링크만 없던 것이다.)
+      */}
+      <div className="mt-4">
+        <Panel title="계정">
+          <a
+            href="/notifications"
+            className="flex min-h-11 items-center justify-between gap-3 rounded-control border border-line bg-surface px-4 py-3 transition-colors hover:border-brand hover:bg-canvas"
+          >
+            <span className="flex flex-col gap-0.5">
+              <span className="text-sm font-extrabold text-ink">알림 센터</span>
+              <span className="text-xs font-bold text-muted">숙제·검사·연동 알림을 모아 봐요.</span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted" strokeWidth={2} />
+          </a>
+          <a
+            href="/settings/account/delete"
+            className="flex min-h-11 items-center justify-between gap-3 rounded-control border border-line bg-surface px-4 py-3 transition-colors hover:border-danger hover:bg-canvas"
+          >
+            <span className="flex flex-col gap-0.5">
+              <span className="text-sm font-extrabold text-danger">회원 탈퇴</span>
+              <span className="text-xs font-bold text-muted">계정과 데이터가 모두 삭제돼요.</span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted" strokeWidth={2} />
+          </a>
+        </Panel>
+      </div>
     </TeacherShell>
   );
 }

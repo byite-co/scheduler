@@ -26,7 +26,8 @@ export type IconName =
   | "person"
   | "mail"
   | "doc"
-  | "alert";
+  | "alert"
+  | "settings";
 
 const GLYPHS: Record<IconName, React.ComponentProps<typeof MaterialCommunityIcons>["name"]> = {
   today: "home-variant-outline",
@@ -50,7 +51,8 @@ const GLYPHS: Record<IconName, React.ComponentProps<typeof MaterialCommunityIcon
   person: "account-outline",
   mail: "email-outline",
   doc: "file-document-outline",
-  alert: "alert-outline"
+  alert: "alert-outline",
+  settings: "cog-outline"
 };
 
 export function AppIcon({

@@ -71,7 +71,7 @@ create table invite_codes (
   code        text primary key,                          -- 예: 6~8자리
   teacher_id  uuid not null references profiles(id) on delete cascade,
   expires_at  timestamptz,
-  used_by     uuid references profiles(id),
+  used_by     uuid references profiles(id) on delete set null,  -- 탈퇴하면 NULL(코드 이력은 남긴다)
   created_at  timestamptz not null default now()
 );
 alter table invite_codes enable row level security;
@@ -84,7 +84,7 @@ create table connections (
   student_id  uuid not null references profiles(id) on delete cascade,
   status      connection_status not null default 'pending',
   invite_code text references invite_codes(code),
-  requested_by uuid references profiles(id),             -- 누가 요청했는지
+  requested_by uuid references profiles(id) on delete set null, -- 누가 요청했는지(탈퇴하면 NULL)
   created_at  timestamptz not null default now(),
   activated_at timestamptz,
   unique (teacher_id, student_id)
@@ -253,7 +253,8 @@ create table todos (
   locked        boolean not null default false,     -- teacher 숙제는 학생이 ai_check 변경 불가
   due_date      date,
   status        todo_status not null default 'todo',
-  created_by    uuid not null references profiles(id),
+  -- 탈퇴하면 NULL(20260809010000). NOT NULL + 절 없음이면 과외쌤 탈퇴가 23503 으로 막힌다.
+  created_by    uuid references profiles(id) on delete set null,
   created_at    timestamptz not null default now(),
   -- 길이 상한은 DB 에서 강제한다 — 클라이언트 검증만 두면 PostgREST 직접 호출로 우회된다.
   -- 공백 제외 글자 수 기준(\s = [[:space:]]). 하한 1 은 "빈 문자열은 NULL" 불변식을 못박는 것으로,
@@ -786,7 +787,7 @@ begin
 
   return new;
 end;
-$;
+$$;
 drop trigger if exists guard_homework_submission_fields_trigger on homework_submissions;
 create trigger guard_homework_submission_fields_trigger
   before insert or update on homework_submissions
@@ -1084,7 +1085,7 @@ create policy airec_student_rw on ai_recommendations for all
 create table reports (
   id             uuid primary key default gen_random_uuid(),
   student_id     uuid not null references profiles(id) on delete cascade,
-  teacher_id     uuid references profiles(id),      -- 학생 본인 리포트면 null
+  teacher_id     uuid references profiles(id) on delete set null, -- 학생 본인 리포트이거나 쌤 탈퇴 시 null
   type           report_type not null,
   period_start   date not null,
   period_end     date not null,
@@ -1463,6 +1464,239 @@ create index on notifications (user_id, read);
 create index on reports (student_id, type, period_start);
 create index if not exists todos_student_due_date_idx on todos (student_id, due_date);
 create index if not exists timetable_blocks_student_day_start_idx on timetable_blocks (student_id, day_of_week, start_min);
+
+-- ============================================================================
+-- 앱 내 알림 생성 (20260809000000)
+-- ============================================================================
+
+-- ── 공통 삽입 헬퍼 ───────────────────────────────────────────────────────────
+-- security definer 로 RLS(notif_self)를 넘어 상대방에게 알림을 남긴다.
+-- 수신자가 없거나(연결 없는 혼공 할 일 등) 자기 자신이면 아무것도 하지 않는다.
+create or replace function emit_notification(
+  p_user_id uuid,
+  p_type notif_type,
+  p_title text,
+  p_body text default null,
+  p_payload jsonb default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_user_id is null then
+    return;
+  end if;
+  -- 자기가 한 일을 자기에게 알리지 않는다. service_role 실행 시 auth.uid() 는 null 이라
+  -- 이 조건은 서버 경로를 막지 않는다.
+  if p_user_id = auth.uid() then
+    return;
+  end if;
+
+  insert into notifications (user_id, type, title, body, payload)
+  values (p_user_id, p_type, p_title, p_body, p_payload);
+end;
+$$;
+
+comment on function emit_notification(uuid, notif_type, text, text, jsonb) is
+  '앱 내 알림 1건 생성. 트리거 전용 — 클라이언트가 직접 부를 일이 없다.';
+
+revoke all on function emit_notification(uuid, notif_type, text, text, jsonb) from public;
+revoke all on function emit_notification(uuid, notif_type, text, text, jsonb) from anon;
+revoke all on function emit_notification(uuid, notif_type, text, text, jsonb) from authenticated;
+
+-- ── 1. 선생님이 숙제를 냈다 → 학생 ───────────────────────────────────────────
+create or replace function notify_teacher_homework_assigned()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.source = 'teacher' then
+    perform emit_notification(
+      new.student_id,
+      'homework',
+      '새 숙제가 등록됐어요',
+      new.title,
+      jsonb_build_object('todoId', new.id)
+    );
+  end if;
+  return null;
+exception when others then
+  -- 알림 실패로 숙제 출제를 되돌리지 않는다.
+  raise warning 'notify_teacher_homework_assigned failed: %', sqlerrm;
+  return null;
+end;
+$$;
+
+drop trigger if exists notify_teacher_homework_assigned_trigger on todos;
+create trigger notify_teacher_homework_assigned_trigger
+after insert on todos
+for each row execute function notify_teacher_homework_assigned();
+
+-- ── 2. 학생이 숙제를 제출했다 → 연결된 선생님 ────────────────────────────────
+create or replace function notify_homework_submitted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_teacher_id uuid;
+  v_title text;
+begin
+  -- 선생님 숙제만 알린다. 혼공 할 일은 connection_id 가 없어 수신자가 없다.
+  select c.teacher_id, t.title
+    into v_teacher_id, v_title
+    from todos t
+    join connections c on c.id = t.connection_id
+   where t.id = new.todo_id
+     and c.status = 'active';
+
+  perform emit_notification(
+    v_teacher_id,
+    'homework',
+    '학생이 숙제를 제출했어요',
+    v_title,
+    jsonb_build_object('todoId', new.todo_id, 'submissionId', new.id)
+  );
+  return null;
+exception when others then
+  raise warning 'notify_homework_submitted failed: %', sqlerrm;
+  return null;
+end;
+$$;
+
+drop trigger if exists notify_homework_submitted_trigger on homework_submissions;
+create trigger notify_homework_submitted_trigger
+after insert on homework_submissions
+for each row execute function notify_homework_submitted();
+
+-- ── 3. 선생님이 확인/반려했다 → 학생 ─────────────────────────────────────────
+create or replace function notify_homework_reviewed()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_title text;
+begin
+  select t.title into v_title from todos t where t.id = new.todo_id;
+
+  -- 반려(다시 제출 요청). resubmit_requested 로도 판정하는 이유: 두 필드가 같은 UPDATE 에서
+  -- 함께 바뀌지만, 한쪽만 바뀌는 경로가 생겨도 알림은 나가야 한다.
+  if (new.teacher_status = 'rejected' and old.teacher_status is distinct from 'rejected')
+     or (new.resubmit_requested and not old.resubmit_requested) then
+    perform emit_notification(
+      new.student_id,
+      'resubmit',
+      '숙제를 다시 제출해 주세요',
+      coalesce(nullif(new.teacher_comment, ''), v_title),
+      jsonb_build_object('todoId', new.todo_id)
+    );
+  elsif new.teacher_status = 'confirmed' and old.teacher_status is distinct from 'confirmed' then
+    perform emit_notification(
+      new.student_id,
+      'check_done',
+      '숙제 확인이 끝났어요',
+      coalesce(nullif(new.teacher_comment, ''), v_title),
+      jsonb_build_object('todoId', new.todo_id)
+    );
+  end if;
+  return null;
+exception when others then
+  raise warning 'notify_homework_reviewed failed: %', sqlerrm;
+  return null;
+end;
+$$;
+
+drop trigger if exists notify_homework_reviewed_trigger on homework_submissions;
+create trigger notify_homework_reviewed_trigger
+after update on homework_submissions
+for each row execute function notify_homework_reviewed();
+
+-- ── 4. 연결 요청·수락·거절 → 상대방 ──────────────────────────────────────────
+create or replace function notify_connection_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_requester uuid := new.requested_by;
+begin
+  if new.status = 'pending'
+     and (tg_op = 'INSERT' or old.status is distinct from 'pending') then
+    -- 요청은 어느 쪽에서도 시작될 수 있다. 요청자가 아닌 쪽에 알린다.
+    perform emit_notification(
+      case when v_requester = new.student_id then new.teacher_id else new.student_id end,
+      'connection',
+      '새 연동 요청이 왔어요',
+      null,
+      jsonb_build_object('connectionId', new.id)
+    );
+  elsif tg_op = 'UPDATE' and new.status = 'active' and old.status is distinct from 'active' then
+    perform emit_notification(
+      new.student_id,
+      'connection',
+      '선생님과 연동됐어요',
+      null,
+      jsonb_build_object('connectionId', new.id)
+    );
+  elsif tg_op = 'UPDATE' and new.status = 'rejected' and old.status is distinct from 'rejected' then
+    perform emit_notification(
+      new.student_id,
+      'connection',
+      '연동 요청이 거절됐어요',
+      null,
+      jsonb_build_object('connectionId', new.id)
+    );
+  end if;
+  return null;
+exception when others then
+  raise warning 'notify_connection_change failed: %', sqlerrm;
+  return null;
+end;
+$$;
+
+drop trigger if exists notify_connection_change_trigger on connections;
+create trigger notify_connection_change_trigger
+after insert or update on connections
+for each row execute function notify_connection_change();
+
+-- ── 5. 리포트를 보냈다 → 학생 ────────────────────────────────────────────────
+-- 이 알림이 /report(나의 리포트)로 가는 딥링크가 된다(getNotificationRoute 의 report → /report).
+create or replace function notify_report_sent()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'sent' and old.status is distinct from 'sent' then
+    perform emit_notification(
+      new.student_id,
+      'report',
+      '새 리포트가 도착했어요',
+      null,
+      jsonb_build_object('reportId', new.id)
+    );
+  end if;
+  return null;
+exception when others then
+  raise warning 'notify_report_sent failed: %', sqlerrm;
+  return null;
+end;
+$$;
+
+drop trigger if exists notify_report_sent_trigger on reports;
+create trigger notify_report_sent_trigger
+after update on reports
+for each row execute function notify_report_sent();
+
 
 -- ============================================================================
 -- 사진 업로드 한도 (20260807010000)

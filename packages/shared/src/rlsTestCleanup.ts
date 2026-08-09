@@ -1,7 +1,14 @@
 // 통합 테스트가 만든 임시 계정 정리 — 핵심은 "조용히 실패하지 않게" 하는 것이다.
 //
 // ── 왜 단순히 순서만 정해서는 안 되는가 ──────────────────────────────────────
-// profiles 를 참조하는 FK 중 일부에 ON DELETE 절이 없다(= NO ACTION):
+// (2026-08-09 갱신) 아래에 적힌 "절 없음" 두 건은 **20260809010000/020000 에서 해소됐다.**
+// profiles 를 참조하는 FK 중 ON DELETE 절이 없는 것은 이제 0개다(todos.created_by,
+// connections.requested_by, reports.teacher_id, invite_codes.used_by 전부 SET NULL).
+// 그래서 프로덕션 delete_my_account() 도, 이 정리기도 순서에 덜 민감해졌다.
+// 그래도 재시도 구조는 남긴다 — 앞으로 절 없는 FK 가 다시 생겨도 조용히 새지 않게 하는
+// 안전망이고, "정리 실패를 반드시 드러낸다"는 목적은 그대로 유효하다.
+//
+// [해소 전 상태 — 왜 이 구조가 필요했는지의 기록]
 //   todos.created_by           references profiles(id)                    ← 절 없음
 //   connections.requested_by   references profiles(id)                    ← 절 없음
 //   todos.student_id           references profiles(id) on delete cascade
