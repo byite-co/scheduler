@@ -970,7 +970,7 @@ export type Database = {
           ai_check_enabled: boolean
           connection_id: string | null
           created_at: string
-          created_by: string
+          created_by: string | null
           due_date: string | null
           id: string
           locked: boolean
@@ -985,7 +985,7 @@ export type Database = {
           ai_check_enabled?: boolean
           connection_id?: string | null
           created_at?: string
-          created_by: string
+          created_by?: string | null
           due_date?: string | null
           id?: string
           locked?: boolean
@@ -1000,7 +1000,7 @@ export type Database = {
           ai_check_enabled?: boolean
           connection_id?: string | null
           created_at?: string
-          created_by?: string
+          created_by?: string | null
           due_date?: string | null
           id?: string
           locked?: boolean
@@ -1209,6 +1209,16 @@ export type Database = {
         Returns: boolean
       }
       delete_my_account: { Args: never; Returns: undefined }
+      emit_notification: {
+        Args: {
+          p_body?: string
+          p_payload?: Json
+          p_title: string
+          p_type: Database["public"]["Enums"]["notif_type"]
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       fail_homework_check_attempt: {
         Args: { p_attempt_id: string; p_error_code: string }
         Returns: {

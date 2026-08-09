@@ -23,6 +23,36 @@ export const NOTIF_TYPE_LABELS: Record<NotifType, string> = {
   system: "공지"
 };
 
+/**
+ * 앱 내 알림이 실제로 생기는 이벤트 목록 (20260809000000).
+ *
+ * 알림은 **DB 트리거**가 만든다 — 알림이 필요한 이벤트 대부분이 클라이언트가 테이블에
+ * 직접 쓰는 경로라, RPC 로 바꾸면 호출부를 하나라도 빠뜨렸을 때 그 경로만 조용히 알림이
+ * 없어진다. 트리거는 모든 쓰기 경로를 덮는다.
+ *
+ * 이 표는 **문서이자 회귀 방어**다. m7.schema.test.ts 가 여기 적힌 제목이 마이그레이션에
+ * 실제로 들어 있는지 대조한다 — 한쪽만 고치면 CI 가 잡는다.
+ *
+ * ⚠️ 푸시 알림(앱 밖)은 여기 없다. push_tokens 는 아직 아무도 쓰지 않는다.
+ * ⚠️ AI 검사 완료 알림도 없다. 판정 노출이 AI_CHECK_RESULTS_ENABLED 로 막혀 있어
+ *    지금 보내면 "볼 수 없는 결과"를 알리게 된다.
+ */
+export const NOTIFICATION_EVENTS = [
+  { event: "homework_assigned", type: "homework", to: "student", title: "새 숙제가 등록됐어요" },
+  { event: "homework_submitted", type: "homework", to: "teacher", title: "학생이 숙제를 제출했어요" },
+  { event: "homework_rejected", type: "resubmit", to: "student", title: "숙제를 다시 제출해 주세요" },
+  { event: "homework_confirmed", type: "check_done", to: "student", title: "숙제 확인이 끝났어요" },
+  { event: "connection_requested", type: "connection", to: "counterpart", title: "새 연동 요청이 왔어요" },
+  { event: "connection_activated", type: "connection", to: "student", title: "선생님과 연동됐어요" },
+  { event: "connection_rejected", type: "connection", to: "student", title: "연동 요청이 거절됐어요" },
+  { event: "report_sent", type: "report", to: "student", title: "새 리포트가 도착했어요" }
+] as const satisfies ReadonlyArray<{
+  event: string;
+  type: NotifType;
+  to: "student" | "teacher" | "counterpart";
+  title: string;
+}>;
+
 export type NotificationLike = {
   id: string;
   type: NotifType;

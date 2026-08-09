@@ -1032,12 +1032,40 @@ function HomeHeader({
           {name}님, {greeting}
         </Text>
       </View>
-      {streakCount > 0 ? (
-        <View style={styles.streakChip}>
-          <AppIcon name="flame" size={14} color={colors.flame} />
-          <Text style={styles.streakChipText}>{streakCount}일</Text>
-        </View>
-      ) : null}
+      <View style={styles.homeHeaderRight}>
+        {streakCount > 0 ? (
+          <View style={styles.streakChip}>
+            <AppIcon name="flame" size={14} color={colors.flame} />
+            <Text style={styles.streakChipText}>{streakCount}일</Text>
+          </View>
+        ) : null}
+        {/*
+          🚨 설정·알림 센터로 가는 **유일한** 진입점이다. 지우지 마라.
+          이게 없으면 프로필 편집·알림 설정·약관·**회원 탈퇴**가 전부 도달 불가가 되고,
+          회원 탈퇴 도달 불가는 앱스토어 심사 리젝 사유다(AGENTS.md 절대 규칙).
+          탭은 5개로 고정(카탈로그)이라 헤더에 뒀다 — 근거는 PR 참고.
+        */}
+        <Link href={"/notifications" as Href} asChild>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="알림 센터"
+            hitSlop={8}
+            style={styles.homeHeaderIcon}
+          >
+            <AppIcon name="bell" size={20} color={colors.ink} />
+          </Pressable>
+        </Link>
+        <Link href={"/settings" as Href} asChild>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="설정"
+            hitSlop={8}
+            style={styles.homeHeaderIcon}
+          >
+            <AppIcon name="settings" size={20} color={colors.ink} />
+          </Pressable>
+        </Link>
+      </View>
     </View>
   );
 }
@@ -2307,6 +2335,15 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "900",
     lineHeight: 31
+  },
+  homeHeaderRight: {
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs
+  },
+  homeHeaderIcon: {
+    padding: spacing.xs
   },
   streakChip: {
     flexShrink: 0,
