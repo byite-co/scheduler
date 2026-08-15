@@ -5,24 +5,37 @@ import type { Session } from "@supabase/supabase-js";
 
 import {
   EMPTY_NARRATIVE,
+  LESSON_STATUSES,
+  LESSON_STATUS_LABELS,
   NARRATIVE_FIELDS,
   REPORT_DELIVERY_CHANNELS,
   REPORT_DELIVERY_CHANNEL_LABELS,
   REPORT_DELIVERY_STATUS_LABELS,
   SUBJECT_LABELS,
+  buildLessonBlock,
   buildParentReport,
+  buildTeacherBranding,
   canSendReport,
   describeEmptyReport,
+  describeLessonBlock,
   describeMetricState,
+  getReportGating,
+  getReportQuotaState,
+  getTeacherBillingState,
   hasAnyReportContent,
   isChannelWired,
+  isReportQuotaError,
   isShareExpired,
   normalizeDisclosure,
   type ExamRecordLike,
+  type LessonBlock,
+  type LessonStatus,
   type ParentReportData,
   type ReportDeliveryChannel,
   type ReportMetric,
-  type ReportNarrative
+  type ReportNarrative,
+  type SubStatus,
+  type TeacherBranding
 } from "@ssamplanner/shared";
 import type { Database, SubjectCode } from "@ssamplanner/shared";
 
@@ -156,6 +169,12 @@ export function TeacherReportBuilder() {
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<Array<{ channel: string; status: string; error: string | null }>>([]);
   const [examForm, setExamForm] = useState({ subject: "math" as SubjectCode, exam_name: "", taken_on: "", grade: "", score: "", comment: "" });
+  const [lessonForm, setLessonForm] = useState({ taught_on: "", status: "done" as LessonStatus, memo: "" });
+  const [lessons, setLessons] = useState<ReportMetric<LessonBlock>>({ state: "no_data" });
+  const [branding, setBranding] = useState<TeacherBranding | null>(null);
+  const [subStatus, setSubStatus] = useState<SubStatus>("none");
+  const [quotaUsed, setQuotaUsed] = useState(0);
+  const [activeCount, setActiveCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("세션 확인 중");
@@ -177,10 +196,19 @@ export function TeacherReportBuilder() {
       .eq("teacher_id", active.user.id)
       .eq("status", "active");
     const ids = (connectionResult.data ?? []).map((c) => c.student_id as string);
-    const profileResult = ids.length
-      ? await supabase.from("profiles").select("*").in("id", ids)
-      : { data: [] as ProfileRow[] };
+    setActiveCount(ids.length);
+    const [profileResult, meResult, subResult, usageResult] = await Promise.all([
+      ids.length ? supabase.from("profiles").select("*").in("id", ids) : Promise.resolve({ data: [] as ProfileRow[] }),
+      // 브랜딩 값은 설정 화면이 이미 저장한다(profiles.name / bio / subjects). 여기서는 읽기만 한다.
+      supabase.from("profiles").select("name, bio, subjects").eq("id", active.user.id).maybeSingle(),
+      // ⚠️ 과외쌤 구독이다. 학생 프리미엄(student_subscriptions)과 다른 테이블이다.
+      supabase.from("teacher_subscriptions").select("status").eq("teacher_id", active.user.id).maybeSingle(),
+      supabase.rpc("report_monthly_usage", { p_teacher_id: active.user.id })
+    ]);
     setStudents(profileResult.data ?? []);
+    setBranding(buildTeacherBranding(meResult.data as never));
+    setSubStatus(((subResult.data as { status?: SubStatus } | null)?.status ?? "none") as SubStatus);
+    setQuotaUsed(typeof usageResult.data === "number" ? usageResult.data : 0);
     setMessage(connectionResult.error?.message ?? "");
     setLoading(false);
   }, []);
@@ -245,6 +273,30 @@ export function TeacherReportBuilder() {
           supabase.from("reports").select("*").eq("student_id", id).order("created_at", { ascending: false }).limit(10)
         ]);
 
+      // 회차는 **이번 달** 기준이다(주간 리포트지만 학부모가 묻는 건 "이번 달 몇 번"이다).
+      const monthStart = `${week.start.slice(0, 7)}-01`;
+      const [lessonResult, feeResult] = await Promise.all([
+        supabase
+          .from("lessons")
+          .select("taught_on, status")
+          .eq("student_id", id)
+          .gte("taught_on", monthStart),
+        // 예정 회차는 월 단위 약속이라 lesson_fees 에 있다(금액과 같은 주기).
+        supabase
+          .from("lesson_fees")
+          .select("planned_sessions")
+          .eq("student_id", id)
+          .eq("teacher_id", session?.user.id ?? "")
+          .eq("period", week.start.slice(0, 7))
+          .maybeSingle()
+      ]);
+      setLessons(
+        buildLessonBlock(
+          (lessonResult.data ?? []) as never,
+          (feeResult.data as { planned_sessions: number | null } | null)?.planned_sessions
+        )
+      );
+
       // 주간 추이: 세션을 주 시작일로 묶는다. 기록이 없는 주도 0 으로 **자리를 만든다** —
       // 막대가 빠지면 그 주가 없는 것처럼 보인다(추이는 연속이어야 읽힌다).
       const buckets = new Map<string, number>();
@@ -307,10 +359,39 @@ export function TeacherReportBuilder() {
     await loadStudent(studentId);
   }
 
+  async function addLesson() {
+    if (!session || !studentId) return;
+    if (!lessonForm.taught_on) {
+      setMessage("수업 날짜는 필요해요.");
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.from("lessons").insert({
+      teacher_id: session.user.id,
+      student_id: studentId,
+      taught_on: lessonForm.taught_on,
+      status: lessonForm.status,
+      memo: lessonForm.memo.trim() || null
+    });
+    setBusy(false);
+    if (error) {
+      // 같은 날 같은 시각 중복은 실수다(연타·중복 저장).
+      setMessage(error.code === "23505" ? "같은 날짜에 이미 기록이 있어요." : error.message);
+      return;
+    }
+    setLessonForm({ taught_on: "", status: "done", memo: "" });
+    setMessage("수업 회차를 기록했어요.");
+    await loadStudent(studentId);
+  }
+
   async function saveAndSend(channel: ReportDeliveryChannel) {
     if (!session || !studentId || !report) return;
     if (!canSendReport(narrative)) {
       setMessage("선생님 코멘트는 채워 주세요. 자동 수집 데이터만으로는 보내지 않아요.");
+      return;
+    }
+    if (quota.exceeded) {
+      setMessage(quota.notice ?? "이번 달 발급 한도를 다 썼어요.");
       return;
     }
     setBusy(true);
@@ -324,7 +405,8 @@ export function TeacherReportBuilder() {
         period_start: week.start,
         period_end: week.end,
         // 발송 시점의 값을 그대로 굳힌다 — 나중에 학생 기록이 바뀌어도 보낸 리포트는 그대로여야 한다.
-        data: report as never,
+        // 무료 플랜은 자동 그래프를 안 쓰므로 스냅샷에도 넣지 않는다(학부모 웹뷰가 그리면 안 된다).
+        data: { ...(gating.autoGraphs ? report : {}), lessons, branding, gating: gating.mode } as never,
         teacher_comment: narrative.teacherComment,
         home_support: narrative.homeSupport || null,
         next_week_focus: narrative.nextWeekFocus || null,
@@ -335,9 +417,15 @@ export function TeacherReportBuilder() {
       .single();
     if (inserted.error || !inserted.data) {
       setBusy(false);
-      setMessage(inserted.error?.message ?? "리포트 저장 실패");
+      // 한도는 DB 트리거가 최종적으로 막는다(화면만 막으면 직접 호출로 우회된다).
+      setMessage(
+        isReportQuotaError(inserted.error?.message)
+          ? (quota.notice ?? `이번 달 발급 한도(${quota.quota}건)를 다 썼어요.`)
+          : (inserted.error?.message ?? "리포트 저장 실패")
+      );
       return;
     }
+    setQuotaUsed((n) => n + 1);
     const reportId = inserted.data.id as string;
 
     // 링크만 실제로 발급된다. 카톡·PDF 는 아직 연동이 없어 **pending 으로만** 남긴다 —
@@ -393,6 +481,9 @@ export function TeacherReportBuilder() {
   };
   const student = students.find((s) => s.id === studentId);
   const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+  // ⚠️ 과외쌤 구독이다(teacher_subscriptions). 학생 프리미엄과 혼동하면 안 된다.
+  const gating = getReportGating(getTeacherBillingState(subStatus).active);
+  const quota = getReportQuotaState(quotaUsed, activeCount);
 
   return (
     <TeacherShell
@@ -430,6 +521,46 @@ export function TeacherReportBuilder() {
               </div>
             ) : null}
 
+            {/* 요금제 안내 — 무료가 무엇을 못 하는지 명확히 알린다. */}
+            <div
+              className={`flex flex-wrap items-center justify-between gap-2 rounded-card border p-4 ${
+                gating.autoGraphs ? "border-line bg-surface" : "border-line bg-canvas"
+              }`}
+            >
+              <span className="flex items-center gap-2 text-sm font-extrabold text-ink">
+                <span
+                  className={`rounded-chip px-2 py-1 text-xs font-extrabold ${
+                    gating.autoGraphs ? "bg-brand text-surface" : "bg-canvas text-muted"
+                  }`}
+                >
+                  {gating.label}
+                </span>
+                {gating.notice}
+              </span>
+              {gating.autoGraphs ? null : (
+                <a href="/billing" className="rounded-control bg-brand px-3 py-2 text-xs font-extrabold text-surface">
+                  구독 시작
+                </a>
+              )}
+            </div>
+
+            {/* 수업 회차 — 공개범위 대상이 아니다(과외쌤 자신의 기록). */}
+            <div className="grid gap-4 md:grid-cols-2">
+              {lessons.state === "value" ? (
+                <Card title="이번 달 수업">
+                  <p className="font-mono text-3xl font-extrabold text-ink">{describeLessonBlock(lessons.value)}</p>
+                  <p className="text-sm font-bold text-muted">
+                    {lessons.value.absent > 0
+                      ? "결석은 진행 회차에 넣지 않고 따로 적어요."
+                      : "과외쌤이 직접 기록한 회차예요."}
+                  </p>
+                </Card>
+              ) : (
+                <MetricFallback metric={lessons} title="이번 달 수업" />
+              )}
+            </div>
+
+            {gating.autoGraphs ? (
             <div className="grid gap-4 md:grid-cols-2">
               {report.studyTime.state === "value" ? (
                 <Card
@@ -510,6 +641,7 @@ export function TeacherReportBuilder() {
                 <MetricFallback metric={report.focus} title="이번 주 집중도" />
               )}
             </div>
+            ) : null}
 
             {/* 시험 기록이 없는 주는 항목 자체를 숨긴다(빈 카드를 늘어놓지 않는다). */}
             {report.exams.length > 0 ? (
@@ -565,8 +697,91 @@ export function TeacherReportBuilder() {
             </div>
           </div>
 
-          {/* ── 오른쪽: 과목 토글 · 시험 입력 · 발송 ── */}
+          {/* ── 오른쪽: 브랜딩 · 과목 토글 · 회차/시험 입력 · 발송 ── */}
           <div className="grid content-start gap-4">
+            {/* 쌤 브랜딩 — 값은 설정 화면이 저장한다. 리포트 상단에 이 이름이 들어간다. */}
+            {branding ? (
+              <div className="grid gap-2 rounded-card border border-line bg-surface p-5">
+                <h3 className="text-sm font-extrabold">쌤 브랜딩</h3>
+                <p className="text-xs font-bold text-muted">리포트 상단에 이름·소개가 들어가요.</p>
+                <div className="flex items-center gap-3 rounded-control border border-line p-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-ink text-sm font-extrabold text-surface">
+                    {branding.initial}
+                  </span>
+                  <span className="grid gap-0.5">
+                    <span className="text-sm font-extrabold text-ink">
+                      {branding.name}
+                      {branding.subjectLabel ? ` ${branding.subjectLabel}` : ""}
+                    </span>
+                    <span className="text-xs font-bold text-muted">{branding.bio ?? "소개가 아직 없어요."}</span>
+                  </span>
+                </div>
+                <a href="/settings" className="text-xs font-extrabold text-brand">
+                  설정에서 수정 →
+                </a>
+              </div>
+            ) : null}
+
+            {/* 발급 한도 — 보내려는 순간 막히면 늦으므로 미리 보여준다. */}
+            <div className="grid gap-2 rounded-card border border-line bg-surface p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold">이번 달 리포트</h3>
+                <span className={`text-xs font-extrabold ${quota.exceeded ? "text-danger" : "text-muted"}`}>
+                  {quota.label}
+                </span>
+              </div>
+              <div className="h-2 rounded-chip bg-canvas">
+                <div
+                  className={`h-2 rounded-chip ${quota.exceeded ? "bg-danger" : "bg-brand"}`}
+                  style={{ width: `${Math.min(100, Math.round((quota.used / quota.quota) * 100))}%` }}
+                />
+              </div>
+              {quota.notice ? (
+                <p className={`text-xs font-bold ${quota.exceeded ? "text-danger" : "text-muted"}`}>{quota.notice}</p>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2 rounded-card border border-line bg-surface p-5">
+              <h3 className="text-sm font-extrabold">수업 회차 기록</h3>
+              <p className="text-xs font-bold text-muted">
+                날짜만 있으면 돼요. 결석도 남겨야 학부모가 알 수 있어요.
+              </p>
+              <input
+                className="rounded-control border border-line px-3 py-2 text-sm"
+                onChange={(e) => setLessonForm((f) => ({ ...f, taught_on: e.target.value }))}
+                type="date"
+                value={lessonForm.taught_on}
+              />
+              <div className="flex gap-2">
+                {LESSON_STATUSES.map((s) => (
+                  <button
+                    key={s}
+                    className={`flex-1 rounded-control px-3 py-2 text-sm font-bold ${
+                      lessonForm.status === s ? "bg-brand text-surface" : "border border-line"
+                    }`}
+                    onClick={() => setLessonForm((f) => ({ ...f, status: s }))}
+                    type="button"
+                  >
+                    {LESSON_STATUS_LABELS[s]}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="rounded-control border border-line px-3 py-2 text-sm"
+                onChange={(e) => setLessonForm((f) => ({ ...f, memo: e.target.value }))}
+                placeholder="메모(선택)"
+                value={lessonForm.memo}
+              />
+              <button
+                className="rounded-control border border-brand px-4 py-2 text-sm font-extrabold text-brand disabled:opacity-50"
+                disabled={busy}
+                onClick={() => void addLesson()}
+                type="button"
+              >
+                회차 추가
+              </button>
+            </div>
+
             <div className="grid gap-2 rounded-card border border-line bg-surface p-5">
               <h3 className="text-sm font-extrabold">리포트에 넣을 과목</h3>
               {report.availableSubjects.length === 0 ? (
@@ -672,7 +887,7 @@ export function TeacherReportBuilder() {
                   className={`rounded-control px-4 py-2 text-sm font-extrabold disabled:opacity-50 ${
                     channel === "link" ? "bg-brand text-surface" : "border border-line text-ink"
                   }`}
-                  disabled={busy || !canSendReport(narrative)}
+                  disabled={busy || !canSendReport(narrative) || quota.exceeded}
                   onClick={() => void saveAndSend(channel)}
                   type="button"
                 >

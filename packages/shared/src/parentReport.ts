@@ -340,3 +340,167 @@ export const REPORT_DELIVERY_STATUS_LABELS: Record<ReportDeliveryStatus, string>
 export function isChannelWired(channel: ReportDeliveryChannel): boolean {
   return channel === "link";
 }
+
+// ── 수업 회차 ────────────────────────────────────────────────────────────────
+//
+// [결석을 왜 따로 세는가] 합치면 "8회 했다"가 거짓이 되고, 빼고 숨기면 학부모가 결석을 모른다.
+// 둘 다 사실이므로 둘 다 적는다 — "이번 달 6회 · 결석 1회".
+// canceled(쌤 사정·공휴일 등)는 학생 책임이 아니라 리포트에 내지 않는다(기록은 남는다).
+export const LESSON_STATUSES = ["done", "absent", "canceled"] as const;
+export type LessonStatus = (typeof LESSON_STATUSES)[number];
+
+export const LESSON_STATUS_LABELS: Record<LessonStatus, string> = {
+  done: "진행",
+  absent: "결석",
+  canceled: "취소"
+};
+
+export type LessonLike = { taught_on: string; status: string };
+
+export type LessonBlock = {
+  done: number;
+  absent: number;
+  /** 이번 달 예정 회차(lesson_fees.planned_sessions). 없으면 null — 임의로 목표를 만들지 않는다. */
+  planned: number | null;
+};
+
+/**
+ * 이번 달 회차 집계.
+ *
+ * ⚠️ 기록이 하나도 없으면 no_data 다. **0회로 표시하면 "수업을 안 했다"가 되는데**,
+ *    실제로는 과외쌤이 아직 안 적은 것일 수 있다. 다른 지표와 같은 원칙이다.
+ *    회차는 공개범위 대상이 아니다 — 과외쌤 자신의 기록이다.
+ */
+export function buildLessonBlock(
+  lessons: LessonLike[],
+  plannedSessions: number | null | undefined
+): ReportMetric<LessonBlock> {
+  if (lessons.length === 0) return NO_DATA;
+  const done = lessons.filter((l) => l.status === "done").length;
+  const absent = lessons.filter((l) => l.status === "absent").length;
+  // 취소만 기록된 달은 "진행 0회"가 사실이다(취소도 적었다는 뜻이므로 기록은 있다).
+  return metricValue({ done, absent, planned: plannedSessions ?? null });
+}
+
+/** 리포트·대시보드 공통 문구. "6회" / "6회 · 결석 1회" / "6/8회 · 결석 1회" */
+export function describeLessonBlock(block: LessonBlock): string {
+  const base = block.planned !== null ? `${block.done}/${block.planned}회` : `${block.done}회`;
+  return block.absent > 0 ? `${base} · 결석 ${block.absent}회` : base;
+}
+
+// ── 쌤 브랜딩 ────────────────────────────────────────────────────────────────
+//
+// 리포트 상단에 들어가는 과외쌤 이름·소개. 값은 profiles 에 이미 있다(설정 화면에서 저장).
+// 여기서 형태를 고정해 두면 학부모 웹뷰·PDF 가 같은 구조를 그대로 쓴다.
+export type TeacherBranding = {
+  name: string;
+  initial: string;
+  bio: string | null;
+  subjects: SubjectCode[];
+  subjectLabel: string | null;
+};
+
+export function buildTeacherBranding(
+  profile: { name?: string | null; bio?: string | null; subjects?: SubjectCode[] | null } | null | undefined
+): TeacherBranding {
+  const name = (profile?.name ?? "").trim() || "선생님";
+  const subjects = profile?.subjects ?? [];
+  return {
+    name,
+    // 아바타 대체 글자. 이름이 비어도 화면이 깨지지 않게 항상 한 글자를 만든다.
+    initial: name.slice(0, 1),
+    bio: (profile?.bio ?? "").trim() || null,
+    subjects,
+    subjectLabel: subjects.length > 0 ? subjects.map((s) => SUBJECT_LABELS[s]).join("·") : null
+  };
+}
+
+// ── 요금제 게이팅 (과외쌤 구독) ──────────────────────────────────────────────
+//
+// ⚠️ **학생 프리미엄과 다른 것이다.** 이건 과외쌤이 우리에게 내는 앱 구독료
+//    (teacher_subscriptions)이고, 판정은 기존 getTeacherBillingState(status).active 를 쓴다.
+//
+// [무료가 못 하는 것] 자동 그래프다. 리포트를 만들고 보내는 것 자체는 막지 않는다 —
+//   막으면 제품의 핵심 가치가 사라지고, 원가도 안 드는 걸 막는 셈이다.
+//   유료는 학생 데이터가 자동으로 그려지고, 무료는 과외쌤이 직접 쓴 글로만 보낸다.
+export type ReportGraphMode = "auto" | "manual";
+
+export type ReportGating = {
+  mode: ReportGraphMode;
+  /** 자동 그래프를 볼 수 있는가. false 면 자동 수집 카드를 리포트에 넣지 않는다. */
+  autoGraphs: boolean;
+  label: string;
+  notice: string;
+};
+
+export function getReportGating(subscriptionActive: boolean): ReportGating {
+  if (subscriptionActive) {
+    return {
+      mode: "auto",
+      autoGraphs: true,
+      label: "자동 그래프",
+      notice: "학생 데이터가 자동으로 그려져요."
+    };
+  }
+  return {
+    mode: "manual",
+    autoGraphs: false,
+    label: "수기 기록",
+    notice: "무료 플랜은 자동 그래프 없이 직접 쓴 코멘트로 보내요. 구독하면 공부량·수행률 그래프가 리포트에 들어가요."
+  };
+}
+
+// ── 발급 한도 ────────────────────────────────────────────────────────────────
+//
+// 리포트 생성은 AI 를 쓰지 않아 원가가 사실상 0 이다. 그래서 한도는 **비용이 아니라 남용 방지**다
+// (발송은 공개 URL 토큰을 만든다 — 안 막으면 토큰을 무한히 찍을 수 있다).
+//
+// 정상 사용의 상한은 "학생 1명당 주 1회"(월 약 4.3회)다. 고쳐 보내는 경우까지 감안해
+// 학생당 월 8회로 잡고, 학생이 적은 과외쌤도 시험해 볼 수 있게 최소 30건을 보장한다.
+// 고정값으로 두면 학생이 12명만 넘어도 정상 사용이 막힌다.
+//
+// ⚠️ DB 트리거(enforce_report_quota)와 **같은 규칙**이어야 한다. 화면 계산만 있으면
+//    PostgREST 직접 호출로 우회된다. 스키마 테스트가 두 값을 대조한다.
+export const REPORT_QUOTA_PER_STUDENT = 8;
+export const REPORT_QUOTA_FLOOR = 30;
+
+export function reportMonthlyQuota(activeStudentCount: number): number {
+  const scaled = Math.max(0, Math.trunc(activeStudentCount)) * REPORT_QUOTA_PER_STUDENT;
+  return Math.max(REPORT_QUOTA_FLOOR, scaled);
+}
+
+export type ReportQuotaState = {
+  used: number;
+  quota: number;
+  remaining: number;
+  exceeded: boolean;
+  /** 남은 개수가 적을 때 미리 알린다 — 보내려는 순간 막히면 늦다. */
+  nearLimit: boolean;
+  label: string;
+  notice: string | null;
+};
+
+export function getReportQuotaState(used: number, activeStudentCount: number): ReportQuotaState {
+  const quota = reportMonthlyQuota(activeStudentCount);
+  const remaining = Math.max(0, quota - used);
+  const exceeded = used >= quota;
+  const nearLimit = !exceeded && remaining <= 5;
+  return {
+    used,
+    quota,
+    remaining,
+    exceeded,
+    nearLimit,
+    label: `발급 ${used} / ${quota}건`,
+    notice: exceeded
+      ? `이번 달 발급 한도(${quota}건)를 다 썼어요. 다음 달 1일에 다시 채워져요. 이미 보낸 리포트는 그대로 볼 수 있어요.`
+      : nearLimit
+        ? `이번 달 ${remaining}건 남았어요.`
+        : null
+  };
+}
+
+/** DB 가 돌려주는 한도 초과 오류를 사용자 문구로. 원문은 'report_monthly_quota_exceeded' 다. */
+export function isReportQuotaError(message: string | null | undefined): boolean {
+  return (message ?? "").includes("report_monthly_quota_exceeded");
+}
