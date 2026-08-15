@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useRouter } from "expo-router";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { formatInviteCode, type Database } from "@ssamplanner/shared";
 
 import { useAuth } from "./auth";
 import { getInviteExpiry } from "./connectionExpiry";
+import { managementStyles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
 import { PrimaryButton, screenStyles } from "./ui";
 
@@ -15,6 +17,7 @@ function generateCode() {
 }
 
 export function InviteCodeScreen() {
+  const router = useRouter();
   const { session, setMessage } = useAuth();
   const [invite, setInvite] = useState<InviteCode | null>(null);
 
@@ -57,6 +60,13 @@ export function InviteCodeScreen() {
         {expiry?.state === "expired" ? <Text>만료된 코드입니다. 새 코드를 발급해 주세요.</Text> : null}
       </View>
       <PrimaryButton onPress={() => void createInvite()}>새 코드 발급</PrimaryButton>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => router.push("/students/requests")}
+        style={managementStyles.secondaryButton}
+      >
+        <Text style={managementStyles.secondaryButtonText}>연결 요청 보기</Text>
+      </Pressable>
     </ScrollView>
   );
 }

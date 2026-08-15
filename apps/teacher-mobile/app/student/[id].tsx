@@ -1,7 +1,118 @@
-import { useLocalSearchParams } from "expo-router";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
 import { colors, spacing } from "@ssamplanner/design-tokens";
+
+import { managementStyles } from "../../src/managementStyles";
 import { useTeacherStudents } from "../../src/teacherData";
 import { EmptyState, screenStyles } from "../../src/ui";
-export default function StudentDetail(){const {id}=useLocalSearchParams<{id:string}>();const {students,loading}=useTeacherStudents();if(loading)return null;const s=students.find(x=>x.id===id);if(!s)return <View style={screenStyles.content}><EmptyState title="학생을 찾을 수 없어요" body="연결 상태를 확인해 주세요."/></View>;const shared=s.disclosure?.share_study_time;return <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}><Text style={screenStyles.heading}>{s.name}</Text><Text style={screenStyles.subtitle}>{s.grade??"학년 미설정"} · 공개 범위 안에서만 표시해요.</Text><View style={styles.tabs}><Text style={styles.active}>요약</Text><Text style={styles.tab}>플랜·숙제</Text><Text style={styles.tab}>공부 기록</Text><Text style={styles.tab}>약점</Text></View>{!shared?<EmptyState title="학생이 공부 기록을 공개하지 않았어요" body="공개 범위가 변경되면 이 화면에 주간 공부시간과 과목별 수행률이 표시돼요."/>:<><View style={styles.card}><Text style={styles.title}>주간 공부시간</Text><Text style={styles.big}>{Math.floor(s.weekMinutes/60)}시간 {s.weekMinutes%60}분</Text></View><View style={styles.card}><Text style={styles.title}>숙제 제출</Text><Text style={styles.big}>{s.submittedCount}건</Text><Text style={styles.note}>AI 판정은 표시하지 않고 제출 여부만 보여요.</Text></View></>}</ScrollView>}
-const styles=StyleSheet.create({tabs:{flexDirection:"row",gap:8,flexWrap:"wrap"},active:{backgroundColor:colors.ink,color:colors.surface,borderRadius:99,paddingHorizontal:15,paddingVertical:9,fontWeight:"900"},tab:{backgroundColor:colors.surface,color:colors.muted,borderRadius:99,paddingHorizontal:15,paddingVertical:9,fontWeight:"800"},card:{backgroundColor:colors.surface,borderRadius:18,padding:spacing.xl,gap:8},title:{fontSize:20,fontWeight:"900",color:colors.ink},big:{fontSize:29,fontWeight:"900",color:colors.brand},note:{color:colors.muted,fontWeight:"600"}});
+
+export default function StudentDetail() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const { students, loading } = useTeacherStudents();
+
+  if (loading) return null;
+
+  const student = students.find((item) => item.id === id);
+  if (!student) {
+    return (
+      <View style={screenStyles.content}>
+        <EmptyState title="학생을 찾을 수 없어요" body="연결 상태를 확인해 주세요." />
+      </View>
+    );
+  }
+
+  const studyTimeShared = student.disclosure?.share_study_time === true;
+
+  return (
+    <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+      <Text style={screenStyles.heading}>{student.name}</Text>
+      <Text style={screenStyles.subtitle}>
+        {student.grade ?? "학년 미설정"} · 공개 범위 안에서만 표시해요.
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        style={managementStyles.secondaryButton}
+        onPress={() => router.push({
+          pathname: "/students/settings",
+          params: { connectionId: student.connection.id }
+        })}
+      >
+        <Text style={managementStyles.secondaryButtonText}>학생별 설정</Text>
+      </Pressable>
+
+      <View style={styles.tabs}>
+        <Text style={styles.active}>요약</Text>
+        <Text style={styles.tab}>플랜·숙제</Text>
+        <Text style={styles.tab}>공부 기록</Text>
+        <Text style={styles.tab}>약점</Text>
+      </View>
+
+      {!studyTimeShared ? (
+        <EmptyState
+          title="학생이 공부 기록을 공개하지 않았어요"
+          body="공개 범위가 변경되면 이 화면에 주간 공부시간과 과목별 수행률이 표시돼요."
+        />
+      ) : (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.title}>주간 공부시간</Text>
+            <Text style={styles.big}>
+              {Math.floor(student.weekMinutes / 60)}시간 {student.weekMinutes % 60}분
+            </Text>
+          </View>
+          <View style={styles.card}>
+            <Text style={styles.title}>숙제 제출</Text>
+            <Text style={styles.big}>{student.submittedCount}건</Text>
+            <Text style={styles.note}>AI 판정은 표시하지 않고 제출 여부만 보여요.</Text>
+          </View>
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  active: {
+    backgroundColor: colors.ink,
+    borderRadius: 99,
+    color: colors.surface,
+    fontWeight: "900",
+    paddingHorizontal: 15,
+    paddingVertical: 9
+  },
+  big: {
+    color: colors.brand,
+    fontSize: 29,
+    fontWeight: "900"
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    gap: 8,
+    padding: spacing.xl
+  },
+  note: {
+    color: colors.muted,
+    fontWeight: "600"
+  },
+  tab: {
+    backgroundColor: colors.surface,
+    borderRadius: 99,
+    color: colors.muted,
+    fontWeight: "800",
+    paddingHorizontal: 15,
+    paddingVertical: 9
+  },
+  tabs: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  title: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900"
+  }
+});
