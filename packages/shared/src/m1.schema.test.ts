@@ -47,10 +47,9 @@ describe("대기 중인 연결 요청의 학생 이름 RPC", () => {
   it("RLS 를 넓히지 않는다 — profiles 정책은 여전히 active 만 허용한다", () => {
     // pending 을 정책에 넣으면 birth_date·target_univ 까지 통째로 열린다.
     expect(schema).toContain("create policy profiles_connected_read on profiles for select using (");
-    const policy = schema.slice(
-      schema.indexOf("create policy profiles_connected_read"),
-      schema.indexOf("create policy profiles_connected_read") + 400
-    );
+    // 고정 길이로 자르면 줄바꿈(CRLF/LF)에 따라 창이 뒤 문단까지 넘어간다 — 문장 끝까지만 본다.
+    const start = schema.indexOf("create policy profiles_connected_read");
+    const policy = schema.slice(start, schema.indexOf(");", start) + 2);
     expect(policy).toContain("c.status='active'");
     expect(policy).not.toContain("pending");
   });
