@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { AI_CHECK_RESULTS_ENABLED } from "./featureFlags";
+import { PRICE_STUDENT_PREMIUM_KRW } from "./pricing";
 import {
   AI_CHECK_LIMITS,
   ANTHROPIC_CHECK_ERROR_CODES,
@@ -500,7 +501,10 @@ describe("M4 AI check limits rebalance", () => {
     const worstKrw =
       (AI_CHECK_LIMITS.maxPerWindow * perCallMicros + AI_CHECK_LIMITS.maxPhotosPerWindow * perPhotoMicros) *
       KRW_PER_MICRO_USD;
-    expect(worstKrw).toBeLessThanOrEqual(2900 * 0.3);
+    // 매출은 상수에서 가져온다 — 가격이 바뀌면 예산도 함께 움직여야 하는데,
+    // 2900 을 박아 두면 인상 후에도 옛 예산으로 검사하게 된다(2026-08-10 인상 때 발견).
+    // 한도 자체는 이 PR 에서 건드리지 않는다 — 인상으로 여유가 생겼을 뿐이다(별도 재산정 대상).
+    expect(worstKrw).toBeLessThanOrEqual(PRICE_STUDENT_PREMIUM_KRW * 0.3);
   });
 
   it("checks the window limits before the daily limit", () => {

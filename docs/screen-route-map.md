@@ -105,7 +105,7 @@
 | — | 비밀번호 재설정 | `/reset` | — | auth |
 | — | 약관·개인정보 뷰어 | `/legal/[doc]` | — | (약관) |
 | — | 회원 탈퇴 | `/settings/account/delete` | 확인 | auth, cascade |
-| — | 구독·결제(앱 구독료) | `/billing` | active 학생×₩2,900 | teacher_subscriptions, billing_invoices |
+| — | 구독·결제(앱 구독료) | `/billing` | active 학생×₩4,900 | teacher_subscriptions, billing_invoices |
 | — | 구독 결제 실패·미납 | `/billing` | dunning 상태 | billing_invoices(past_due) |
 | — | 구독 해지·일시정지 | `/billing/cancel` | — | teacher_subscriptions(canceled/paused) |
 | — | 수업·수업료 관리 | `/lesson-fees` | **수기 트래커(결제 아님)** | lesson_fees |

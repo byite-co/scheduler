@@ -120,6 +120,58 @@ describe("회원 탈퇴를 막지 않는 FK", () => {
     }
   });
 
+  it("탈퇴하면 Storage 사진 정리가 대기열에 반드시 남는다", () => {
+    // delete_my_account 는 DB 만 지운다. Storage 파일은 Postgres 트랜잭션에서 못 지운다.
+    // Edge Function 을 안 거치고 RPC 만 불러도 트리거가 대기열에 남겨야 조용히 새지 않는다.
+    const purge = readFileSync(
+      new URL("../../../supabase/migrations/20260810000000_account_storage_purge.sql", import.meta.url),
+      "utf8"
+    );
+    for (const source of [schema, purge]) {
+      expect(source).toContain("create table if not exists storage_purge_queue");
+      expect(source).toContain("create trigger enqueue_storage_purge_on_profile_delete_trigger");
+      expect(source).toContain("before delete on profiles");
+      // 대기열이 profiles 를 참조하면 계정과 함께 사라져서 존재 의미가 없다.
+      // (notifications 등 다른 테이블에는 그 FK 가 정상적으로 있으므로 이 표 안에서만 본다.)
+      const table = source.slice(
+        source.indexOf("create table if not exists storage_purge_queue"),
+        source.indexOf("create index if not exists storage_purge_queue_pending_idx")
+      );
+      expect(table.length).toBeGreaterThan(100);
+      expect(table).not.toMatch(/references\s+profiles/);
+      // 남의 파일을 지우지 않는 유일한 기준 — DB 에서 강제한다.
+      expect(source).toContain("check (prefix = user_id::text || '/')");
+      // 조회·기록 함수는 service_role 전용이어야 한다.
+      for (const fn of ["storage_paths_for_prefix", "complete_storage_purge"]) {
+        expect(source, fn).toMatch(new RegExp(`revoke all on function ${fn}\\([^)]*\\) from authenticated`));
+        expect(source, fn).toMatch(new RegExp(`grant execute on function ${fn}\\([^)]*\\) to service_role`));
+      }
+    }
+    // 클라이언트가 대기열을 읽거나 쓰면 탈퇴한 사용자의 흔적이 노출된다 → 정책 0개.
+    expect(schema).toContain("alter table storage_purge_queue enable row level security");
+    expect(schema).not.toMatch(/create policy \w+ on storage_purge_queue/);
+  });
+
+  it("탈퇴 화면이 RPC 를 직접 부르지 않는다 — 부르면 사진이 남는다", () => {
+    const fn = readFileSync(
+      new URL("../../../supabase/functions/account-delete/index.ts", import.meta.url),
+      "utf8"
+    );
+    // 파일 → 계정 순서. 그리고 계정 삭제는 **호출자 권한**이어야 auth.uid() 가 맞는다.
+    expect(fn).toContain('asUser.rpc("delete_my_account")');
+    expect(fn).toContain("assertScoped");
+    expect(fn).toContain("scope_violation");
+
+    for (const [label, path] of [
+      ["학생", "../../../apps/student/src/m7Screens.tsx"],
+      ["과외쌤", "../../../apps/teacher/src/app/m7.tsx"]
+    ] as const) {
+      const screen = readFileSync(new URL(path, import.meta.url), "utf8");
+      expect(screen, label).toContain('supabase.functions.invoke("account-delete"');
+      expect(screen, label).not.toContain('supabase.rpc("delete_my_account")');
+    }
+  });
+
   it("todos.created_by 의 NOT NULL 을 푼다 — 안 풀면 SET NULL 을 걸 수 없다", () => {
     expect(fkMigrations).toContain("alter table todos alter column created_by drop not null");
     expect(schema).not.toMatch(/created_by\s+uuid not null references profiles/);

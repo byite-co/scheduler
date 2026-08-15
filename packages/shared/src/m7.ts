@@ -88,6 +88,24 @@ export function getNotificationRoute(notification: NotificationLike): string {
   }
 }
 
+/**
+ * 회원 탈퇴 실패 안내. account-delete Edge Function 이 돌려주는 오류를 사용자 문구로 옮긴다.
+ *
+ * 원문(Supabase FunctionsError)에는 스택·내부 메시지가 섞여 있어 그대로 보여주면
+ * 사용자가 무엇을 해야 할지 알 수 없다. **기존 export 는 건드리지 않고 새로 추가한 것이다.**
+ */
+export function getAccountDeleteErrorMessage(error: { message?: string } | null | undefined): string {
+  const raw = error?.message ?? "";
+  if (/unauthenticated|missing_authorization|401/i.test(raw)) {
+    return "로그인이 만료됐어요. 다시 로그인한 뒤 시도해 주세요.";
+  }
+  if (/network|fetch|timeout/i.test(raw)) {
+    return "연결이 불안정해요. 잠시 후 다시 시도해 주세요.";
+  }
+  // 사진 정리는 실패해도 계정 삭제는 진행된다(207). 여기 오는 건 계정 삭제 자체의 실패다.
+  return "탈퇴 처리 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.";
+}
+
 // 푸시 권한 프라이밍 상태 — 거부해도 기능은 막지 않는다.
 export type PushPermissionStatus = "undetermined" | "granted" | "denied";
 

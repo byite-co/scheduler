@@ -35,8 +35,20 @@ describe("M6 billing schema coverage", () => {
   });
 
   it("keeps the SQL price source in sync with the TS constant", () => {
+    // 청구 금액은 서버가 계산한다(active_count * price_per_student_krw()).
+    // TS 만 바꾸면 화면 금액과 실제 청구가 어긋난다 → 두 값을 대조한다.
+    //
+    // ⚠️ 대조 대상은 **현재 상태(schema.sql)와 최신 가격 마이그레이션**이다.
+    //    적용된 마이그레이션은 불변이라 20260626000000 은 최초 단가를 그대로 둔다 —
+    //    그 파일까지 검사하면 가격을 올릴 때마다 역사 파일을 고치게 된다.
+    const pricingMigration = readFileSync(
+      new URL("../../../supabase/migrations/20260810010000_pricing_increase.sql", import.meta.url),
+      "utf8"
+    );
     expect(schema).toContain(`select ${PRICE_PER_STUDENT_KRW}`);
-    expect(migration).toContain(`select ${PRICE_PER_STUDENT_KRW}`);
+    expect(pricingMigration).toContain(`select ${PRICE_PER_STUDENT_KRW}`);
+    // 최초 마이그레이션은 단가 함수를 "만드는" 책임만 진다(값 갱신은 이후 마이그레이션).
+    expect(migration).toContain("create or replace function price_per_student_krw");
   });
 
   it("marks webhook stand-ins as dev mocks to be replaced by edge functions", () => {
