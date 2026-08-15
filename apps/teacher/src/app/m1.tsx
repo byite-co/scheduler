@@ -159,8 +159,45 @@ function useRequireOnboarding(data: TeacherData) {
 
 type DashboardStudent = { id: string; name: string; minutes: number };
 
+// active 연결 학생의 이름. RLS(profiles_connected_read)가 active 만 허용하므로 여기 담기는 건
+// 전부 과외쌤이 볼 수 있는 이름이다. 학생을 고르는 화면은 전부 이걸 쓴다 —
+// 이름을 안 붙이면 UUID 앞자리가 그대로 노출되고 누가 누군지 구분할 수 없다.
+function useActiveStudentNames(connections: ConnectionRow[]): Map<string, string> {
+  const [names, setNames] = useState<Map<string, string>>(new Map());
+  const idKey = connections
+    .filter((c) => c.status === "active")
+    .map((c) => c.student_id)
+    .join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const ids = idKey ? idKey.split(",") : [];
+      if (!ids.length) {
+        if (!cancelled) setNames(new Map());
+        return;
+      }
+      const { data } = await supabase.from("profiles").select("id, name").in("id", ids);
+      if (cancelled) return;
+      setNames(new Map((data ?? []).map((p) => [p.id, (p.name ?? "").trim()])));
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [idKey]);
+
+  return names;
+}
+
+// 이름이 비어 있을 때만 식별자 일부를 폴백으로. 빈 칸으로 두면 행이 깨진 것처럼 보인다.
+function studentLabel(names: Map<string, string>, studentId: string): string {
+  return names.get(studentId) || `학생 ${shortId(studentId)}`;
+}
+
 function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] {
   const [students, setStudents] = useState<DashboardStudent[]>([]);
+  const names = useActiveStudentNames(connections);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,17 +213,14 @@ function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] 
       const since = `${weekStart.toISOString().slice(0, 10)}T00:00:00.000Z`;
 
       // 공개범위 게이팅 뷰(v_teacher_study_sessions)만 읽는다 — RLS/데이터 무변경.
-      const [profilesRes, sessionsRes] = await Promise.all([
-        supabase.from("profiles").select("id, name").in("id", ids),
-        supabase
-          .from("v_teacher_study_sessions")
-          .select("student_id, duration_sec, started_at")
-          .in("student_id", ids)
-          .gte("started_at", since)
-      ]);
+      // 이름은 useActiveStudentNames 가 이미 가져온다(같은 조회를 두 번 하지 않는다).
+      const sessionsRes = await supabase
+        .from("v_teacher_study_sessions")
+        .select("student_id, duration_sec, started_at")
+        .in("student_id", ids)
+        .gte("started_at", since);
       if (cancelled) return;
 
-      const nameById = new Map((profilesRes.data ?? []).map((p) => [p.id, p.name]));
       const minutesById = new Map<string, number>();
       for (const row of sessionsRes.data ?? []) {
         const sid = row.student_id;
@@ -199,8 +233,7 @@ function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] 
         ids
           .map((id) => ({
             id,
-            // 이름이 있으면 이름, 비어 있을 때만 식별자 일부를 폴백으로.
-            name: (nameById.get(id) ?? "").trim() || `학생 ${shortId(id)}`,
+            name: studentLabel(names, id),
             minutes: minutesById.get(id) ?? 0
           }))
           .sort((a, b) => a.minutes - b.minutes)
@@ -210,7 +243,7 @@ function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] 
     return () => {
       cancelled = true;
     };
-  }, [connections]);
+  }, [connections, names]);
 
   return students;
 }
@@ -1147,6 +1180,7 @@ function ConnectionList({ data, status }: { data: TeacherData; status: M1Connect
 
 function StudentSettingsPanel({ data }: { data: TeacherData }) {
   const activeConnections = data.connections.filter((connection) => connection.status === "active");
+  const studentNames = useActiveStudentNames(data.connections);
   const [selectedId, setSelectedId] = useState("");
   const selected = activeConnections.find((connection) => connection.id === selectedId) ?? activeConnections[0];
   const setting = data.settings.find((row) => row.connection_id === selected?.id);
@@ -1186,7 +1220,7 @@ function StudentSettingsPanel({ data }: { data: TeacherData }) {
           <select className="h-11 rounded-control border border-line bg-canvas px-3 text-sm font-semibold text-ink" value={selected?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)}>
             {activeConnections.map((connection) => (
               <option key={connection.id} value={connection.id}>
-                {shortId(connection.student_id)}
+                {studentLabel(studentNames, connection.student_id)}
               </option>
             ))}
           </select>

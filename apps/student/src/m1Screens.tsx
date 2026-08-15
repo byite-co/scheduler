@@ -10,6 +10,7 @@ import {
   DEFAULT_DISCLOSURE_SCOPE,
   canCompleteStudentSignup,
   canRequestConnectionAgain,
+  formatConnectionTeacherLabel,
   formatInviteCode,
   getMissingStudentSignupSteps,
   normalizeInviteCode,
@@ -96,6 +97,8 @@ function useStudentData() {
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [disclosures, setDisclosures] = useState<DisclosureRow[]>([]);
+  // active 연결의 쌤 이름. RLS 가 active 만 허용하므로 pending/rejected 는 담기지 않는다.
+  const [teacherNames, setTeacherNames] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("세션 확인 중");
 
@@ -107,6 +110,7 @@ function useStudentData() {
       setProfile(null);
       setConnections([]);
       setDisclosures([]);
+      setTeacherNames(new Map());
       setMessage("가입 또는 로그인이 필요합니다.");
       setLoading(false);
       return;
@@ -125,6 +129,20 @@ function useStudentData() {
 
     setProfile(profileResult.data);
     setConnections(connectionsResult.data ?? []);
+
+    const activeTeacherIds = [
+      ...new Set(
+        (connectionsResult.data ?? [])
+          .filter((connection) => connection.status === "active")
+          .map((connection) => connection.teacher_id)
+      )
+    ];
+    if (activeTeacherIds.length) {
+      const teacherResult = await supabase.from("profiles").select("id, name").in("id", activeTeacherIds);
+      setTeacherNames(new Map((teacherResult.data ?? []).map((row) => [row.id, (row.name ?? "").trim()])));
+    } else {
+      setTeacherNames(new Map());
+    }
 
     const connectionIds = (connectionsResult.data ?? []).map((connection) => connection.id);
     if (connectionIds.length) {
@@ -154,6 +172,7 @@ function useStudentData() {
     session,
     profile,
     connections,
+    teacherNames,
     disclosures,
     loading,
     message,
@@ -488,7 +507,11 @@ export function StudentConnectStatusScreen() {
       {data.connections.length ? (
         <StepList
           steps={data.connections.map((connection) => [
-            connection.invite_code ? formatInviteCode(connection.invite_code) : connection.id.slice(0, 8),
+            // 연결 ID 앞자리를 찍던 자리다 — 학생에게 아무 의미 없는 문자열이었다.
+            formatConnectionTeacherLabel({
+              teacherName: data.teacherNames.get(connection.teacher_id),
+              inviteCode: connection.invite_code
+            }),
             connection.status
           ])}
         />

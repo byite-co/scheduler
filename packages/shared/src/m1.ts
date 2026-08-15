@@ -331,3 +331,24 @@ export function indexPendingRequests(
 ): Map<string, PendingConnectionRequest> {
   return new Map((rows ?? []).map((row) => [row.connection_id, row]));
 }
+
+/**
+ * 학생 앱에서 연결 상대(과외쌤)를 부르는 이름표.
+ *
+ * profiles RLS 는 양방향 모두 active 만 허용한다. 그래서 **수락 전에는 학생도 쌤 이름을
+ * 읽을 수 없다.** 그 자리에 연결 ID 앞자리를 찍으면 학생에게는 아무 의미 없는 문자열이다.
+ * 대신 학생이 직접 입력한 초대 코드를 보여 주고, 코드조차 없으면 왜 이름이 없는지 말한다.
+ *
+ * (과외쌤 쪽과 달리 여기엔 전용 RPC 를 두지 않았다. 학생은 쌤이 준 코드를 입력해서 요청하므로
+ *  상대가 누구인지 이미 안다 — 모르는 상대의 요청을 받는 과외쌤 쪽과는 상황이 다르다.)
+ */
+export function formatConnectionTeacherLabel(input: {
+  teacherName?: string | null;
+  inviteCode?: string | null;
+}): string {
+  const name = (input.teacherName ?? "").trim();
+  if (name) return `${name} 선생님`;
+  const code = (input.inviteCode ?? "").trim();
+  if (code) return formatInviteCode(code);
+  return "수락 후 이름이 보여요";
+}

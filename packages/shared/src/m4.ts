@@ -411,6 +411,41 @@ export type HomeworkCheckGateErrorCode = (typeof HOMEWORK_CHECK_GATE_ERROR_CODES
 
 export type HomeworkCheckErrorCode = AnthropicCheckErrorCode | HomeworkCheckGateErrorCode;
 
+/**
+ * AI 검사 사용량 한도. **DB 가 최종 권위**다(ai_check_max_* 함수).
+ * 여기 값은 안내 문구·테스트를 위한 사본이고, 스키마 테스트가 마이그레이션과 대조한다.
+ */
+export const AI_CHECK_LIMITS = {
+  windowDays: 30,
+  maxPerSubmission: 3,
+  maxPerDay: 8,
+  // 20260816000000 재산정: 70 → 40 / 280 → 100.
+  // 결제액이 아니라 실수령액(부가세 10% + 스토어 15% / PG 3% 제외) 기준으로 다시 잡았고,
+  // 관찰 프롬프트 + 4분할로 사진 1장 원가가 약 3.5배가 된 것을 반영했다.
+  maxPerWindow: 40,
+  maxPhotosPerWindow: 100
+} as const;
+
+/**
+ * AI 검사 원가 모델(µ$). 한도 산정과 예산 테스트가 같은 숫자를 쓰게 한다.
+ * 지금 **실제로 도는 것** = Haiku 4.5 + 관찰 프롬프트(2,892토큰) + 4분할·10% 겹침.
+ * 사진 1장이 1,568px 조각 4장이 되므로 사진 항이 원가를 지배한다.
+ *
+ * (Gemini 무분할이면 장당 약 0.6원이라 같은 한도가 예산의 9% 밖에 안 된다.
+ *  모델이 확정되면 이 상수를 바꾸고 한도를 되돌리면 된다 — 지금은 도는 쪽에 맞춘다.)
+ */
+export const AI_CHECK_COST_MODEL = {
+  /** 프롬프트 + 출력 (입력 $1/Mtok · 출력 $5/Mtok) */
+  perCallMicroUsd: 2892 + 130 * 5,
+  /** 4조각 × 1,600토큰 */
+  perPhotoMicroUsd: 4 * 1600,
+  krwPerMicroUsd: 1370 / 1_000_000,
+  /** 실측(15.2원/장)이 토큰 계산(13.6원)보다 높다 — 출력이 더 길었다. 그만큼 여유를 둔다. */
+  measurementMargin: 1.15,
+  /** 원가 예산은 실수령액의 30%. 두 결제 경로 중 **낮은 쪽**(과외쌤)에 맞춘다. */
+  budgetShare: 0.3
+} as const;
+
 export const HOMEWORK_CHECK_ERROR_MESSAGES: Record<HomeworkCheckErrorCode, string> = {
   photos_missing: "올린 사진을 찾지 못했어요. 사진을 다시 올려 제출해 주세요.",
   photo_download_failed: "사진을 읽는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.",
@@ -427,14 +462,13 @@ export const HOMEWORK_CHECK_ERROR_MESSAGES: Record<HomeworkCheckErrorCode, strin
   premium_required: "혼자 만든 할 일의 AI 검사는 프리미엄에서 쓸 수 있어요. 제출은 저장됐어요.",
   connection_required: "선생님과 연결되면 AI 검사를 쓸 수 있어요. 제출은 저장됐어요.",
 
-  // ── 사용량 한도 ── 왜 막혔는지와 언제 다시 되는지를 함께 알려준다.
-  check_limit_submission_exceeded:
-    "이 제출은 검사 횟수를 모두 사용했어요. 사진을 다시 찍어 새로 제출하면 검사할 수 있어요.",
-  check_limit_daily_exceeded: "오늘 검사 횟수를 모두 사용했어요. 내일 다시 시도해 주세요. 제출은 저장됐어요.",
-  check_limit_monthly_exceeded:
-    "최근 30일 검사 횟수를 모두 사용했어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
-  check_limit_photos_monthly_exceeded:
-    "최근 30일 검사 사진 장수를 모두 사용했어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.",
+  // ── 사용량 한도 ── 왜 막혔는지·얼마가 상한인지·언제 다시 되는지를 함께 알려준다.
+  // 숫자를 빼면 "모두 사용했어요"만 남아서 사용자가 뭘 얼마나 썼는지 알 수 없다.
+  // 한도가 40회/100장으로 줄어 이전보다 자주 닿으므로 더더욱 숫자를 밝힌다.
+  check_limit_submission_exceeded: `이 제출은 검사 횟수(${AI_CHECK_LIMITS.maxPerSubmission}회)를 모두 사용했어요. 사진을 다시 찍어 새로 제출하면 검사할 수 있어요.`,
+  check_limit_daily_exceeded: `오늘 검사 횟수(${AI_CHECK_LIMITS.maxPerDay}회)를 모두 사용했어요. 내일 다시 시도해 주세요. 제출은 저장됐어요.`,
+  check_limit_monthly_exceeded: `최근 ${AI_CHECK_LIMITS.windowDays}일 검사 횟수(${AI_CHECK_LIMITS.maxPerWindow}회)를 모두 사용했어요. 가장 먼저 쓴 검사가 ${AI_CHECK_LIMITS.windowDays}일을 지나면 다시 쓸 수 있어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.`,
+  check_limit_photos_monthly_exceeded: `최근 ${AI_CHECK_LIMITS.windowDays}일 검사 사진(${AI_CHECK_LIMITS.maxPhotosPerWindow}장)을 모두 사용했어요. 한 번에 올리는 사진을 줄이면 더 오래 쓸 수 있어요. 제출은 저장됐고, 선생님이 직접 확인해 주실 거예요.`,
 
   // ── 구조적 전제 ──
   check_already_in_progress: "이미 검사가 진행 중이에요. 잠시 후 결과를 확인해 주세요.",
@@ -442,18 +476,6 @@ export const HOMEWORK_CHECK_ERROR_MESSAGES: Record<HomeworkCheckErrorCode, strin
   scope_text_required: "검사할 범위가 없어요. 선생님께 범위를 확인해 주세요. 제출은 저장됐어요.",
   submission_not_found: "제출을 찾지 못했어요. 다시 제출해 주세요."
 };
-
-/**
- * AI 검사 사용량 한도. **DB 가 최종 권위**다(ai_check_max_* 함수).
- * 여기 값은 안내 문구·테스트를 위한 사본이고, 스키마 테스트가 마이그레이션과 대조한다.
- */
-export const AI_CHECK_LIMITS = {
-  windowDays: 30,
-  maxPerSubmission: 3,
-  maxPerDay: 8,
-  maxPerWindow: 70,
-  maxPhotosPerWindow: 280
-} as const;
 
 /**
  * 숙제 사진 업로드 한도. **DB 가 최종 권위**다(homework_photo_quota_* 함수).

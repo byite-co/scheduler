@@ -9,6 +9,31 @@
 export const PRICE_STUDENT_PREMIUM_KRW = 8900;
 export const PRICE_PER_STUDENT_KRW = 4900;
 
+// ── 실수령액 ────────────────────────────────────────────────────────────────
+//
+// 결제액은 우리 돈이 아니다. 원가 예산을 결제액 기준으로 잡으면 실제로는 예산을 넘는다.
+//   · 부가세 10% — 정부 몫. 소비자 표시가에 포함돼 있으므로 나눠서 뺀다.
+//   · 앱스토어 수수료 15% — 학생 프리미엄은 모바일 인앱결제다(중소사업자 프로그램 기준).
+//   · 웹 PG 수수료 3% — 과외쌤 구독은 웹 결제다.
+// 스토어·PG 모두 부가세를 뺀 금액에 수수료를 매긴다.
+export const VAT_RATE = 0.1;
+export const APP_STORE_FEE_RATE = 0.15;
+export const WEB_PG_FEE_RATE = 0.03;
+
+function netOf(grossKrw: number, feeRate: number): number {
+  return Math.round((grossKrw / (1 + VAT_RATE)) * (1 - feeRate));
+}
+
+/** 학생 프리미엄 1건의 월 실수령액. 8,900 → 부가세 제외 8,091 → 스토어 15% 제외 = 6,877원. */
+export function getStudentPremiumNetKrw(): number {
+  return netOf(PRICE_STUDENT_PREMIUM_KRW, APP_STORE_FEE_RATE);
+}
+
+/** 과외쌤 구독 학생 1인분의 월 실수령액. 4,900 → 부가세 제외 4,455 → PG 3% 제외 = 4,321원. */
+export function getTeacherPerStudentNetKrw(): number {
+  return netOf(PRICE_PER_STUDENT_KRW, WEB_PG_FEE_RATE);
+}
+
 export function getTeacherMonthlySubscriptionAmount(
   activeConnectionCount: number
 ): number {
