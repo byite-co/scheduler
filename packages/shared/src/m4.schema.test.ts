@@ -3,8 +3,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { AI_CHECK_RESULTS_ENABLED } from "./featureFlags";
-import { PRICE_STUDENT_PREMIUM_KRW } from "./pricing";
 import {
+  PRICE_PER_STUDENT_KRW,
+  PRICE_STUDENT_PREMIUM_KRW,
+  getStudentPremiumNetKrw,
+  getTeacherPerStudentNetKrw
+} from "./pricing";
+import {
+  AI_CHECK_COST_MODEL,
   AI_CHECK_LIMITS,
   ANTHROPIC_CHECK_ERROR_CODES,
   HOMEWORK_CHECK_ERROR_MESSAGES,
@@ -465,17 +471,26 @@ describe("M4 AI check limits rebalance", () => {
     new URL("../../../supabase/migrations/20260807020000_ai_check_limits_rebalance.sql", import.meta.url),
     "utf8"
   );
+  const repricingMigration = readFileSync(
+    new URL("../../../supabase/migrations/20260816000000_ai_check_limits_repricing.sql", import.meta.url),
+    "utf8"
+  );
 
   it("keeps the shared limit copy in sync with the DB (DB is authoritative)", () => {
     // schema.sql 은 CRLF 다 — 줄바꿈에 무관하게 \s+ 로 잇는다.
     const limitDef = (name: string, value: number) =>
       new RegExp(`${name}\\(\\) returns integer\\s+language sql immutable as \\$\\$ select ${value} \\$\\$`);
+    // 제출당·하루·창 길이는 20260807020000 이 마지막으로 정한 값 그대로다.
     for (const source of [schema, limitsMigration]) {
       expect(source).toMatch(limitDef("ai_check_max_attempts_per_submission", AI_CHECK_LIMITS.maxPerSubmission));
       expect(source).toMatch(limitDef("ai_check_max_attempts_per_day", AI_CHECK_LIMITS.maxPerDay));
+      expect(source).toMatch(limitDef("ai_check_window_days", AI_CHECK_LIMITS.windowDays));
+    }
+    // 월 한도·사진 한도는 20260816000000 이 다시 정했다. 마이그레이션은 불변이므로
+    // 옛 파일에는 옛 값(70/280)이 그대로 남아 있다 — **최신 판**과 schema.sql 을 본다.
+    for (const source of [schema, repricingMigration]) {
       expect(source).toMatch(limitDef("ai_check_max_attempts_per_month", AI_CHECK_LIMITS.maxPerWindow));
       expect(source).toMatch(limitDef("ai_check_max_photos_per_month", AI_CHECK_LIMITS.maxPhotosPerWindow));
-      expect(source).toMatch(limitDef("ai_check_window_days", AI_CHECK_LIMITS.windowDays));
     }
   });
 
@@ -492,19 +507,40 @@ describe("M4 AI check limits rebalance", () => {
     }
   });
 
-  it("keeps the worst-case monthly cost inside 30% of student revenue", () => {
-    // 실측(2026-08-06): 프롬프트 936토큰 · 사진 1장 ≈ 1,600토큰 · 출력 ≤130토큰,
-    // Haiku 단가 입력 $1/Mtok · 출력 $5/Mtok, 환율 약 1,370원/$.
-    const KRW_PER_MICRO_USD = 1370 / 1_000_000;
-    const perCallMicros = 936 + 130 * 5; // 프롬프트 + 출력
-    const perPhotoMicros = 1600;
+  it("최악 사용도 실수령액 예산 안에 들어온다", () => {
+    // 🚨 **결제액이 아니라 실수령액**이 기준이다. 결제액으로 잡으면 부가세와 스토어·PG
+    //    수수료만큼 예산을 과대평가한다(2026-08-16 재산정에서 발견).
     const worstKrw =
-      (AI_CHECK_LIMITS.maxPerWindow * perCallMicros + AI_CHECK_LIMITS.maxPhotosPerWindow * perPhotoMicros) *
-      KRW_PER_MICRO_USD;
-    // 매출은 상수에서 가져온다 — 가격이 바뀌면 예산도 함께 움직여야 하는데,
-    // 2900 을 박아 두면 인상 후에도 옛 예산으로 검사하게 된다(2026-08-10 인상 때 발견).
-    // 한도 자체는 이 PR 에서 건드리지 않는다 — 인상으로 여유가 생겼을 뿐이다(별도 재산정 대상).
-    expect(worstKrw).toBeLessThanOrEqual(PRICE_STUDENT_PREMIUM_KRW * 0.3);
+      (AI_CHECK_LIMITS.maxPerWindow * AI_CHECK_COST_MODEL.perCallMicroUsd +
+        AI_CHECK_LIMITS.maxPhotosPerWindow * AI_CHECK_COST_MODEL.perPhotoMicroUsd) *
+      AI_CHECK_COST_MODEL.krwPerMicroUsd *
+      AI_CHECK_COST_MODEL.measurementMargin;
+
+    // 한도는 요청자 1인 기준 단일 값이라 **두 결제 경로 중 낮은 쪽**을 넘으면 안 된다.
+    // 과외쌤 경로(학생당 4,900 → 실수령 4,321)가 학생 프리미엄(8,900 → 6,877)보다 낮다.
+    const budget = Math.min(getStudentPremiumNetKrw(), getTeacherPerStudentNetKrw()) * AI_CHECK_COST_MODEL.budgetShare;
+    expect(getTeacherPerStudentNetKrw()).toBeLessThan(getStudentPremiumNetKrw());
+    expect(worstKrw).toBeLessThanOrEqual(budget);
+  });
+
+  it("실수령액이 결제액보다 확실히 낮다 — 수수료를 빼먹으면 이 테스트가 잡는다", () => {
+    // 옛 계산은 결제액을 그대로 썼다. 그러면 예산이 실제보다 29% 부풀려진다.
+    expect(getStudentPremiumNetKrw()).toBeLessThan(PRICE_STUDENT_PREMIUM_KRW);
+    expect(getTeacherPerStudentNetKrw()).toBeLessThan(PRICE_PER_STUDENT_KRW);
+    // 부가세만 빼고 수수료를 안 뺀 값과도 달라야 한다.
+    expect(getStudentPremiumNetKrw()).toBeLessThan(PRICE_STUDENT_PREMIUM_KRW / 1.1);
+    expect(getTeacherPerStudentNetKrw()).toBeLessThan(PRICE_PER_STUDENT_KRW / 1.1);
+  });
+
+  it("정상 사용자가 예산을 다 쓰지는 않는다", () => {
+    // 정상 사용 추정: 월 30회 · 사진 90장(평일 숙제 20건 × 검사 1~2회, 장당 2~3장).
+    // 여기서 100% 를 넘으면 한도가 아니라 **원가**를 손봐야 한다는 신호다.
+    const normalKrw =
+      (30 * AI_CHECK_COST_MODEL.perCallMicroUsd + 90 * AI_CHECK_COST_MODEL.perPhotoMicroUsd) *
+      AI_CHECK_COST_MODEL.krwPerMicroUsd *
+      AI_CHECK_COST_MODEL.measurementMargin;
+    const budget = getTeacherPerStudentNetKrw() * AI_CHECK_COST_MODEL.budgetShare;
+    expect(normalKrw).toBeLessThan(budget);
   });
 
   it("checks the window limits before the daily limit", () => {

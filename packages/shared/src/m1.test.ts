@@ -6,6 +6,7 @@ import {
   canRequestConnectionAgain,
   canCompleteStudentSignup,
   createConnectionRequest,
+  formatConnectionTeacherLabel,
   formatInviteCode,
   formatPendingRequestLabel,
   getMissingStudentSignupSteps,
@@ -189,5 +190,23 @@ describe("대기 요청 이름표", () => {
       { connection_id: "c1", student_name: "김민준", student_grade: "고3", requested_at: null }
     ]);
     expect(map.get("c1")?.student_name).toBe("김민준");
+  });
+});
+
+describe("학생 앱의 연결 상대 이름표", () => {
+  it("수락된 연결은 쌤 이름을 보여 준다", () => {
+    expect(formatConnectionTeacherLabel({ teacherName: "김지훈", inviteCode: "ABC123" })).toBe("김지훈 선생님");
+  });
+
+  it("수락 전에는 학생이 입력한 코드를 보여 준다 — 연결 ID 를 찍지 않는다", () => {
+    // RLS 가 active 만 허용하므로 pending 에서는 쌤 이름을 읽을 수 없다.
+    expect(formatConnectionTeacherLabel({ teacherName: null, inviteCode: "ABC123" })).toBe(
+      formatInviteCode("ABC123")
+    );
+  });
+
+  it("이름도 코드도 없으면 왜 없는지 말한다", () => {
+    expect(formatConnectionTeacherLabel({})).toBe("수락 후 이름이 보여요");
+    expect(formatConnectionTeacherLabel({ teacherName: "  ", inviteCode: " " })).toBe("수락 후 이름이 보여요");
   });
 });

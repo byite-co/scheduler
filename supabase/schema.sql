@@ -2018,11 +2018,18 @@ create or replace function ai_check_max_attempts_per_submission() returns intege
 create or replace function ai_check_max_attempts_per_day() returns integer
   language sql immutable as $$ select 8 $$;
 
--- 최근 30일 호출 수 / 사진 장수 (신규). 이 둘이 상품 한도다.
+-- 최근 30일 호출 수 / 사진 장수. 이 둘이 상품 한도다.
+-- 20260816000000 재산정: 70 → 40 / 280 → 100.
+--   결제액이 아니라 **실수령액** 기준으로 다시 잡았다(부가세 10% + 스토어 15% / PG 3%).
+--   예산 = 과외쌤 경로 실수령 4,321원 × 30% = 1,296원/월 (두 결제 경로 중 낮은 쪽).
+--   원가 = 관찰 프롬프트(2,892토큰) + 4분할(사진 1장 = 1,568px 조각 4장) 기준
+--          호출 4.9원 + 사진 8.8원. 최악(40회·100장) 1,196원 = 예산의 92%.
+--   ⚠️ 정상 사용(30회·90장)이 이미 예산의 81% 다. 이 방식은 아슬아슬하다 —
+--      한도를 늘리려면 원가를 낮춰야 한다(Gemini 무분할이면 같은 한도에서 9%).
 create or replace function ai_check_max_attempts_per_month() returns integer
-  language sql immutable as $$ select 70 $$;
+  language sql immutable as $$ select 40 $$;
 create or replace function ai_check_max_photos_per_month() returns integer
-  language sql immutable as $$ select 280 $$;
+  language sql immutable as $$ select 100 $$;
 
 comment on function ai_check_window_days() is
   '월 한도를 계산하는 이동 창(일). 달력 월로 끊으면 말일·1일에 연속 최대치를 쓸 수 있다.';
@@ -2031,7 +2038,7 @@ comment on function ai_check_max_attempts_per_submission() is
 comment on function ai_check_max_attempts_per_day() is
   '요청자 1인 하루 검사 상한(버스트 방어). 누적 방어는 월 한도가 담당한다.';
 comment on function ai_check_max_attempts_per_month() is
-  '요청자 1인 최근 30일 검사 상한. 매출 2,900원의 30%(870원) 원가 예산에서 나온 상품 한도다.';
+  '요청자 1인 최근 30일 검사 상한. 실수령 4,321원(과외쌤 경로)의 30% = 1,296원 예산에서 나온 값이다.';
 comment on function ai_check_max_photos_per_month() is
   '요청자 1인 최근 30일 검사 사진 장수 상한. 원가는 사진 토큰이 지배하므로 호출 수만으로는 예산을 지킬 수 없다.';
 
