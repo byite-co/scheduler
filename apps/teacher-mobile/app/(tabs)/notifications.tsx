@@ -1,2 +1,5 @@
-import { TabPlaceholder } from "../../src/tabPlaceholder";
-export default function NotificationsRoute() { return <TabPlaceholder title="알림" />; }
+import { NotificationCenterScreen } from "../../src/notificationCenterScreen";
+
+export default function NotificationsRoute() {
+  return <NotificationCenterScreen />;
+}
