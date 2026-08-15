@@ -3,7 +3,14 @@ import { useRouter } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
-import { DEFAULT_TEACHER_STUDENT_SETTINGS, formatInviteCode, type Database } from "@ssamplanner/shared";
+import {
+  DEFAULT_TEACHER_STUDENT_SETTINGS,
+  formatInviteCode,
+  formatPendingRequestLabel,
+  indexPendingRequests,
+  type Database,
+  type PendingConnectionRequest
+} from "@ssamplanner/shared";
 
 import { useAuth } from "./auth";
 import { managementStyles } from "./managementStyles";
@@ -12,6 +19,8 @@ import { EmptyState, PrimaryButton, screenStyles } from "./ui";
 
 type Connection = Database["public"]["Tables"]["connections"]["Row"];
 type ConnectionStatus = Database["public"]["Enums"]["connection_status"];
+type StudentProfile = Pick<Database["public"]["Tables"]["profiles"]["Row"], "id" | "name" | "grade">;
+type ConnectionWithStudent = Connection & { student: StudentProfile | null };
 
 const STATUS_COPY: Record<ConnectionStatus, { label: string; description: string }> = {
   pending: {
@@ -38,21 +47,49 @@ function statusStyle(status: ConnectionStatus) {
   return styles.statusPending;
 }
 
+function connectionLabel(
+  connection: ConnectionWithStudent,
+  pendingByConnectionId: Map<string, PendingConnectionRequest>
+) {
+  if (connection.status === "pending") {
+    const request = pendingByConnectionId.get(connection.id);
+    return request ? formatPendingRequestLabel(request) : "학생 정보를 볼 수 없음";
+  }
+  if (connection.status === "active") {
+    return connection.student
+      ? formatPendingRequestLabel({
+          student_name: connection.student.name,
+          student_grade: connection.student.grade
+        })
+      : "학생 정보를 볼 수 없음";
+  }
+  if (connection.status === "rejected") return "거절된 연결 요청";
+  return "연결 해제된 기록";
+}
+
 export function ConnectionRequestsScreen() {
   const router = useRouter();
   const { session, setMessage } = useAuth();
-  const [connections, setConnections] = useState<Connection[]>([]);
+  const [connections, setConnections] = useState<ConnectionWithStudent[]>([]);
+  const [pendingByConnectionId, setPendingByConnectionId] = useState(
+    () => new Map<string, PendingConnectionRequest>()
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const loadConnections = useCallback(async () => {
     if (!session) return;
-    const result = await supabase
-      .from("connections")
-      .select("*")
-      .eq("teacher_id", session.user.id)
-      .order("created_at", { ascending: false });
-    setConnections(result.data ?? []);
-    if (result.error) setMessage(result.error.message);
+    const [connectionsResult, pendingResult] = await Promise.all([
+      supabase
+        .from("connections")
+        .select("*, student:profiles!connections_student_id_fkey(id,name,grade)")
+        .eq("teacher_id", session.user.id)
+        .order("created_at", { ascending: false }),
+      supabase.rpc("pending_connection_requests")
+    ]);
+    setConnections((connectionsResult.data ?? []) as ConnectionWithStudent[]);
+    setPendingByConnectionId(indexPendingRequests(pendingResult.data));
+    const error = connectionsResult.error ?? pendingResult.error;
+    if (error) setMessage(error.message);
   }, [session, setMessage]);
 
   useEffect(() => {
@@ -68,7 +105,7 @@ export function ConnectionRequestsScreen() {
     [connections]
   );
 
-  async function decide(connection: Connection, accept: boolean) {
+  async function decide(connection: ConnectionWithStudent, accept: boolean) {
     setBusyId(connection.id);
     const patch = accept
       ? { status: "active" as const, activated_at: new Date().toISOString() }
@@ -125,6 +162,7 @@ export function ConnectionRequestsScreen() {
             busy={busyId === connection.id}
             connection={connection}
             key={connection.id}
+            pendingByConnectionId={pendingByConnectionId}
             onAccept={() => void decide(connection, true)}
             onReject={() => void decide(connection, false)}
           />
@@ -137,7 +175,11 @@ export function ConnectionRequestsScreen() {
           <Text style={styles.historyEmpty}>수락·거절·연결 해제된 내역이 아직 없어요.</Text>
         ) : null}
         {history.map((connection) => (
-          <ConnectionCard connection={connection} key={connection.id} />
+          <ConnectionCard
+            connection={connection}
+            key={connection.id}
+            pendingByConnectionId={pendingByConnectionId}
+          />
         ))}
       </View>
 
@@ -149,11 +191,13 @@ export function ConnectionRequestsScreen() {
 function ConnectionCard({
   busy = false,
   connection,
+  pendingByConnectionId,
   onAccept,
   onReject
 }: {
   busy?: boolean;
-  connection: Connection;
+  connection: ConnectionWithStudent;
+  pendingByConnectionId: Map<string, PendingConnectionRequest>;
   onAccept?: () => void;
   onReject?: () => void;
 }) {
@@ -164,7 +208,7 @@ function ConnectionCard({
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.studentCopy}>
-          <Text style={styles.studentLabel}>학생 {connection.student_id.slice(0, 8)}</Text>
+          <Text style={styles.studentLabel}>{connectionLabel(connection, pendingByConnectionId)}</Text>
           <Text style={styles.meta}>{inviteCode}</Text>
         </View>
         <Text style={[styles.status, statusStyle(connection.status)]}>{copy.label}</Text>
