@@ -43,5 +43,11 @@ describe("M3 timer session schema coverage", () => {
       expect(source).toContain("create policy focus_teacher_read_disclosed on focus_checks");
       expect(source).toContain("can_teacher_read_focus_check(auth.uid(), focus_checks.session_id)");
     }
+    // 🚨 뷰는 담당 학생 **전체**를 돌려준다. student_id 가 없으면 화면이 학생별로 좁힐 수 없어
+    //    한 학생의 리포트에 다른 학생의 집중도가 섞인다(2026-08-15 실연동에서 재현).
+    //    RLS 가 뚫린 게 아니라 "고를 수단이 없다"는 문제였고, 결과는 학부모에게 남의 아이 데이터다.
+    expect(schema).toMatch(
+      /create or replace view v_teacher_focus_checks[\s\S]*?s\.student_id[\s\S]*?from focus_checks/
+    );
   });
 });

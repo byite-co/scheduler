@@ -271,6 +271,63 @@ export type Database = {
           },
         ]
       }
+      exam_records: {
+        Row: {
+          comment: string | null
+          created_at: string
+          exam_name: string
+          grade: number | null
+          id: string
+          score: number | null
+          student_id: string
+          subject: Database["public"]["Enums"]["subject_code"]
+          taken_on: string
+          teacher_id: string
+          updated_at: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string
+          exam_name: string
+          grade?: number | null
+          id?: string
+          score?: number | null
+          student_id: string
+          subject: Database["public"]["Enums"]["subject_code"]
+          taken_on: string
+          teacher_id: string
+          updated_at?: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string
+          exam_name?: string
+          grade?: number | null
+          id?: string
+          score?: number | null
+          student_id?: string
+          subject?: Database["public"]["Enums"]["subject_code"]
+          taken_on?: string
+          teacher_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_records_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_records_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       focus_checks: {
         Row: {
           checked_at: string
@@ -706,6 +763,44 @@ export type Database = {
           },
         ]
       }
+      report_deliveries: {
+        Row: {
+          channel: string
+          created_at: string
+          error: string | null
+          id: string
+          report_id: string
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          report_id: string
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          report_id?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_deliveries_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_views: {
         Row: {
           id: string
@@ -737,8 +832,10 @@ export type Database = {
           ai_draft: string | null
           created_at: string
           data: Json
+          home_support: string | null
           id: string
           included_subjects: Database["public"]["Enums"]["subject_code"][]
+          next_week_focus: string | null
           period_end: string
           period_start: string
           sent_at: string | null
@@ -754,8 +851,10 @@ export type Database = {
           ai_draft?: string | null
           created_at?: string
           data?: Json
+          home_support?: string | null
           id?: string
           included_subjects?: Database["public"]["Enums"]["subject_code"][]
+          next_week_focus?: string | null
           period_end: string
           period_start: string
           sent_at?: string | null
@@ -771,8 +870,10 @@ export type Database = {
           ai_draft?: string | null
           created_at?: string
           data?: Json
+          home_support?: string | null
           id?: string
           included_subjects?: Database["public"]["Enums"]["subject_code"][]
+          next_week_focus?: string | null
           period_end?: string
           period_start?: string
           sent_at?: string | null
@@ -1082,6 +1183,7 @@ export type Database = {
           drowsy: boolean | null
           id: string | null
           session_id: string | null
+          student_id: string | null
           teacher_id: string | null
         }
         Relationships: [
@@ -1104,6 +1206,13 @@ export type Database = {
             columns: ["session_id"]
             isOneToOne: false
             referencedRelation: "v_teacher_study_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_sessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
