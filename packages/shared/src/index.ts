@@ -8,6 +8,7 @@ export * from "./m4";
 export * from "./m5";
 export * from "./m6";
 export * from "./m7";
+export * from "./parentReport";
 export * from "./pricing";
 export * from "./subjects";
 export * from "./supabase";
