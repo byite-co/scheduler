@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { NOTIFICATION_EVENTS } from "./m7";
+import { REPORT_QUOTA_FLOOR, REPORT_QUOTA_PER_STUDENT, reportMonthlyQuota } from "./parentReport";
 
 const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
 const migration = readFileSync(
@@ -175,5 +176,45 @@ describe("회원 탈퇴를 막지 않는 FK", () => {
   it("todos.created_by 의 NOT NULL 을 푼다 — 안 풀면 SET NULL 을 걸 수 없다", () => {
     expect(fkMigrations).toContain("alter table todos alter column created_by drop not null");
     expect(schema).not.toMatch(/created_by\s+uuid not null references profiles/);
+  });
+});
+
+// ── 수업 회차 · 발급 한도 (20260815020000) ───────────────────────────────────
+describe("수업 회차와 리포트 발급 한도", () => {
+  const lessonsMigration = readFileSync(
+    new URL("../../../supabase/migrations/20260815020000_lessons_and_report_quota.sql", import.meta.url),
+    "utf8"
+  );
+
+  it("회차는 exam_records 와 같은 원칙으로 막는다 — teacher_id + active 연결", () => {
+    for (const source of [schema, lessonsMigration]) {
+      expect(source).toContain("create table if not exists lessons");
+      expect(source).toContain("create policy lessons_teacher_rw on lessons");
+      // teacher_id 만 보면 남의 학생 id 로 행을 만들 수 있다.
+      expect(source).toMatch(/lessons_teacher_rw[\s\S]*?c\.status = 'active'/);
+      expect(source).toContain("check (status in ('done', 'absent', 'canceled'))");
+    }
+  });
+
+  it("한도 규칙이 TS 상수와 DB 함수에서 같다", () => {
+    // 화면 계산만 있으면 PostgREST 직접 호출로 우회된다 → DB 트리거가 최종 방어선이다.
+    expect(lessonsMigration).toContain(`select ${REPORT_QUOTA_PER_STUDENT}`);
+    expect(lessonsMigration).toContain(`select ${REPORT_QUOTA_FLOOR}`);
+    expect(schema).toContain(`select ${REPORT_QUOTA_PER_STUDENT}`);
+    expect(schema).toContain(`select ${REPORT_QUOTA_FLOOR}`);
+    // 하한 + 학생수×단가 구조가 양쪽에서 같아야 한다.
+    expect(lessonsMigration).toContain("greatest(");
+    expect(reportMonthlyQuota(12)).toBe(12 * REPORT_QUOTA_PER_STUDENT);
+    expect(reportMonthlyQuota(1)).toBe(REPORT_QUOTA_FLOOR);
+  });
+
+  it("한도는 DB 에서 강제된다", () => {
+    for (const source of [schema, lessonsMigration]) {
+      expect(source).toContain("create trigger enforce_report_quota_trigger");
+      expect(source).toContain("before insert on reports");
+      expect(source).toContain("report_monthly_quota_exceeded");
+      // 학생 본인 리포트(teacher_id 없음)는 이 한도의 대상이 아니다.
+      expect(source).toContain("if new.teacher_id is null then");
+    }
   });
 });

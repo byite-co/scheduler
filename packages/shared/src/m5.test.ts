@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -155,5 +157,79 @@ describe("M5 plan reflection", () => {
         created_by: "student-1"
       }
     ]);
+  });
+});
+
+// ── 학부모 웹뷰의 공유 링크 보안 (20260815030000) ────────────────────────────
+// 학부모는 가입하지 않는다. 접근 통제가 **토큰 하나**에 달려 있어서, 여기가 무너지면
+// 남의 아이 리포트가 열린다.
+describe("공유 링크 — 토큰·만료·회수", () => {
+  const migration = readFileSync(
+    new URL("../../../supabase/migrations/20260815030000_parent_webview_share.sql", import.meta.url),
+    "utf8"
+  );
+  const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
+  const screen = readFileSync(new URL("../../../apps/teacher/src/app/m5.tsx", import.meta.url), "utf8");
+  const webview = readFileSync(
+    new URL("../../../apps/teacher/src/app/r/[token]/page.tsx", import.meta.url),
+    "utf8"
+  );
+  const webviewLayout = readFileSync(
+    new URL("../../../apps/teacher/src/app/r/[token]/layout.tsx", import.meta.url),
+    "utf8"
+  );
+
+  it("토큰은 UUID 두 개를 이어 붙인 64자다 — 무작위 대입이 불가능하다", () => {
+    for (const source of [migration, schema]) {
+      expect(source).toContain(
+        "replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')"
+      );
+    }
+  });
+
+  it("없는 토큰과 미발송 리포트를 같은 응답으로 합친다 — 토큰 존재 여부가 새면 안 된다", () => {
+    for (const source of [migration, schema]) {
+      expect(source).toMatch(/if not found or report_row\.status <> 'sent' then[\s\S]{0,120}'not_found'/);
+    }
+  });
+
+  it("만료 기본값은 90일이고 화면이 그걸 덮어쓰지 않는다", () => {
+    // 168시간(7일)로 되돌리면 학부모가 늦게 열었을 때 링크가 죽는다.
+    for (const source of [migration, schema]) {
+      expect(source).toContain("p_ttl_hours integer default 2160");
+    }
+    expect(screen).toContain('supabase.rpc("create_report_share", { p_report_id: reportId })');
+    expect(screen).not.toContain("p_ttl_hours: 168");
+  });
+
+  it("회수 수단이 있고 화면에서 도달 가능하다", () => {
+    // 함수만 만들고 버튼이 없으면 유출 시 만료를 기다리는 것 말고 할 수 있는 게 없다.
+    for (const source of [migration, schema]) {
+      expect(source).toContain("create or replace function revoke_report_share");
+      expect(source).toContain("revoke all on function revoke_report_share(uuid) from anon");
+      expect(source).toContain("grant execute on function revoke_report_share(uuid) to authenticated");
+    }
+    expect(screen).toContain('supabase.rpc("revoke_report_share"');
+    expect(screen).toContain("링크 끊기");
+  });
+
+  it("조회 함수만 anon 에게 열려 있다 — 테이블 직접 접근 경로는 없다", () => {
+    for (const source of [migration, schema]) {
+      expect(source).toContain("grant execute on function get_shared_report(text) to anon, authenticated");
+    }
+    // reports 에 anon 정책이 생기면 토큰 없이도 읽히기 시작한다.
+    expect(schema).not.toMatch(/create policy \w+ on reports for select to anon/);
+  });
+
+  it("웹뷰는 스냅샷만 읽는다 — 실시간 테이블을 다시 조회하지 않는다", () => {
+    expect(webview).toContain('supabase.rpc("get_shared_report"');
+    expect(webview).not.toMatch(/supabase\s*\.from\(/);
+  });
+
+  it("공개 URL 이 색인되거나 Referer 로 새지 않는다", () => {
+    // 한 번 색인되면 토큰을 몰라도 검색으로 도달한다 — 만료 정책이 무의미해진다.
+    expect(webviewLayout).toContain("index: false");
+    expect(webviewLayout).toContain("noarchive: true");
+    expect(webviewLayout).toContain('referrer: "no-referrer"');
   });
 });

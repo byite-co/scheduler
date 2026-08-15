@@ -573,6 +573,7 @@ export type Database = {
           paid: boolean
           paid_at: string | null
           period: string
+          planned_sessions: number | null
           student_id: string
           teacher_id: string
         }
@@ -583,6 +584,7 @@ export type Database = {
           paid?: boolean
           paid_at?: string | null
           period: string
+          planned_sessions?: number | null
           student_id: string
           teacher_id: string
         }
@@ -593,6 +595,7 @@ export type Database = {
           paid?: boolean
           paid_at?: string | null
           period?: string
+          planned_sessions?: number | null
           student_id?: string
           teacher_id?: string
         }
@@ -606,6 +609,60 @@ export type Database = {
           },
           {
             foreignKeyName: "lesson_fees_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lessons: {
+        Row: {
+          created_at: string
+          duration_min: number | null
+          id: string
+          memo: string | null
+          started_at_min: number | null
+          status: string
+          student_id: string
+          taught_on: string
+          teacher_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          duration_min?: number | null
+          id?: string
+          memo?: string | null
+          started_at_min?: number | null
+          status?: string
+          student_id: string
+          taught_on: string
+          teacher_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          duration_min?: number | null
+          id?: string
+          memo?: string | null
+          started_at_min?: number | null
+          status?: string
+          student_id?: string
+          taught_on?: string
+          teacher_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lessons_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lessons_teacher_id_fkey"
             columns: ["teacher_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -1574,6 +1631,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      report_monthly_quota: { Args: { p_teacher_id: string }; Returns: number }
+      report_monthly_usage: { Args: { p_teacher_id: string }; Returns: number }
+      report_quota_floor: { Args: never; Returns: number }
+      report_quota_per_student: { Args: never; Returns: number }
       request_connection_by_invite: {
         Args: { p_code: string }
         Returns: {
@@ -1593,6 +1654,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      revoke_report_share: { Args: { p_report_id: string }; Returns: undefined }
       save_focus_check: {
         Args: { p_checked_at?: string; p_drowsy: boolean; p_session_id: string }
         Returns: {
