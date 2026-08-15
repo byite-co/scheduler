@@ -1580,6 +1580,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      pending_connection_requests: {
+        Args: { p_connection_id?: string }
+        Returns: {
+          connection_id: string
+          requested_at: string
+          student_grade: string
+          student_name: string
+        }[]
+      }
       price_per_student_krw: { Args: never; Returns: number }
       record_homework_check_observation: {
         Args: {

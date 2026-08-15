@@ -7,8 +7,10 @@ import {
   canCompleteStudentSignup,
   createConnectionRequest,
   formatInviteCode,
+  formatPendingRequestLabel,
   getMissingStudentSignupSteps,
   getTeacherVisibleStudentSections,
+  indexPendingRequests,
   isValidBirthDate,
   isValidInviteCode,
   requiresGuardianConsent,
@@ -161,5 +163,31 @@ describe("M1 disclosure and guardian consent", () => {
     expect(
       canCompleteStudentSignup({ ...withBirth, guardianConsentAccepted: true }, "2026-06-22")
     ).toBe(true);
+  });
+});
+
+describe("대기 요청 이름표", () => {
+  it("학년이 있으면 함께 보여 준다 — 동명이인을 구분해야 한다", () => {
+    expect(formatPendingRequestLabel({ student_name: "김민준", student_grade: "고3" })).toBe("김민준 · 고3");
+  });
+
+  it("학년이 없으면 이름만", () => {
+    expect(formatPendingRequestLabel({ student_name: "김민준", student_grade: null })).toBe("김민준");
+    expect(formatPendingRequestLabel({ student_name: "김민준", student_grade: "  " })).toBe("김민준");
+  });
+
+  it("이름이 비어 있으면 빈 칸이 아니라 그 사실을 말한다", () => {
+    // 빈 문자열을 그대로 그리면 행이 깨진 것처럼 보인다.
+    expect(formatPendingRequestLabel({ student_name: "  ", student_grade: "고2" })).toBe("이름 미입력 · 고2");
+    expect(formatPendingRequestLabel({})).toBe("이름 미입력");
+  });
+
+  it("RPC 가 실패하거나 비어 있어도 빈 Map 을 준다 — 목록은 그려져야 한다", () => {
+    expect(indexPendingRequests(null).size).toBe(0);
+    expect(indexPendingRequests(undefined).size).toBe(0);
+    const map = indexPendingRequests([
+      { connection_id: "c1", student_name: "김민준", student_grade: "고3", requested_at: null }
+    ]);
+    expect(map.get("c1")?.student_name).toBe("김민준");
   });
 });
