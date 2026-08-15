@@ -1,2 +1,5 @@
-import { TabPlaceholder } from "../../src/tabPlaceholder";
-export default function SettingsRoute() { return <TabPlaceholder title="설정" />; }
+import { SettingsScreen } from "../../src/settingsScreen";
+
+export default function SettingsRoute() {
+  return <SettingsScreen />;
+}
