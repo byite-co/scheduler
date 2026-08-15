@@ -27,17 +27,18 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
+import {
+  corsForbiddenResponse,
+  corsPolicyFor,
+  corsPreflightResponse,
+  jsonHeadersWithCors
+} from "../_shared/cors.ts";
+
 const PHOTO_BUCKET = "homework-photos";
 // Storage remove() 한 번에 넘기는 경로 수. 너무 크면 요청이 거부된다.
 const REMOVE_CHUNK = 100;
 // sweep 한 번에 처리할 대기열 행 수.
 const SWEEP_LIMIT = 20;
-
-const jsonHeaders = { "Content-Type": "application/json" } as const;
-
-function fail(code: string, status: number, extra?: Record<string, unknown>): Response {
-  return new Response(JSON.stringify({ error: code, errorCode: code, ...extra }), { status, headers: jsonHeaders });
-}
 
 /**
  * 호출자가 service_role 인지 판정한다(sweep 전용).
@@ -105,6 +106,14 @@ async function purgePrefix(
 }
 
 Deno.serve(async (req: Request) => {
+  const cors = corsPolicyFor(req);
+  if (!cors.allowed) return corsForbiddenResponse(cors);
+  if (req.method === "OPTIONS") return corsPreflightResponse(cors);
+
+  const jsonHeaders = jsonHeadersWithCors(cors);
+  const fail = (code: string, status: number, extra?: Record<string, unknown>): Response =>
+    new Response(JSON.stringify({ error: code, errorCode: code, ...extra }), { status, headers: jsonHeaders });
+
   if (req.method !== "POST") return fail("method_not_allowed", 405);
 
   const url = Deno.env.get("SUPABASE_URL")!;

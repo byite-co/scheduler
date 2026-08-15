@@ -38,6 +38,12 @@ import {
   type ObservationImage,
   type ObservationInputImage
 } from "./observation.ts";
+import {
+  corsForbiddenResponse,
+  corsPolicyFor,
+  corsPreflightResponse,
+  jsonHeadersWithCors
+} from "../_shared/cors.ts";
 
 // 시크릿이 없을 때의 대비값. 실제 값은 함수 시크릿(ANTHROPIC_MODEL)에서 온다.
 //
@@ -102,8 +108,6 @@ async function downloadSnapshotImages(
   return images;
 }
 
-const jsonHeaders = { "Content-Type": "application/json" } as const;
-
 // 존재하지 않는 제출과 권한 없는 제출을 **같은 응답**으로 합친다. 구분해서 알려주면
 // 남의 submission_id를 넣어 보며 다른 학생의 데이터 존재 여부를 알아낼 수 있다.
 const NOT_FOUND = "submission_not_found" as const;
@@ -111,12 +115,16 @@ const NOT_FOUND = "submission_not_found" as const;
 // 클라이언트(getHomeworkCheckErrorMessage)는 body.errorCode 로 안내 문구를 고른다.
 // 예전에는 게이트·한도 응답이 { error } 만 담아 errorCode 가 항상 undefined 였고,
 // 그 결과 "한도 초과"가 "확인 중 문제가 생겼어요"라는 일반 문구로 표시됐다.
-// 두 필드를 함께 담아 그 구멍을 막는다(error 는 기존 호출부 호환용으로 유지).
-function fail(code: string, status: number, extra?: Record<string, unknown>): Response {
-  return new Response(JSON.stringify({ error: code, errorCode: code, ...extra }), { status, headers: jsonHeaders });
-}
-
 Deno.serve(async (req: Request) => {
+  const cors = corsPolicyFor(req);
+  if (!cors.allowed) return corsForbiddenResponse(cors);
+  if (req.method === "OPTIONS") return corsPreflightResponse(cors);
+
+  const jsonHeaders = jsonHeadersWithCors(cors);
+  // 두 필드를 함께 담아 그 구멍을 막는다(error 는 기존 호출부 호환용으로 유지).
+  const fail = (code: string, status: number, extra?: Record<string, unknown>): Response =>
+    new Response(JSON.stringify({ error: code, errorCode: code, ...extra }), { status, headers: jsonHeaders });
+
   if (req.method !== "POST") {
     return fail("method_not_allowed", 405);
   }
