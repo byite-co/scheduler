@@ -32,10 +32,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
-  const refreshProfile = useCallback(async () => {
-    const { data } = await supabase.auth.getSession();
-    setSession(data.session);
-    if (!data.session) {
+  const loadProfile = useCallback(async (nextSession: Session | null) => {
+    setSession(nextSession);
+    if (!nextSession) {
       setProfile(null);
       return;
     }
@@ -43,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: teacherProfile, error } = await supabase
       .from("profiles")
       .select("id, name, bio, subjects, onboarded, role")
-      .eq("id", data.session.user.id)
+      .eq("id", nextSession.user.id)
       .maybeSingle();
 
     if (error) {
@@ -59,13 +58,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(teacherProfile as TeacherProfile | null);
   }, []);
 
+  const refreshProfile = useCallback(async () => {
+    const { data } = await supabase.auth.getSession();
+    await loadProfile(data.session);
+  }, [loadProfile]);
+
   useEffect(() => {
     void refreshProfile().finally(() => setLoading(false));
-    const { data } = supabase.auth.onAuthStateChange(() => {
-      void refreshProfile().finally(() => setLoading(false));
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      void loadProfile(nextSession).finally(() => setLoading(false));
     });
     return () => data.subscription.unsubscribe();
-  }, [refreshProfile]);
+  }, [loadProfile, refreshProfile]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
