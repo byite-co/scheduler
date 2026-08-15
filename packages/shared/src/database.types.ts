@@ -801,6 +801,45 @@ export type Database = {
           },
         ]
       }
+      storage_purge_queue: {
+        Row: {
+          attempts: number
+          bucket_id: string
+          completed_at: string | null
+          created_at: string
+          deleted_count: number
+          id: string
+          last_error: string | null
+          prefix: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          bucket_id: string
+          completed_at?: string | null
+          created_at?: string
+          deleted_count?: number
+          id?: string
+          last_error?: string | null
+          prefix: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          bucket_id?: string
+          completed_at?: string | null
+          created_at?: string
+          deleted_count?: number
+          id?: string
+          last_error?: string | null
+          prefix?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       student_subscriptions: {
         Row: {
           expires_at: string | null
@@ -1200,6 +1239,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      complete_storage_purge: {
+        Args: { p_deleted_count: number; p_error?: string; p_id: string }
+        Returns: {
+          attempts: number
+          bucket_id: string
+          completed_at: string | null
+          created_at: string
+          deleted_count: number
+          id: string
+          last_error: string | null
+          prefix: string
+          status: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "storage_purge_queue"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_report_share: {
         Args: { p_report_id: string; p_ttl_hours?: number }
         Returns: Json
@@ -1473,6 +1533,12 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      storage_paths_for_prefix: {
+        Args: { p_bucket: string; p_prefix: string }
+        Returns: {
+          path: string
+        }[]
       }
     }
     Enums: {

@@ -8,7 +8,7 @@
 --    학부모=reports.share_token로만(인증 없이, 토큰 한정).
 --  - 집중 모드 카메라 프레임/영상은 서버에 저장하지 않는다(메타데이터만).
 --  - "앱 구독료(teacher_subscriptions, Stripe)"와 "수업·수업료(lesson_fees, 수기)"는 별개.
---  - 가격 상수: 학생 ₩2,900/월, 과외쌤 연결 학생당 ₩2,900/월(= active connections × 2900).
+--  - 가격 상수: 학생 ₩8,900/월, 과외쌤 연결 학생당 ₩4,900/월(= active connections × 4900). 2026-08-10 인상.
 --  - RLS는 row 단위라 "열(column) 공개범위"는 아래 *teacher view*로 강제(예: v_teacher_study_sessions).
 -- ============================================================================
 
@@ -1281,7 +1281,7 @@ comment on function ai_check_max_attempts_per_day() is
   '요청자 1인 하루 검사 상한(서버 안전장치). 상품 한도가 아니다.';
 -- 갱신은 RevenueCat/IAP 웹훅(서비스롤)로만.
 
--- 과외쌤 앱 구독료(Stripe) — 월 청구 = active 연결 수 × 2900
+-- 과외쌤 앱 구독료(Stripe) — 월 청구 = active 연결 수 × 4900
 create table teacher_subscriptions (
   teacher_id        uuid primary key references profiles(id) on delete cascade,
   status            sub_status not null default 'none',
@@ -1299,7 +1299,7 @@ create table billing_invoices (
   teacher_id    uuid not null references profiles(id) on delete cascade,
   period        text not null,          -- '2026-06'
   student_count integer not null,       -- 과금 대상(active 연결) 수
-  amount        integer not null,       -- = student_count * 2900
+  amount        integer not null,       -- = student_count * price_per_student_krw() (발행 시점 단가로 확정)
   status        text not null default 'open', -- open|paid|failed|past_due
   issued_at     timestamptz not null default now(),
   paid_at       timestamptz,
@@ -1309,7 +1309,7 @@ alter table billing_invoices enable row level security;
 create policy inv_self on billing_invoices for select using (teacher_id = auth.uid());
 
 -- M6: 단가 단일 SQL 출처(TS PRICE_PER_STUDENT_KRW와 교차검증). 월 청구 = active 연결 수 × 단가.
-create or replace function price_per_student_krw() returns integer language sql immutable as $$ select 2900 $$;
+create or replace function price_per_student_krw() returns integer language sql immutable as $$ select 4900 $$;
 
 create or replace function generate_teacher_invoice(p_period text)
 returns billing_invoices
@@ -2222,6 +2222,134 @@ grant execute on function record_homework_check_observation(
 
 -- complete_homework_check_attempt(판정 기록)은 DEPRECATED(2026-08-07)다. 지우지 않는 이유:
 -- 옛 경로가 남은 코드에서 깨지고, 되돌릴 때 근거가 없어진다. 2단계에서 정리한다.
+
+-- ============================================================================
+-- 계정 탈퇴 시 Storage 정리 (20260810000000)
+-- ============================================================================
+create table if not exists storage_purge_queue (
+  id           uuid primary key default gen_random_uuid(),
+  -- FK 없음(의도적). 이 행은 사용자가 사라진 뒤에도 살아 있어야 한다.
+  user_id      uuid not null,
+  bucket_id    text not null,
+  -- 지울 대상 폴더. 항상 '<user_id>/' 형태다 — 남의 파일을 지우지 않기 위한 유일한 기준.
+  prefix       text not null,
+  status       text not null default 'pending',
+  attempts     integer not null default 0,
+  deleted_count integer not null default 0,
+  last_error   text,
+  created_at   timestamptz not null default now(),
+  completed_at timestamptz,
+
+  constraint storage_purge_queue_status_check
+    check (status in ('pending', 'done', 'failed')),
+  -- prefix 가 user_id 로 시작하지 않으면 남의 파일을 지우게 된다. DB 에서 막는다.
+  constraint storage_purge_queue_prefix_scoped
+    check (prefix = user_id::text || '/'),
+  constraint storage_purge_queue_attempts_non_negative
+    check (attempts >= 0 and deleted_count >= 0)
+);
+
+create index if not exists storage_purge_queue_pending_idx
+  on storage_purge_queue (status, created_at)
+  where status <> 'done';
+
+comment on table storage_purge_queue is
+  '탈퇴한 사용자의 Storage 파일 정리 대기열. 실제 삭제는 Edge Function(account-delete)이 한다.';
+
+-- 서버 전용. 클라이언트가 읽거나 쓸 이유가 없다(탈퇴한 사용자의 흔적이다).
+alter table storage_purge_queue enable row level security;
+-- 정책을 하나도 만들지 않는다 = authenticated/anon 은 아무것도 못 한다.
+-- service_role 은 RLS 를 우회하므로 Edge Function 만 접근한다.
+
+-- ── 삭제 시 대기열 적재 트리거 ───────────────────────────────────────────────
+create or replace function enqueue_storage_purge_on_profile_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into storage_purge_queue (user_id, bucket_id, prefix)
+  values (old.id, 'homework-photos', old.id::text || '/');
+  return old;
+exception when others then
+  -- 대기열 적재 실패로 탈퇴 자체를 막지 않는다. 사용자의 삭제 요구가 우선이다.
+  -- 대신 경고를 남겨 로그에서 추적할 수 있게 한다.
+  raise warning 'enqueue_storage_purge_on_profile_delete failed for %: %', old.id, sqlerrm;
+  return old;
+end;
+$$;
+
+drop trigger if exists enqueue_storage_purge_on_profile_delete_trigger on profiles;
+create trigger enqueue_storage_purge_on_profile_delete_trigger
+before delete on profiles
+for each row execute function enqueue_storage_purge_on_profile_delete();
+
+-- ── Edge Function 이 쓰는 조회·기록 함수 ─────────────────────────────────────
+--
+-- Storage API 의 list() 는 폴더 단위 페이지네이션이라 하위 경로를 빠뜨리기 쉽다.
+-- storage.objects 를 직접 조회하면 **정확히** 그 사용자의 객체만 얻는다.
+create or replace function storage_paths_for_prefix(p_bucket text, p_prefix text)
+returns table (path text)
+language sql
+stable
+security definer
+set search_path = public, storage
+as $$
+  select name
+  from storage.objects
+  where bucket_id = p_bucket
+    -- like 는 _ 와 % 가 와일드카드다. prefix 는 'uuid/' 라 둘 다 없지만,
+    -- 폴더 첫 조각을 직접 비교하는 편이 의도가 분명하고 우회 여지가 없다.
+    and (storage.foldername(name))[1] = rtrim(p_prefix, '/')
+  order by name
+$$;
+
+comment on function storage_paths_for_prefix(text, text) is
+  '한 사용자 폴더의 Storage 객체 경로 목록. service_role 전용 — 삭제 대상을 정확히 좁히는 용도.';
+
+revoke all on function storage_paths_for_prefix(text, text) from public;
+revoke all on function storage_paths_for_prefix(text, text) from anon;
+revoke all on function storage_paths_for_prefix(text, text) from authenticated;
+grant execute on function storage_paths_for_prefix(text, text) to service_role;
+
+create or replace function complete_storage_purge(
+  p_id uuid,
+  p_deleted_count integer,
+  p_error text default null
+)
+returns storage_purge_queue
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  result storage_purge_queue%rowtype;
+begin
+  update storage_purge_queue
+     set status        = case when p_error is null then 'done' else 'failed' end,
+         attempts      = attempts + 1,
+         deleted_count = deleted_count + greatest(coalesce(p_deleted_count, 0), 0),
+         last_error    = p_error,
+         completed_at  = case when p_error is null then now() else null end
+   where id = p_id
+  returning * into result;
+
+  if not found then
+    raise exception 'purge_row_not_found';
+  end if;
+  return result;
+end;
+$$;
+
+comment on function complete_storage_purge(uuid, integer, text) is
+  '정리 결과 기록. 실패는 status=failed 로 남겨 사람이 볼 수 있게 한다(조용히 사라지지 않는다).';
+
+revoke all on function complete_storage_purge(uuid, integer, text) from public;
+revoke all on function complete_storage_purge(uuid, integer, text) from anon;
+revoke all on function complete_storage_purge(uuid, integer, text) from authenticated;
+grant execute on function complete_storage_purge(uuid, integer, text) to service_role;
+
 
 -- ============================================================================
 -- Storage 버킷(앱에서 생성):

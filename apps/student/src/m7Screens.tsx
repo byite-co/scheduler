@@ -8,6 +8,7 @@ import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
 import {
   ACCOUNT_DELETE_STEPS,
   NOTIF_TYPE_LABELS,
+  getAccountDeleteErrorMessage,
   getNotificationRoute,
   getPushPrimingState,
   getSystemGateState,
@@ -171,9 +172,12 @@ export function AccountDeleteScreen() {
   async function deleteAccount() {
     if (!canDelete) return;
     setBusy(true);
-    const { error } = await supabase.rpc("delete_my_account");
+    // ⚠️ delete_my_account RPC 를 직접 부르면 **Storage 사진이 남는다**(DB 만 지워진다).
+    //    account-delete 함수가 사진을 먼저 지우고 계정을 지운다.
+    //    (RPC 를 직접 부르는 경로가 남아도 profiles 삭제 트리거가 정리 대기열에 남긴다.)
+    const { error } = await supabase.functions.invoke("account-delete", { body: {} });
     if (error) {
-      setMessage(error.message);
+      setMessage(getAccountDeleteErrorMessage(error));
       setBusy(false);
       return;
     }

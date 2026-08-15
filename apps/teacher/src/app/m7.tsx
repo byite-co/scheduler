@@ -4,7 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 
-import { NOTIF_TYPE_LABELS, unreadCount, validateDeleteConfirmation, type NotifType } from "@ssamplanner/shared";
+import {
+  NOTIF_TYPE_LABELS,
+  getAccountDeleteErrorMessage,
+  unreadCount,
+  validateDeleteConfirmation,
+  type NotifType
+} from "@ssamplanner/shared";
 import type { Database } from "@ssamplanner/shared";
 
 import { Bell } from "lucide-react";
@@ -102,9 +108,13 @@ export function TeacherAccountDelete() {
   async function deleteAccount() {
     if (!canDelete) return;
     setBusy(true);
-    const { error } = await supabase.rpc("delete_my_account");
+    // ⚠️ delete_my_account RPC 를 직접 부르면 Storage 사진이 남는다(DB 만 지워진다).
+    //    account-delete 함수가 사진을 먼저 지우고 계정을 지운다.
+    //    과외쌤은 homework-photos 에 올리는 주체가 아니라 보통 지울 파일이 없지만,
+    //    경로를 하나로 두어야 앞으로 버킷이 늘어도 빠지지 않는다.
+    const { error } = await supabase.functions.invoke("account-delete", { body: {} });
     if (error) {
-      setMessage(error.message);
+      setMessage(getAccountDeleteErrorMessage(error));
       setBusy(false);
       return;
     }
