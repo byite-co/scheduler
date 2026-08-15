@@ -1,8 +1,93 @@
 import { Link } from "expo-router";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+
 import { colors, spacing } from "@ssamplanner/design-tokens";
+
 import { useAuth } from "../../src/auth";
 import { statusFor, useTeacherStudents } from "../../src/teacherData";
 import { EmptyState, screenStyles } from "../../src/ui";
-export default function DashboardRoute(){const {profile}=useAuth();const {students,loading}=useTeacherStudents();const risk=students.filter(s=>statusFor(s).label==="주의");if(loading)return null;if(!students.length)return <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}><Text style={screenStyles.heading}>대시보드</Text><EmptyState title="아직 학생이 없어요" body="학생을 추가하면 진도·숙제·리포트를 바로 기록할 수 있어요."/><Text style={s.title}>오늘 할 일</Text><Text style={screenStyles.subtitle}>• 내 수업 일정부터 등록해 보세요</Text></ScrollView>;return <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}><Text style={s.date}>{new Date().toLocaleDateString("ko-KR")}</Text><Text style={screenStyles.heading}>{profile?.name} 선생님</Text><View style={s.grid}><Stat label="담당 학생" value={`${students.length}명`}/><Stat label="제출됨" value={`${students.reduce((n,x)=>n+x.submittedCount,0)}건`}/><Stat label="오늘 수업" value="—"/><Stat label="위험 학생" value={`${risk.length}명`}/></View>{risk.length?<View style={s.card}><Text style={s.title}>집중 관리</Text>{risk.map(x=><Link key={x.id} href={{pathname:"/student/[id]",params:{id:x.id}}}><Text style={s.row}>{x.name} · 이번 주 {x.weekMinutes}분 · 주의</Text></Link>)}</View>:null}<View style={s.dark}><Text style={s.darkTitle}>숙제 제출 {students.reduce((n,x)=>n+x.submittedCount,0)}건</Text><Text style={s.darkText}>AI 판정은 표시하지 않아요. 제출 여부만 확인할 수 있어요.</Text></View></ScrollView>}
-function Stat({label,value}:{label:string;value:string}){return <View style={s.stat}><Text style={s.label}>{label}</Text><Text style={s.value}>{value}</Text></View>};const s=StyleSheet.create({date:{color:colors.muted,fontWeight:"700"},grid:{flexDirection:"row",flexWrap:"wrap",gap:12},stat:{width:"47%",backgroundColor:colors.surface,borderRadius:18,padding:spacing.lg},label:{color:colors.muted,fontWeight:"700"},value:{fontSize:28,fontWeight:"900",color:colors.ink},card:{backgroundColor:colors.surface,borderRadius:18,padding:spacing.lg},title:{fontSize:20,fontWeight:"900",color:colors.ink},row:{paddingVertical:10,color:colors.ink,fontWeight:"700"},dark:{backgroundColor:colors.ink,borderRadius:18,padding:spacing.xl},darkTitle:{fontSize:20,fontWeight:"900",color:colors.surface},darkText:{color:"#C4CAD9",marginTop:8}});
+
+export default function DashboardRoute() {
+  const { profile } = useAuth();
+  const { students, loading } = useTeacherStudents();
+  const risk = students.filter((student) => statusFor(student).label === "주의");
+  const submittedCount = students.reduce((count, student) => count + student.submittedCount, 0);
+
+  if (loading) return null;
+
+  if (!students.length) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>대시보드</Text>
+        <EmptyState title="아직 학생이 없어요" body="학생을 추가하면 진도·숙제·리포트를 바로 기록할 수 있어요." />
+        <Text style={styles.title}>오늘 할 일</Text>
+        <Text style={screenStyles.subtitle}>• 내 수업 일정부터 등록해 보세요</Text>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+      <Text style={styles.date}>{new Date().toLocaleDateString("ko-KR")}</Text>
+      <Text style={screenStyles.heading}>{profile?.name} 선생님</Text>
+      <View style={styles.grid}>
+        <Stat label="담당 학생" value={`${students.length}명`} />
+        <Stat label="제출됨" value={`${submittedCount}건`} />
+        <Stat label="오늘 수업" value="—" />
+        <Stat label="위험 학생" value={`${risk.length}명`} />
+      </View>
+      {risk.length ? (
+        <View style={styles.card}>
+          <Text style={styles.title}>집중 관리</Text>
+          {risk.map((student) => (
+            <Link key={student.id} href={{ pathname: "/student/[id]", params: { id: student.id } }}>
+              <Text style={styles.row}>{student.name} · 이번 주 {student.weekMinutes}분 · 주의</Text>
+            </Link>
+          ))}
+        </View>
+      ) : null}
+      <View style={styles.dark}>
+        <Text style={styles.darkTitle}>숙제 제출 {submittedCount}건</Text>
+        <Text style={styles.darkText}>AI 판정은 표시하지 않아요. 제출 사진을 직접 확인할 수 있어요.</Text>
+        <View style={styles.homeworkLinks}>
+          <Link href="../homework" style={styles.homeworkLink}>낸 숙제</Link>
+          <Link href="../homework/review" style={styles.homeworkLink}>제출 검사</Link>
+          <Link href="../homework/new" style={styles.homeworkLink}>+ 숙제 내기</Link>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.value}>{value}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  date: { color: colors.muted, fontWeight: "700" },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  stat: { width: "47%", backgroundColor: colors.surface, borderRadius: 18, padding: spacing.lg },
+  label: { color: colors.muted, fontWeight: "700" },
+  value: { fontSize: 28, fontWeight: "900", color: colors.ink },
+  card: { backgroundColor: colors.surface, borderRadius: 18, padding: spacing.lg },
+  title: { fontSize: 20, fontWeight: "900", color: colors.ink },
+  row: { paddingVertical: 10, color: colors.ink, fontWeight: "700" },
+  dark: { backgroundColor: colors.ink, borderRadius: 18, padding: spacing.xl, gap: spacing.sm },
+  darkTitle: { fontSize: 20, fontWeight: "900", color: colors.surface },
+  darkText: { color: "#C4CAD9" },
+  homeworkLinks: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm },
+  homeworkLink: {
+    backgroundColor: colors.brand,
+    borderRadius: 12,
+    color: colors.surface,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  }
+});
