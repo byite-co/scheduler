@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildLessonBlock,
+  buildTeacherBranding,
+  describeLessonBlock,
+  getReportGating,
+  getReportQuotaState,
+  isReportQuotaError,
+  reportMonthlyQuota,
   NARRATIVE_FIELDS,
   buildParentReport,
   canSendReport,
@@ -11,6 +18,7 @@ import {
   normalizeDisclosure,
   type ParentReportInput
 } from "./parentReport";
+import { getTeacherBillingState } from "./m6";
 
 const ALL_OPEN = { share_study_time: true, share_homework_photos: true, share_focus_data: true };
 
@@ -230,5 +238,110 @@ describe("발송", () => {
     expect(isChannelWired("link")).toBe(true);
     expect(isChannelWired("kakao")).toBe(false);
     expect(isChannelWired("pdf")).toBe(false);
+  });
+});
+
+describe("수업 회차", () => {
+  it("기록이 없으면 no_data — 0회로 표시하면 '수업을 안 했다'가 된다", () => {
+    expect(buildLessonBlock([], null).state).toBe("no_data");
+  });
+
+  it("결석은 진행 회차에 넣지 않고 따로 센다", () => {
+    const block = buildLessonBlock(
+      [
+        { taught_on: "2026-08-03", status: "done" },
+        { taught_on: "2026-08-05", status: "done" },
+        { taught_on: "2026-08-07", status: "absent" },
+        { taught_on: "2026-08-10", status: "canceled" }
+      ],
+      8
+    );
+    if (block.state !== "value") throw new Error("unreachable");
+    // canceled 는 학생 책임이 아니므로 어느 쪽에도 안 들어간다(기록은 남는다).
+    expect(block.value).toEqual({ done: 2, absent: 1, planned: 8 });
+    expect(describeLessonBlock(block.value)).toBe("2/8회 · 결석 1회");
+  });
+
+  it("예정 회차가 없으면 진행 회차만 보여준다 — 임의로 목표를 만들지 않는다", () => {
+    const block = buildLessonBlock([{ taught_on: "2026-08-03", status: "done" }], null);
+    if (block.state !== "value") throw new Error("unreachable");
+    expect(describeLessonBlock(block.value)).toBe("1회");
+  });
+
+  it("취소만 기록된 달은 진행 0회가 사실이다 (기록은 있다)", () => {
+    const block = buildLessonBlock([{ taught_on: "2026-08-03", status: "canceled" }], null);
+    expect(block.state).toBe("value");
+    if (block.state !== "value") throw new Error("unreachable");
+    expect(block.value.done).toBe(0);
+  });
+});
+
+describe("쌤 브랜딩", () => {
+  it("이름이 비어도 화면이 깨지지 않는다", () => {
+    const b = buildTeacherBranding({ name: "", bio: null, subjects: [] });
+    expect(b.name).toBe("선생님");
+    expect(b.initial).toBe("선");
+    expect(b.bio).toBeNull();
+    expect(b.subjectLabel).toBeNull();
+  });
+
+  it("담당 과목을 한 줄로 만든다", () => {
+    const b = buildTeacherBranding({ name: "김지훈", bio: " 10년차 ", subjects: ["math", "english"] });
+    expect(b.initial).toBe("김");
+    expect(b.bio).toBe("10년차");
+    expect(b.subjectLabel).toBe("수학·영어");
+  });
+});
+
+describe("요금제 게이팅 (과외쌤 구독)", () => {
+  it("유료는 자동 그래프, 무료는 수기", () => {
+    expect(getReportGating(true)).toMatchObject({ mode: "auto", autoGraphs: true });
+    expect(getReportGating(false)).toMatchObject({ mode: "manual", autoGraphs: false });
+  });
+
+  it("무료가 무엇을 못 하는지 문구로 말한다 — 리포트 자체는 막지 않는다", () => {
+    const free = getReportGating(false);
+    expect(free.notice).toContain("자동 그래프");
+    expect(free.notice).toContain("구독");
+  });
+
+  it("과외쌤 구독 상태를 그대로 따른다 (학생 프리미엄과 무관)", () => {
+    // 미납·해지·일시정지는 전부 비활성 → 자동 그래프 없음.
+    for (const status of ["none", "past_due", "canceled", "paused"] as const) {
+      expect(getReportGating(getTeacherBillingState(status).active).autoGraphs).toBe(false);
+    }
+    expect(getReportGating(getTeacherBillingState("active").active).autoGraphs).toBe(true);
+  });
+});
+
+describe("발급 한도", () => {
+  it("학생 수에 연동한다 — 고정값이면 학생이 늘 때 정상 사용이 막힌다", () => {
+    expect(reportMonthlyQuota(0)).toBe(30);
+    expect(reportMonthlyQuota(3)).toBe(30); // 24 < 하한 30
+    expect(reportMonthlyQuota(12)).toBe(96); // 주간 리포트 52건의 약 2배 여유
+    expect(reportMonthlyQuota(20)).toBe(160);
+  });
+
+  it("초과하면 막고, 왜 막혔는지와 언제 풀리는지 알려준다", () => {
+    const state = getReportQuotaState(30, 0);
+    expect(state.exceeded).toBe(true);
+    expect(state.remaining).toBe(0);
+    expect(state.notice).toContain("다음 달");
+    // 이미 보낸 리포트는 볼 수 있다는 것도 알려준다(불안하지 않게).
+    expect(state.notice).toContain("이미 보낸");
+  });
+
+  it("한도에 가까워지면 미리 알린다 — 보내려는 순간 막히면 늦다", () => {
+    const near = getReportQuotaState(26, 0);
+    expect(near.exceeded).toBe(false);
+    expect(near.nearLimit).toBe(true);
+    expect(near.notice).toContain("4건 남았어요");
+    expect(getReportQuotaState(10, 0).notice).toBeNull();
+  });
+
+  it("DB 가 돌려주는 한도 오류를 알아본다", () => {
+    expect(isReportQuotaError('new row violates ... report_monthly_quota_exceeded')).toBe(true);
+    expect(isReportQuotaError("some other error")).toBe(false);
+    expect(isReportQuotaError(null)).toBe(false);
   });
 });
