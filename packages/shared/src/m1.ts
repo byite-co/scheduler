@@ -292,3 +292,42 @@ function addUtcYears(date: Date, years: number): Date {
   next.setUTCFullYear(next.getUTCFullYear() + years);
   return next;
 }
+
+// ── 대기 중인 연결 요청의 학생 표시 ────────────────────────────────────────────
+//
+// profiles RLS(profiles_connected_read)는 active 연결만 허용한다. 그래서 pending 요청에서는
+// 학생 프로필을 읽을 수 없고, 화면이 UUID 앞자리를 보여 줬다 — 과외쌤이 누가 요청했는지
+// 모르는 채로 수락/거절을 눌러야 했다.
+//
+// pending_connection_requests() RPC 가 이 세 필드만 돌려준다. 수락/거절 결정에 필요한
+// 최소한이고, 생년월일·목표대학·사진은 넘어오지 않는다.
+export type PendingConnectionRequest = {
+  connection_id: string;
+  student_name: string | null;
+  student_grade: string | null;
+  requested_at: string | null;
+};
+
+/**
+ * 요청 행에 찍을 이름표. 동명이인이 있을 수 있어 학년이 있으면 함께 보여 준다.
+ * 이름이 비어 있으면(프로필 미작성) 빈 문자열 대신 그 사실을 말한다 — 빈 칸은 오류처럼 보인다.
+ */
+export function formatPendingRequestLabel(request: {
+  student_name?: string | null;
+  student_grade?: string | null;
+}): string {
+  const name = (request.student_name ?? "").trim();
+  const grade = (request.student_grade ?? "").trim();
+  if (!name) return grade ? `이름 미입력 · ${grade}` : "이름 미입력";
+  return grade ? `${name} · ${grade}` : name;
+}
+
+/**
+ * RPC 응답을 connection_id 로 찾을 수 있게 만든다.
+ * RPC 가 실패하거나(네트워크·권한) 행이 없으면 빈 Map — 호출부는 이름 없이도 그려야 한다.
+ */
+export function indexPendingRequests(
+  rows: PendingConnectionRequest[] | null | undefined
+): Map<string, PendingConnectionRequest> {
+  return new Map((rows ?? []).map((row) => [row.connection_id, row]));
+}

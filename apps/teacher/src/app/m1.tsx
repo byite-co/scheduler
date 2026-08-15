@@ -19,9 +19,11 @@ import {
   M1_CONNECTION_STATUS_SCREENS,
   PRICE_PER_STUDENT_KRW,
   formatInviteCode,
-  getTeacherMonthlySubscriptionAmount
+  formatPendingRequestLabel,
+  getTeacherMonthlySubscriptionAmount,
+  indexPendingRequests
 } from "@ssamplanner/shared";
-import type { Database, M1ConnectionStatus } from "@ssamplanner/shared";
+import type { Database, M1ConnectionStatus, PendingConnectionRequest } from "@ssamplanner/shared";
 
 import { supabase } from "./supabaseClient";
 
@@ -211,6 +213,36 @@ function useDashboardStudents(connections: ConnectionRow[]): DashboardStudent[] 
   }, [connections]);
 
   return students;
+}
+
+// pending 요청의 학생 이름은 profiles 를 직접 못 읽는다(RLS 가 active 만 허용).
+// 전용 RPC 가 이름·학년만 돌려준다. 목록 화면이므로 인자 없이 한 번만 부른다(N+1 회피).
+function usePendingRequestNames(connections: ConnectionRow[]): Map<string, PendingConnectionRequest> {
+  const [byId, setById] = useState<Map<string, PendingConnectionRequest>>(new Map());
+  const pendingKey = connections
+    .filter((c) => c.status === "pending")
+    .map((c) => c.id)
+    .join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!pendingKey) {
+        if (!cancelled) setById(new Map());
+        return;
+      }
+      const { data } = await supabase.rpc("pending_connection_requests");
+      if (cancelled) return;
+      // 실패하면 빈 Map — 이름 없이라도 목록은 그려야 한다(수락/거절 자체를 막지 않는다).
+      setById(indexPendingRequests(data as PendingConnectionRequest[] | null));
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingKey]);
+
+  return byId;
 }
 
 // 집중 관리 상태: 신규·무데이터 학생은 '주의'로 깃발하지 않는다(기록 없음=중립).
@@ -1054,6 +1086,7 @@ function InviteCodePanel({ data }: { data: TeacherData }) {
 
 function ConnectionList({ data, status }: { data: TeacherData; status: M1ConnectionStatus }) {
   const rows = data.connections.filter((connection) => connection.status === status);
+  const pendingNames = usePendingRequestNames(data.connections);
 
   async function decide(connection: ConnectionRow, decision: "accept" | "reject") {
     const patch =
@@ -1080,11 +1113,17 @@ function ConnectionList({ data, status }: { data: TeacherData; status: M1Connect
 
   return (
     <div className="flex flex-col gap-3">
-      {rows.map((connection) => (
+      {rows.map((connection) => {
+        // pending 일 때만 이름이 온다. 아직 안 왔거나 실패했으면 기존대로 식별자를 보여 준다
+        // (누구인지 모르는 채 누르게 두더라도, 목록이 사라지는 것보다는 낫다).
+        const request = pendingNames.get(connection.id);
+        return (
         <div key={connection.id} className="rounded-control border border-line bg-canvas p-4">
           <StepList
             steps={[
-              ["학생 ID", shortId(connection.student_id)],
+              request
+                ? ["학생", formatPendingRequestLabel(request)]
+                : ["학생 ID", shortId(connection.student_id)],
               ["초대 코드", connection.invite_code ? formatInviteCode(connection.invite_code) : "-"],
               ["상태", connection.status]
             ]}
@@ -1100,7 +1139,8 @@ function ConnectionList({ data, status }: { data: TeacherData; status: M1Connect
             </div>
           ) : null}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
