@@ -504,3 +504,143 @@ export function getReportQuotaState(used: number, activeStudentCount: number): R
 export function isReportQuotaError(message: string | null | undefined): boolean {
   return (message ?? "").includes("report_monthly_quota_exceeded");
 }
+
+// ── 학부모 웹뷰 (J16) ────────────────────────────────────────────────────────
+//
+// 웹뷰는 **발송 시점 스냅샷만** 읽는다. 실시간 재조회를 하지 않는다 —
+// 보낸 뒤 학생 기록이 바뀌어도 학부모가 본 내용은 그대로여야 한다.
+//
+// 스냅샷 모양이 리포트마다 다르다:
+//   · 유료 과외쌤  → 자동 수집 4종 + lessons + branding
+//   · 무료 과외쌤  → 자동 수집이 **아예 없다**(게이팅으로 스냅샷에도 안 담는다)
+//   · 옛 리포트     → 1단계 이전 구조(키가 없거나 다름)
+// 그래서 **없는 키를 가정하지 않고** 하나씩 확인해 꺼낸다. 모양이 달라도 렌더는 성공해야 한다.
+
+/** hidden 은 웹뷰에 아예 내보내지 않는다 — 학생이 공개하지 않은 사실이다. */
+function readMetric<T>(raw: unknown): ReportMetric<T> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const state = (raw as { state?: unknown }).state;
+  if (state === "hidden") return null; // 웹뷰에서는 존재 자체를 지운다
+  if (state === "no_data") return NO_DATA;
+  if (state === "value" && "value" in (raw as object)) {
+    return metricValue((raw as { value: T }).value);
+  }
+  return null;
+}
+
+export type ParentWebviewReport = {
+  studentName: string;
+  periodStart: string;
+  periodEnd: string;
+  branding: TeacherBranding;
+  /** 각 항목은 "보여줄 것이 있을 때만" 존재한다. null 이면 카드를 그리지 않는다. */
+  studyTime: ReportMetric<StudyTimeBlock> | null;
+  homework: ReportMetric<HomeworkBlock> | null;
+  subjectRates: ReportMetric<SubjectRateRow[]> | null;
+  focus: ReportMetric<FocusBlock> | null;
+  lessons: ReportMetric<LessonBlock> | null;
+  exams: ExamBlock[];
+  narrative: ReportNarrative;
+  includedSubjects: SubjectCode[];
+  /** 자동 수집이 하나도 없는 리포트(무료 플랜 등). 화면이 "고장난 것처럼" 보이지 않게 쓴다. */
+  autoDataAvailable: boolean;
+};
+
+export type SharedReportRowLike = {
+  period_start: string;
+  period_end: string;
+  data: unknown;
+  teacher_comment: string | null;
+  home_support?: string | null;
+  next_week_focus?: string | null;
+  included_subjects: SubjectCode[] | null;
+  student_name?: string | null;
+  teacher_name?: string | null;
+};
+
+export function buildParentWebviewReport(row: SharedReportRowLike): ParentWebviewReport {
+  const data = (row.data ?? {}) as Record<string, unknown>;
+
+  // 브랜딩은 스냅샷에 있으면 그것을 쓴다(발송 시점의 이름이 맞다).
+  // 없으면(2단계 이전 리포트) RPC 가 준 현재 이름으로 대체한다.
+  const snapshotBranding = data.branding as Partial<TeacherBranding> | undefined;
+  const branding =
+    snapshotBranding && typeof snapshotBranding.name === "string"
+      ? buildTeacherBranding({
+          name: snapshotBranding.name,
+          bio: snapshotBranding.bio ?? null,
+          subjects: snapshotBranding.subjects ?? []
+        })
+      : buildTeacherBranding({ name: row.teacher_name ?? null, bio: null, subjects: [] });
+
+  const studyTime = readMetric<StudyTimeBlock>(data.studyTime);
+  const homework = readMetric<HomeworkBlock>(data.homework);
+  const subjectRates = readMetric<SubjectRateRow[]>(data.subjectRates);
+  const focus = readMetric<FocusBlock>(data.focus);
+  const lessons = readMetric<LessonBlock>(data.lessons);
+  const exams = Array.isArray(data.exams) ? (data.exams as ExamBlock[]) : [];
+
+  const included = row.included_subjects ?? [];
+  // 공개 과목만 보여준다. 과목이 지정돼 있으면 그 과목의 행만 남긴다.
+  const filterBySubject = <T extends { subject: SubjectCode }>(rows: T[]): T[] =>
+    included.length > 0 ? rows.filter((r) => included.includes(r.subject)) : rows;
+
+  const filteredSubjectRates =
+    subjectRates && subjectRates.state === "value"
+      ? metricValue(filterBySubject(subjectRates.value))
+      : subjectRates;
+
+  return {
+    studentName: (row.student_name ?? "").trim() || "학생",
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    branding,
+    studyTime,
+    homework,
+    subjectRates: filteredSubjectRates,
+    focus,
+    lessons,
+    exams: filterBySubject(exams),
+    narrative: {
+      teacherComment: row.teacher_comment ?? "",
+      homeSupport: row.home_support ?? "",
+      nextWeekFocus: row.next_week_focus ?? ""
+    },
+    includedSubjects: included,
+    autoDataAvailable: [studyTime, homework, subjectRates, focus].some((m) => m?.state === "value")
+  };
+}
+
+/** J16 상단 요약 3칸. 값이 있는 것만 낸다 — 없는 지표를 0으로 채우지 않는다. */
+export type WebviewHighlight = { label: string; value: string; tone: "brand" | "success" | "flame" };
+
+export function buildWebviewHighlights(report: ParentWebviewReport): WebviewHighlight[] {
+  const out: WebviewHighlight[] = [];
+  if (report.studyTime?.state === "value") {
+    const h = Math.floor(report.studyTime.value.totalMinutes / 60);
+    const m = report.studyTime.value.totalMinutes % 60;
+    out.push({ label: "공부시간", value: h > 0 ? `${h}h` : `${m}분`, tone: "brand" });
+  }
+  if (report.homework?.state === "value") {
+    out.push({ label: "숙제 수행", value: `${Math.round(report.homework.value.rate * 100)}%`, tone: "success" });
+  }
+  if (report.focus?.state === "value" && report.focus.value.averageScore !== null) {
+    out.push({ label: "집중도", value: `${report.focus.value.averageScore}%`, tone: "flame" });
+  }
+  if (report.lessons?.state === "value") {
+    out.push({ label: "이번 달 수업", value: `${report.lessons.value.done}회`, tone: "brand" });
+  }
+  return out.slice(0, 3);
+}
+
+/** 기간 표기. "6월 2주차"처럼 학부모가 읽기 쉬운 형태로. */
+export function formatReportPeriod(periodStart: string, periodEnd: string): string {
+  const start = new Date(`${periodStart}T00:00:00.000Z`);
+  const month = start.getUTCMonth() + 1;
+  const weekOfMonth = Math.floor((start.getUTCDate() - 1) / 7) + 1;
+  const end = new Date(`${periodEnd}T00:00:00.000Z`);
+  const endMonth = end.getUTCMonth() + 1;
+  return endMonth === month
+    ? `${month}월 ${weekOfMonth}주차`
+    : `${month}월 ${weekOfMonth}주차 ~ ${endMonth}월`;
+}

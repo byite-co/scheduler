@@ -1654,6 +1654,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      revoke_report_share: { Args: { p_report_id: string }; Returns: undefined }
       save_focus_check: {
         Args: { p_checked_at?: string; p_drowsy: boolean; p_session_id: string }
         Returns: {

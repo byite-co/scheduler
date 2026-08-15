@@ -433,7 +433,9 @@ export function TeacherReportBuilder() {
     let deliveryStatus: "pending" | "sent" | "failed" = "pending";
     let deliveryError: string | null = null;
     if (channel === "link") {
-      const shared = await supabase.rpc("create_report_share", { p_report_id: reportId, p_ttl_hours: 168 });
+      // 만료는 DB 기본값(90일)을 쓴다. 여기서 168시간을 넘기면 학부모가 일주일 안에 못 열었을 때
+      // 링크가 죽는다 — 그 문의는 전부 과외쌤에게 돌아온다.
+      const shared = await supabase.rpc("create_report_share", { p_report_id: reportId });
       if (shared.error) {
         deliveryStatus = "failed";
         deliveryError = shared.error.message;
@@ -467,6 +469,19 @@ export function TeacherReportBuilder() {
           : `${REPORT_DELIVERY_CHANNEL_LABELS[channel]} 연동 전이라 발송 대기로만 기록했어요.`
     );
     await loadStudent(studentId);
+  }
+
+  // 발급된 링크를 즉시 죽인다. 리포트 본문은 남는다(이력·재발급 가능).
+  async function revokeShare(reportId: string) {
+    if (!window.confirm("이 링크를 끊으면 학부모가 더 이상 볼 수 없어요. 계속할까요?")) return;
+    setBusy(true);
+    const { error } = await supabase.rpc("revoke_report_share", { p_report_id: reportId });
+    setBusy(false);
+    setMessage(error ? `링크 끊기 실패: ${error.message}` : "링크를 끊었어요. 필요하면 다시 발급할 수 있어요.");
+    if (!error) {
+      setShareLink(null);
+      if (studentId) await loadStudent(studentId);
+    }
   }
 
   const shellData: TeacherShellData = {
@@ -927,8 +942,19 @@ export function TeacherReportBuilder() {
               <span className="font-bold">
                 {r.period_start} ~ {r.period_end} · {r.status === "sent" ? "발송됨" : "초안"}
               </span>
-              <span className="font-bold text-muted">
+              <span className="flex items-center gap-2 font-bold text-muted">
                 {r.share_token ? (isShareExpired(r.share_expires_at) ? "링크 만료" : "링크 활성") : "링크 없음"}
+                {/* 링크가 잘못 퍼졌을 때 회수할 수단. 없으면 만료(90일)를 기다리는 것 말고 할 게 없다. */}
+                {r.share_token && !isShareExpired(r.share_expires_at) ? (
+                  <button
+                    className="rounded-control border border-line px-2 py-1 text-xs font-bold text-danger disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => void revokeShare(r.id)}
+                    type="button"
+                  >
+                    링크 끊기
+                  </button>
+                ) : null}
               </span>
             </div>
           ))}

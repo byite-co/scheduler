@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLessonBlock,
+  buildParentWebviewReport,
+  buildWebviewHighlights,
+  formatReportPeriod,
   buildTeacherBranding,
   describeLessonBlock,
   getReportGating,
@@ -19,6 +22,7 @@ import {
   type ParentReportInput
 } from "./parentReport";
 import { getTeacherBillingState } from "./m6";
+import type { SubjectCode } from "./subjects";
 
 const ALL_OPEN = { share_study_time: true, share_homework_photos: true, share_focus_data: true };
 
@@ -343,5 +347,95 @@ describe("발급 한도", () => {
     expect(isReportQuotaError('new row violates ... report_monthly_quota_exceeded')).toBe(true);
     expect(isReportQuotaError("some other error")).toBe(false);
     expect(isReportQuotaError(null)).toBe(false);
+  });
+});
+
+describe("학부모 웹뷰 — 스냅샷만 그린다", () => {
+  const full = {
+    period_start: "2026-08-09",
+    period_end: "2026-08-15",
+    teacher_comment: "이번 주 좋았어요",
+    home_support: "밤 11시 이후 휴대폰",
+    next_week_focus: "미적분",
+    included_subjects: ["math"] as SubjectCode[],
+    student_name: "이서연",
+    teacher_name: "김지훈",
+    data: {
+      branding: { name: "김지훈", bio: "10년차", subjects: ["math", "english"] },
+      studyTime: { state: "value", value: { totalMinutes: 180, perDayMinutes: [0, 60, 120, 0, 0, 0, 0], deltaMinutes: 60, trend: [] } },
+      homework: { state: "value", value: { done: 3, total: 4, rate: 0.75 } },
+      subjectRates: {
+        state: "value",
+        value: [
+          { subject: "math", label: "수학", done: 2, total: 2, rate: 1 },
+          { subject: "english", label: "영어", done: 1, total: 2, rate: 0.5 }
+        ]
+      },
+      // 🚨 학생이 공개하지 않은 항목 — 웹뷰에 절대 나오면 안 된다.
+      focus: { state: "hidden" },
+      lessons: { state: "value", value: { done: 3, absent: 1, planned: 8 } },
+      exams: [
+        { subject: "math", label: "수학", latest: { id: "e1", subject: "math", exam_name: "6월 모의", taken_on: "2026-06-04", grade: 3, score: null, comment: null }, points: [] },
+        { subject: "english", label: "영어", latest: { id: "e2", subject: "english", exam_name: "중간", taken_on: "2026-05-01", grade: null, score: 88, comment: null }, points: [] }
+      ]
+    }
+  };
+
+  it("hidden 항목은 웹뷰에서 존재 자체가 사라진다", () => {
+    const v = buildParentWebviewReport(full);
+    // null 이면 화면이 카드를 아예 안 그린다. no_data("아직 기록이 없어요")와도 다르다.
+    expect(v.focus).toBeNull();
+    expect(v.studyTime?.state).toBe("value");
+  });
+
+  it("공개 과목만 남긴다", () => {
+    const v = buildParentWebviewReport(full);
+    if (v.subjectRates?.state !== "value") throw new Error("unreachable");
+    expect(v.subjectRates.value.map((r) => r.subject)).toEqual(["math"]);
+    expect(v.exams.map((e) => e.subject)).toEqual(["math"]);
+  });
+
+  it("브랜딩은 발송 시점 스냅샷을 쓴다 (지금 이름이 아니라)", () => {
+    const v = buildParentWebviewReport({ ...full, teacher_name: "바뀐이름" });
+    expect(v.branding.name).toBe("김지훈");
+    expect(v.branding.subjectLabel).toBe("수학·영어");
+  });
+
+  it("스냅샷에 브랜딩이 없으면(옛 리포트) 현재 이름으로 대체한다", () => {
+    const v = buildParentWebviewReport({ ...full, data: { studyTime: full.data.studyTime } });
+    expect(v.branding.name).toBe("김지훈");
+  });
+
+  it("자동 수집이 아예 없는 스냅샷(무료 플랜)도 렌더된다", () => {
+    const v = buildParentWebviewReport({
+      ...full,
+      data: { branding: full.data.branding, lessons: full.data.lessons, exams: [] }
+    });
+    expect(v.autoDataAvailable).toBe(false);
+    expect(v.studyTime).toBeNull();
+    expect(v.homework).toBeNull();
+    // 글 세 칸과 회차는 그대로 나온다 — 빈 화면이 되면 안 된다.
+    expect(v.narrative.teacherComment).toBe("이번 주 좋았어요");
+    expect(v.lessons?.state).toBe("value");
+  });
+
+  it("data 가 비어 있어도 터지지 않는다", () => {
+    const v = buildParentWebviewReport({ ...full, data: null });
+    expect(v.autoDataAvailable).toBe(false);
+    expect(v.exams).toEqual([]);
+    expect(v.studentName).toBe("이서연");
+  });
+
+  it("상단 요약은 값이 있는 것만 최대 3개", () => {
+    const h = buildWebviewHighlights(buildParentWebviewReport(full));
+    expect(h.length).toBeLessThanOrEqual(3);
+    // 공개하지 않은 집중도는 요약에도 없다.
+    expect(h.some((x) => x.label === "집중도")).toBe(false);
+    expect(h[0]).toMatchObject({ label: "공부시간", value: "3h" });
+  });
+
+  it("기간을 학부모가 읽는 형태로 만든다", () => {
+    expect(formatReportPeriod("2026-06-08", "2026-06-14")).toBe("6월 2주차");
+    expect(formatReportPeriod("2026-08-30", "2026-09-05")).toContain("~");
   });
 });
