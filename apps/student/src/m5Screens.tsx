@@ -8,6 +8,7 @@ import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-t
 import {
   AD_UNLOCK_DISABLED_NOTICE,
   AD_UNLOCK_ENABLED,
+  AI_REC_CLIENT_WRITE_ENABLED,
   SUBJECT_LABELS,
   aggregateWeeklyStudy,
   createPlannerTodosFromRecommendation,
@@ -159,17 +160,23 @@ export function AiRecommendationScreen() {
     const due = getDateKey(new Date(Date.now() + 6 * 86_400_000));
     const todos = createPlannerTodosFromRecommendation(recommendations, userId, due);
     const weekStart = startOfWeekKey(new Date());
+    // 플래너 반영(todos)은 학생 자신의 할 일이라 그대로 둔다.
     const { error } = await supabase.from("todos").insert(todos);
-    await supabase.from("ai_recommendations").upsert(
-      recommendations.map((rec) => ({
-        student_id: userId,
-        week_start: weekStart,
-        subject: rec.subject,
-        recommended_hours: rec.recommendedHours,
-        reason: rec.reason
-      })),
-      { onConflict: "student_id,week_start,subject" }
-    );
+    // ai_recommendations 쓰기는 서버에서 차단돼 있다(20260816020000). 추천값이 서버 산출물이
+    // 아니라 클라이언트 스텁의 결과라, 유료 기능의 산출물 저장소를 사용자가 직접 채우는 꼴이었다.
+    // 서버만 막고 여기를 남기면 저장 실패 오류만 사용자에게 보인다 → 플래그로 함께 멈춘다.
+    if (AI_REC_CLIENT_WRITE_ENABLED) {
+      await supabase.from("ai_recommendations").upsert(
+        recommendations.map((rec) => ({
+          student_id: userId,
+          week_start: weekStart,
+          subject: rec.subject,
+          recommended_hours: rec.recommendedHours,
+          reason: rec.reason
+        })),
+        { onConflict: "student_id,week_start,subject" }
+      );
+    }
     data.setMessage(error ? error.message : `${todos.length}개 할 일을 플래너에 반영했어요.`);
     if (!error) setReflected(true);
   }

@@ -794,6 +794,11 @@ as $$
 declare
   result_row homework_submissions%rowtype;
 begin
+  -- 20260816020000: 호출 주체 검증(이중 방어). anon 키·사용자 토큰은 여기서 막힌다.
+  --   JWT 가 없는 경로(psql·Management API)는 null → 통과시킨다(운영 점검을 막지 않는다).
+  if coalesce(auth.role(), 'service_role') <> 'service_role' then
+    raise exception 'service_role_required';
+  end if;
   update homework_submissions
     set ai_verdict = p_verdict,
         ai_confidence = case when p_confidence is null then null else greatest(0, least(1, p_confidence)) end,
@@ -807,6 +812,8 @@ begin
 end;
 $$;
 revoke all on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) from public;
+-- 20260816020000: anon 이 빠져 있어 실제로 열려 있었다. revoke ... from public 은 롤별 grant 를 지우지 못한다.
+revoke all on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) from anon;
 revoke all on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) from authenticated;
 grant execute on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) to service_role;
 
@@ -1142,8 +1149,13 @@ create table ai_recommendations (
   unique (student_id, week_start, subject)
 );
 alter table ai_recommendations enable row level security;
-create policy airec_student_rw on ai_recommendations for all
-  using (student_id = auth.uid()) with check (student_id = auth.uid());
+-- 20260816020000: 클라이언트 쓰기 차단. 추천값이 클라이언트 스텁의 결과라, 유료 기능의
+--   산출물 저장소를 사용자가 직접 채울 수 있었다(실측 HTTP 201). 쓰기 정책은 두지 않는다.
+create policy ai_recommendations_select_self on ai_recommendations
+  for select to authenticated
+  using (student_id = auth.uid());
+revoke all on table ai_recommendations from anon;
+revoke insert, update, delete, truncate, references on table ai_recommendations from authenticated;
 
 -- ============================================================================
 -- 8. 리포트(학생 나의 리포트 / 과외쌤 수업·주간) + 학부모 공유
