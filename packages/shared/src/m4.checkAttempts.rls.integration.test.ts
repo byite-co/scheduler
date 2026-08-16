@@ -303,6 +303,84 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
       });
       assertOk(afterFail);
 
+      // ── (7-b) 관찰 기록 경로를 **실제로 실행**한다 ────────────────────────
+      // 🚨 이 실행 테스트가 없어서 record_homework_check_observation 이 2026-08-07 부터
+      //    호출될 때마다 실패하는 것을 아무도 몰랐다(무형 리터럴 CASE → text → enum 대입 실패).
+      //    스키마 테스트는 함수 존재·권한만 문자열로 확인한다 — 본문이 도는지는 검증하지 못한다.
+      //    그래서 여기서는 반드시 **호출하고 결과 행까지** 확인한다.
+      const observeId = (afterFail.data as Record<string, unknown>).id as string;
+      const observed = await admin.rpc("record_homework_check_observation", {
+        p_attempt_id: observeId,
+        p_raw_observation: { prompt_version: "obs-prompt-1", schema_version: "1.0", images: [] },
+        p_prompt_version: "obs-prompt-1",
+        p_schema_version: "1.0",
+        p_scope_included: true,
+        p_stop_reason: "end_turn",
+        p_model: "integration-no-ai-call",
+        p_input_tokens: 2892,
+        p_output_tokens: 130,
+        p_cost_usd_micros: 3542,
+        p_latency_ms: 1200
+        // p_discard_reason 생략 = 폐기 아님(성공 경로).
+      });
+      assertOk(observed);
+      const observedRow = assertData(observed.data as Record<string, unknown> | null);
+      expect(observedRow.status).toBe("completed");
+      expect(observedRow.prompt_version).toBe("obs-prompt-1");
+      expect(observedRow.model).toBe("integration-no-ai-call");
+      // 비용·토큰이 실제로 남아야 한다. 안 남으면 나간 돈을 나중에 셀 수 없다.
+      expect(observedRow.estimated_cost_usd_micros).toBe(3542);
+      expect(observedRow.input_tokens).toBe(2892);
+      expect(observedRow.raw_ai_observation).toMatchObject({ schema_version: "1.0" });
+      // 관찰은 판정이 아니다 — verdict 는 비어 있어야 한다.
+      expect(observedRow.verdict).toBeNull();
+
+      // 폐기 경로도 실행한다. 폐기는 failed 로 남되 **원본은 보관**한다.
+      // 제출당 재검사 상한(3회)에 이미 닿았으므로 새 제출을 하나 만든다.
+      const discardSubmission = await admin
+        .from("homework_submissions")
+        .insert({ todo_id: todoId, student_id: studentId, photo_paths: [`${studentId}/p3.jpg`] })
+        .select("id")
+        .single();
+      assertOk(discardSubmission);
+      const discardRun = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: assertData(discardSubmission.data).id,
+        p_requested_by: studentId,
+        p_idempotency_key: `run-5-${suffix}`
+      });
+      assertOk(discardRun);
+      const discarded = await admin.rpc("record_homework_check_observation", {
+        p_attempt_id: (discardRun.data as Record<string, unknown>).id as string,
+        p_raw_observation: { prompt_version: "obs-prompt-1", schema_version: "1.0", images: null },
+        p_prompt_version: "obs-prompt-1",
+        p_schema_version: "1.0",
+        p_scope_included: true,
+        p_stop_reason: "max_tokens",
+        p_model: "integration-no-ai-call",
+        p_input_tokens: 100,
+        p_output_tokens: 10,
+        p_cost_usd_micros: 200,
+        p_latency_ms: 300,
+        p_discard_reason: "stop_reason_not_end_turn: max_tokens"
+      });
+      assertOk(discarded);
+      const discardedRow = assertData(discarded.data as Record<string, unknown> | null);
+      expect(discardedRow.status).toBe("failed");
+      expect(discardedRow.error_code).toBe("observation_discarded");
+      expect(discardedRow.discard_reason).toContain("max_tokens");
+      expect(discardedRow.raw_ai_observation).toBeTruthy(); // 폐기해도 원본은 남는다
+
+      // 이미 마감된 attempt 에 다시 기록하면 거부된다(중복 기록 방지).
+      const reRecord = await admin.rpc("record_homework_check_observation", {
+        p_attempt_id: observeId,
+        p_raw_observation: {},
+        p_prompt_version: "obs-prompt-1",
+        p_schema_version: "1.0",
+        p_scope_included: true
+        // 선택 인자는 생략한다 — 기본값이 null 이라 같은 요청이 된다.
+      });
+      expect(reRecord.error?.message ?? "").toContain("check_attempt_not_open");
+
       // ── (8) 과외쌤: 공개범위 안에서는 읽히고, 끄면 읽히지 않는다 ─────────
       const teacherSees = await teacherClient
         .from("homework_check_attempts")
