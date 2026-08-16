@@ -6,6 +6,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, tints, typography } from "@ssamplanner/design-tokens";
 import {
+  AD_UNLOCK_DISABLED_NOTICE,
+  AD_UNLOCK_ENABLED,
   SUBJECT_LABELS,
   aggregateWeeklyStudy,
   createPlannerTodosFromRecommendation,
@@ -107,7 +109,9 @@ function GateNotice({ gate, onWatchAd }: { gate: FeatureGateState; onWatchAd: ()
         <Text style={styles.lockTitle}>준비됐어요</Text>
         <Text style={styles.lockHint}>{gate.reason}</Text>
       </View>
-      {gate.canUnlockByAd ? (
+      {/* 광고 언락은 서버에서 발급이 차단돼 있다(20260816010000). 버튼을 남기면 눌러도
+          실패하는 버튼이 되므로 플래그로 함께 숨긴다. */}
+      {AD_UNLOCK_ENABLED && gate.canUnlockByAd ? (
         <Pressable accessibilityRole="button" onPress={onWatchAd} style={styles.primaryButton}>
           <AppIcon name="ad" size={18} color={colors.surface} />
           <Text style={styles.primaryButtonText}>광고 보고 무료로 열기</Text>
@@ -115,10 +119,14 @@ function GateNotice({ gate, onWatchAd }: { gate: FeatureGateState; onWatchAd: ()
       ) : null}
       <Link href={"/subscribe" as Href} asChild>
         <Pressable accessibilityRole="button" style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>월 구독하고 광고 없이 무제한</Text>
+          <Text style={styles.secondaryButtonText}>
+            {AD_UNLOCK_ENABLED ? "월 구독하고 광고 없이 무제한" : "월 구독하고 무제한으로 쓰기"}
+          </Text>
         </Pressable>
       </Link>
-      <Text style={styles.gateHint}>광고 없이 매주 받고 싶다면? 월 구독 →</Text>
+      <Text style={styles.gateHint}>
+        {AD_UNLOCK_ENABLED ? "광고 없이 매주 받고 싶다면? 월 구독 →" : AD_UNLOCK_DISABLED_NOTICE}
+      </Text>
     </View>
   );
 }

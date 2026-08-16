@@ -1455,8 +1455,15 @@ create table ad_unlocks (
   expires_at  timestamptz
 );
 alter table ad_unlocks enable row level security;
-create policy unlock_self on ad_unlocks for all
-  using (student_id = auth.uid()) with check (student_id = auth.uid());
+-- 2026-08-16(20260816010000): 광고 보상 언락 **발급 전면 중지**.
+--   기존 unlock_self(for all)는 본인 행 한정이었지만, 광고 시청을 검증하는 서버 경로가 없어
+--   "본인이 스스로 발급"이 곧 우회였다(학생이 광고를 안 보고 유료 기능을 열 수 있었다).
+--   INSERT/UPDATE/DELETE 정책을 **두지 않는다** — RLS 기본 거부가 최종 방어선이다.
+create policy ad_unlocks_select_self on ad_unlocks
+  for select to authenticated
+  using (student_id = auth.uid());
+revoke all on table ad_unlocks from anon;
+revoke insert, update, delete, truncate, references on table ad_unlocks from authenticated;
 
 -- ============================================================================
 -- 11. 알림 + 푸시 토큰
