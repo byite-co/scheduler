@@ -60,3 +60,22 @@ export function getAiCheckPausedStudentNotice(options: { isTutored: boolean }): 
     ? AI_CHECK_PAUSED_STUDENT_NOTICE_TUTORED
     : AI_CHECK_PAUSED_STUDENT_NOTICE_SOLO;
 }
+
+/**
+ * 광고 보상 언락(`ad_unlocks`)을 **쓸 수 있는가**.
+ *
+ * `false` 인 이유 — 광고 시청 완료를 검증하는 서버 경로가 **없다.**
+ * 클라이언트가 `NOTE(mock)` 로 시청을 가정하고 행을 넣을 뿐이라
+ * (apps/student/src/m5Screens.tsx), 학생이 광고를 안 보고도 유료 기능을 열 수 있었다.
+ * 2026-08-16 마이그레이션(20260816010000)으로 **서버에서 발급을 전면 차단**했고,
+ * 이 플래그는 그에 맞춰 버튼을 숨긴다 — 서버만 막고 버튼을 남기면 눌러도 실패하는
+ * 버튼이 되어 고장으로 보인다.
+ *
+ * ⚠️ 이 값을 `true` 로 되돌리려면 서버 차단 해제가 **먼저** 필요하다. 순서를 뒤집으면
+ *    사용자는 버튼을 누르지만 DB 가 거부한다. 그리고 되돌리기 전에 리워드 광고 SDK 와
+ *    **서버 측 시청 검증**(리워드 콜백 서명 확인)이 있어야 한다. 없으면 같은 구멍이다.
+ */
+export const AD_UNLOCK_ENABLED = false;
+
+/** 언락 수단이 없는 동안 잠금 화면에 띄울 안내. "고장"이 아니라 "지금은 없는 기능"임을 말한다. */
+export const AD_UNLOCK_DISABLED_NOTICE = "지금은 광고 보고 열기를 쓸 수 없어요.";

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { AD_UNLOCK_ENABLED } from "./featureFlags";
+
 import {
   aggregateWeeklyStudy,
   createPlannerTodosFromRecommendation,
@@ -231,5 +233,43 @@ describe("공유 링크 — 토큰·만료·회수", () => {
     expect(webviewLayout).toContain("index: false");
     expect(webviewLayout).toContain("noarchive: true");
     expect(webviewLayout).toContain('referrer: "no-referrer"');
+  });
+});
+
+// ── 광고 보상 언락 실패-폐쇄 (20260816010000) ────────────────────────────────
+// A0 감사에서 ad_unlocks 정책이 for all 이라 학생이 광고를 보지 않고 스스로 언락을
+// 발급할 수 있음이 확인됐다. 유료 게이트가 이 표 한 줄로 열린다.
+describe("광고 보상 언락 — 발급 차단", () => {
+  const migration = readFileSync(
+    new URL("../../../supabase/migrations/20260816010000_ad_unlocks_fail_closed.sql", import.meta.url),
+    "utf8"
+  );
+  const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
+  const screen = readFileSync(new URL("../../../apps/student/src/m5Screens.tsx", import.meta.url), "utf8");
+
+  it("for all 정책이 사라졌다", () => {
+    expect(migration).toContain("drop policy if exists unlock_self on ad_unlocks");
+    expect(schema).not.toContain("create policy unlock_self on ad_unlocks for all");
+  });
+
+  it("SELECT 만 남기고 쓰기 정책은 아예 없다 — RLS 기본 거부가 최종 방어선이다", () => {
+    for (const source of [migration, schema]) {
+      expect(source).toContain("create policy ad_unlocks_select_self on ad_unlocks");
+      expect(source).toContain("for select to authenticated");
+      // 쓰기 정책을 만들어 두면 조건을 완화하는 실수로 곧바로 열린다.
+      expect(source).not.toMatch(/create policy \w+ on ad_unlocks[\s\S]{0,80}for (insert|update|delete|all)/);
+    }
+  });
+
+  it("테이블 권한도 회수한다 — 정책만 고치면 정책 추가 시 곧바로 열린다", () => {
+    for (const source of [migration, schema]) {
+      expect(source).toContain("revoke all on table ad_unlocks from anon");
+      expect(source).toMatch(/revoke insert, update, delete[^;]*on table ad_unlocks from authenticated/);
+    }
+  });
+
+  it("클라이언트 광고 버튼도 함께 숨긴다 — 서버만 막으면 눌러도 실패하는 버튼이 된다", () => {
+    expect(AD_UNLOCK_ENABLED).toBe(false);
+    expect(screen).toContain("AD_UNLOCK_ENABLED && gate.canUnlockByAd");
   });
 });
