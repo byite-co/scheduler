@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { AI_CHECK_RESULTS_ENABLED } from "./featureFlags";
+import { AI_CHECK_RESULTS_ENABLED, AI_REC_CLIENT_WRITE_ENABLED } from "./featureFlags";
 import {
   PRICE_PER_STUDENT_KRW,
   PRICE_STUDENT_PREMIUM_KRW,
@@ -603,5 +603,53 @@ describe("AI 판정 노출 차단 플래그 (shared ↔ edge function)", () => {
     for (const forbidden of [".delete()", "ai_verdict: null", "delete from homework_check_attempts"]) {
       expect(edgeFunction, forbidden).not.toContain(forbidden);
     }
+  });
+});
+
+// ── AI 판정·추천 쓰기 경로 잠금 (20260816020000) ─────────────────────────────
+// A1 에서 확인된 [지금 뚫림] 2건. anon 이 판정을 덮어쓸 수 있었고, 학생이 추천 결과를
+// 직접 써 넣을 수 있었다(실측 HTTP 400 P0001 / HTTP 201).
+describe("판정·추천 쓰기 잠금", () => {
+  const lockdown = readFileSync(
+    new URL("../../../supabase/migrations/20260816020000_verdict_and_recommendation_lockdown.sql", import.meta.url),
+    "utf8"
+  );
+  const recScreen = readFileSync(new URL("../../../apps/student/src/m5Screens.tsx", import.meta.url), "utf8");
+
+  it("apply_homework_ai_verdict 의 anon 을 명시적으로 회수한다", () => {
+    // `revoke ... from public` 은 Supabase 가 롤별로 준 grant 를 지우지 못한다.
+    // 원본(20260624000000)이 authenticated 만 적어서 anon 이 남아 있었다.
+    expect(lockdown).toContain(
+      "revoke all on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) from anon"
+    );
+    for (const source of [schema, lockdown]) {
+      expect(source).toContain(
+        "grant execute on function apply_homework_ai_verdict(uuid, submission_verdict, numeric, text) to service_role"
+      );
+    }
+  });
+
+  it("함수 스스로 호출 주체를 확인한다 — GRANT 가 되돌려져도 한 겹 더 막는다", () => {
+    for (const source of [schema, lockdown]) {
+      expect(source).toContain("coalesce(auth.role(), 'service_role') <> 'service_role'");
+      expect(source).toContain("service_role_required");
+    }
+  });
+
+  it("ai_recommendations 는 조회만 열려 있다", () => {
+    for (const source of [schema, lockdown]) {
+      expect(source).toContain("create policy ai_recommendations_select_self on ai_recommendations");
+      expect(source).toContain("revoke all on table ai_recommendations from anon");
+      expect(source).toMatch(/revoke insert, update, delete[^;]*on table ai_recommendations from authenticated/);
+      // 쓰기 정책을 만들어 두면 조건 완화 실수로 곧바로 열린다.
+      expect(source).not.toMatch(/create policy \w+ on ai_recommendations[\s\S]{0,80}for (insert|update|delete|all)/);
+    }
+  });
+
+  it("클라이언트 쓰기도 플래그로 멈춘다 — 서버만 막으면 저장 실패 오류만 보인다", () => {
+    expect(AI_REC_CLIENT_WRITE_ENABLED).toBe(false);
+    expect(recScreen).toContain("if (AI_REC_CLIENT_WRITE_ENABLED)");
+    // 플래너 반영(todos)은 학생 자신의 할 일이라 계속 동작해야 한다.
+    expect(recScreen).toContain('supabase.from("todos").insert(todos)');
   });
 });
