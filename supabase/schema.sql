@@ -488,10 +488,14 @@ create table homework_check_attempts (
     unique (requested_by, idempotency_key),
   constraint attempts_idempotency_key_not_blank
     check (btrim(idempotency_key) <> ''),
-  -- 완료된 실행에는 결과가 하나는 있어야 하고, 완료가 아니면 없어야 한다(양방향).
-  -- 20260807030000 에서 완화: 관찰 전용 실행에는 verdict 가 없고 raw_ai_observation 만 있다.
+  -- 20260816040000: 양방향 등식을 단방향 두 개로 쪼갰다.
+  --   양방향이면 "결과가 있으면 반드시 completed" 까지 강제해서, 폐기 기록
+  --   (status='failed' + raw_ai_observation 보관)이 **불가능**했다 — 폐기 원본이 통째로 사라졌다.
   constraint attempts_completed_has_result
-    check ((status = 'completed') = (verdict is not null or raw_ai_observation is not null)),
+    check (status <> 'completed' or verdict is not null or raw_ai_observation is not null),
+  -- verdict 는 completed 일 때만. raw_ai_observation 은 failed(폐기)에도 있을 수 있다.
+  constraint attempts_verdict_requires_completed
+    check (verdict is null or status = 'completed'),
   constraint attempts_latency_non_negative
     check (latency_ms is null or latency_ms >= 0),
   -- 사진 1~9개. array_length 는 빈 배열에 NULL 을 돌려주므로 coalesce 가 없으면
@@ -794,9 +798,13 @@ as $$
 declare
   result_row homework_submissions%rowtype;
 begin
-  -- 20260816020000: 호출 주체 검증(이중 방어). anon 키·사용자 토큰은 여기서 막힌다.
-  --   JWT 가 없는 경로(psql·Management API)는 null → 통과시킨다(운영 점검을 막지 않는다).
-  if coalesce(auth.role(), 'service_role') <> 'service_role' then
+  -- 20260816030000: **클레임 존재 여부**로 갈라 API 경로에서는 언제나 닫는다.
+  --   (20260816020000 의 coalesce(...,'service_role') 은 모르면 열리는 fail-open 이었다.)
+  --   클레임이 있으면 = API 요청 → service_role 이 아니면 거부(값을 못 읽어도 거부).
+  --   클레임이 없으면 = 직접 DB 접속(psql·Management API) → 허용(운영 점검을 막지 않는다).
+  if (nullif(current_setting('request.jwt.claims', true), '') is not null
+      or nullif(current_setting('request.jwt.claim.role', true), '') is not null)
+     and coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'service_role_required';
   end if;
   update homework_submissions
@@ -2271,7 +2279,12 @@ declare
   result homework_check_attempts%rowtype;
 begin
   update homework_check_attempts
-     set status              = case when p_discard_reason is null then 'completed' else 'failed' end,
+     -- 20260816030000: 무형 리터럴 CASE 는 text 로 추론돼 enum 대입에서 죽는다.
+     --   이 한 줄 때문에 2026-08-07 이후 관찰 기록이 전부 실패했다. 분기마다 캐스팅한다.
+     set status              = case
+                                 when p_discard_reason is null then 'completed'::check_attempt_status
+                                 else 'failed'::check_attempt_status
+                               end,
          raw_ai_observation  = p_raw_observation,
          prompt_version      = p_prompt_version,
          schema_version      = p_schema_version,

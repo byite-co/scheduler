@@ -139,14 +139,21 @@ describe("M4 homework_check_attempts (실행 레코드)", () => {
       // 사진 1~9개. coalesce 가 없으면 빈 배열의 array_length 가 NULL 이라 제약이 통과해 버린다.
       expect(source).toContain("check (coalesce(array_length(photo_paths_snapshot, 1), 0) between 1 and 9)");
     }
-    // "완료면 결과가 있다"는 양방향 불변식은 유지되지만, 20260807030000 에서 결과의 정의가
-    // 넓어졌다(판정 → 판정 **또는** 관찰). 마이그레이션은 역사이므로 옛 문장을 그대로 두고,
-    // 현재 상태(schema.sql)만 새 문장이어야 한다.
+    // 불변식은 세 번 바뀌었다. 마이그레이션은 역사이므로 옛 문장을 그대로 두고,
+    // 현재 상태(schema.sql)만 최신이어야 한다.
+    //   20260806040000: (completed) = (verdict 있음)                       — 양방향
+    //   20260807030000: (completed) = (verdict 또는 관찰 있음)             — 여전히 양방향
+    //   20260816040000: 단방향 두 개 — 양방향이면 폐기 기록(failed + 관찰)이 불가능했다.
     expect(attemptsMigration).toContain("check ((status = 'completed') = (verdict is not null))");
     expect(schema).toContain(
+      "check (status <> 'completed' or verdict is not null or raw_ai_observation is not null)"
+    );
+    expect(schema).toContain("check (verdict is null or status = 'completed')");
+    expect(schema).not.toContain("constraint attempts_verdict_only_when_completed");
+    // 양방향으로 되돌아가면 폐기 원본이 다시 사라진다.
+    expect(schema).not.toContain(
       "check ((status = 'completed') = (verdict is not null or raw_ai_observation is not null))"
     );
-    expect(schema).not.toContain("constraint attempts_verdict_only_when_completed");
   });
 
   it("keeps attempts read-only for clients and writable only by the server", () => {
@@ -630,10 +637,36 @@ describe("판정·추천 쓰기 잠금", () => {
   });
 
   it("함수 스스로 호출 주체를 확인한다 — GRANT 가 되돌려져도 한 겹 더 막는다", () => {
-    for (const source of [schema, lockdown]) {
-      expect(source).toContain("coalesce(auth.role(), 'service_role') <> 'service_role'");
+    // 20260816030000 에서 fail-open → fail-closed 로 바꿨다.
+    // 옛 판정 `coalesce(auth.role(), 'service_role')` 는 role 을 못 읽으면 **통과**시켰다.
+    // 지금은 클레임 존재 여부로 갈라 API 경로에서는 언제나 닫는다.
+    const failClosed = readFileSync(
+      new URL("../../../supabase/migrations/20260816030000_record_path_fix_and_fail_closed.sql", import.meta.url),
+      "utf8"
+    );
+    for (const source of [schema, failClosed]) {
+      expect(source).toContain("current_setting('request.jwt.claims', true)");
+      expect(source).toContain("coalesce(auth.role(), '') <> 'service_role'");
       expect(source).toContain("service_role_required");
     }
+    // 모르면 열리는 방향이 **현재 상태**에 다시 들어오면 안 된다.
+    // (마이그레이션 주석에는 before 로 인용돼 있으므로 schema.sql 만 본다.)
+    expect(schema).not.toContain("coalesce(auth.role(), 'service_role')");
+    // 최초 도입(20260816020000)에는 fail-open 판정이 있었다 — 마이그레이션은 역사이므로 그대로 둔다.
+    expect(lockdown).toContain("service_role_required");
+  });
+
+  it("관찰 기록의 enum 캐스팅 — 이 한 줄이 빠져 2026-08-07 부터 기록이 전부 실패했다", () => {
+    const fix = readFileSync(
+      new URL("../../../supabase/migrations/20260816030000_record_path_fix_and_fail_closed.sql", import.meta.url),
+      "utf8"
+    );
+    for (const source of [schema, fix]) {
+      expect(source).toContain("'completed'::check_attempt_status");
+      expect(source).toContain("'failed'::check_attempt_status");
+    }
+    // 캐스팅 없는 옛 형태가 현재 상태에 남아 있으면 안 된다.
+    expect(schema).not.toContain("case when p_discard_reason is null then 'completed' else 'failed' end");
   });
 
   it("ai_recommendations 는 조회만 열려 있다", () => {
