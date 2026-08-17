@@ -126,6 +126,55 @@ export function formatInviteCode(code: string): string {
     : normalized;
 }
 
+// ── 초대 코드 사용 결과 ─────────────────────────────────────────────────────
+// request_connection_by_invite 는 사용자 입력 실패를 **예외가 아니라 결과값**으로 돌려준다.
+// 예외로 끝내면 시도 기록이 같은 트랜잭션에서 롤백돼 속도 제한을 셀 수 없다
+// (측정 근거는 마이그레이션 20260819030000 주석에 있다).
+// 그래서 클라이언트는 error 만 보면 안 되고 이 reason 을 읽어야 한다.
+
+export type InviteRedeemSuccessReason = "created" | "reopened" | "existing";
+export type InviteRedeemFailureReason = "invalid_format" | "not_found" | "already_used" | "rate_limited";
+
+export type InviteRedeemResult =
+  | {
+      ok: true;
+      reason: InviteRedeemSuccessReason;
+      connection: { id: string; status: string } & Record<string, unknown>;
+    }
+  | { ok: false; reason: InviteRedeemFailureReason; retry_after_seconds?: number };
+
+export function isInviteRedeemSuccess(
+  result: InviteRedeemResult
+): result is Extract<InviteRedeemResult, { ok: true }> {
+  return result.ok === true;
+}
+
+/**
+ * 초대 코드 사용 결과를 사용자에게 보여 줄 한 줄로 바꾼다.
+ *
+ * ⚠️ not_found 와 already_used 를 구분해서 알려 준다. 추측하는 쪽에는 "그 코드는 실재한다" 는
+ * 정보가 새지만, 오타를 낸 학생과 남이 먼저 쓴 코드를 받은 학생은 해야 할 일이 다르다.
+ * 추측 1회의 비용은 시도 제한이 담당한다(10분 10회) — 문구로 감추는 쪽이 아니다.
+ */
+export function describeInviteRedeemResult(result: InviteRedeemResult): string {
+  if (result.ok) {
+    return `연결 요청이 ${result.connection.status} 상태로 저장되었습니다.`;
+  }
+
+  switch (result.reason) {
+    case "invalid_format":
+      return "초대 코드는 영문·숫자 6~8자리예요. 다시 확인해 주세요.";
+    case "not_found":
+      return "그 초대 코드를 찾을 수 없어요. 코드가 만료되었을 수도 있어요.";
+    case "already_used":
+      return "이미 사용된 초대 코드예요. 선생님께 새 코드를 받아 주세요.";
+    case "rate_limited": {
+      const minutes = Math.max(1, Math.ceil((result.retry_after_seconds ?? 600) / 60));
+      return `코드를 여러 번 잘못 입력했어요. ${minutes}분 뒤에 다시 시도해 주세요.`;
+    }
+  }
+}
+
 export function createConnectionRequest(input: {
   id: string;
   teacherId: string;
