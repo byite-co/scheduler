@@ -1,27 +1,47 @@
-import { Link } from "expo-router";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Link, useRouter } from "expo-router";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, spacing } from "@ssamplanner/design-tokens";
 
 import { useAuth } from "../../src/auth";
 import { statusFor, useTeacherStudents } from "../../src/teacherData";
-import { EmptyState, screenStyles } from "../../src/ui";
+import { EmptyState, ErrorState, LoadingState, PrimaryButton, screenStyles } from "../../src/ui";
 
 export default function DashboardRoute() {
+  const router = useRouter();
   const { profile } = useAuth();
-  const { students, loading } = useTeacherStudents();
+  const { error, loading, refresh, students, todayLessonCount } = useTeacherStudents();
   const risk = students.filter((student) => statusFor(student).label === "주의");
-  const submittedCount = students.reduce((count, student) => count + student.submittedCount, 0);
+  const pendingReviewCount = students.reduce((count, student) => count + student.pendingReviewCount, 0);
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>대시보드</Text>
+        <LoadingState label="대시보드를 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (error) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>대시보드</Text>
+        <ErrorState body={error} onRetry={() => void refresh()} />
+      </ScrollView>
+    );
+  }
 
   if (!students.length) {
     return (
       <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
         <Text style={screenStyles.heading}>대시보드</Text>
         <EmptyState title="아직 학생이 없어요" body="학생을 추가하면 진도·숙제·리포트를 바로 기록할 수 있어요." />
+        <PrimaryButton onPress={() => router.push("/students/invite")}>학생 추가하기</PrimaryButton>
         <Text style={styles.title}>오늘 할 일</Text>
-        <Text style={screenStyles.subtitle}>• 내 수업 일정부터 등록해 보세요</Text>
+        <Pressable accessibilityRole="button" onPress={() => router.push("/tools")} style={styles.outlineButton}>
+          <Text style={styles.outlineButtonText}>내 수업 일정 등록하기</Text>
+        </Pressable>
       </ScrollView>
     );
   }
@@ -29,11 +49,11 @@ export default function DashboardRoute() {
   return (
     <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
       <Text style={styles.date}>{new Date().toLocaleDateString("ko-KR")}</Text>
-      <Text style={screenStyles.heading}>{profile?.name} 선생님</Text>
+      <Text style={screenStyles.heading}>{profile?.name || "과외쌤"} 선생님</Text>
       <View style={styles.grid}>
         <Stat label="담당 학생" value={`${students.length}명`} />
-        <Stat label="제출됨" value={`${submittedCount}건`} />
-        <Stat label="오늘 수업" value="—" />
+        <Stat label="검사 대기" value={`${pendingReviewCount}건`} />
+        <Stat label="오늘 수업" value={`${todayLessonCount}건`} />
         <Stat label="위험 학생" value={`${risk.length}명`} />
       </View>
       {risk.length ? (
@@ -47,12 +67,12 @@ export default function DashboardRoute() {
         </View>
       ) : null}
       <View style={styles.dark}>
-        <Text style={styles.darkTitle}>숙제 제출 {submittedCount}건</Text>
+        <Text style={styles.darkTitle}>검사 대기 {pendingReviewCount}건</Text>
         <Text style={styles.darkText}>AI 판정은 표시하지 않아요. 제출 사진을 직접 확인할 수 있어요.</Text>
         <View style={styles.homeworkLinks}>
-          <Link href="../homework" style={styles.homeworkLink}>낸 숙제</Link>
-          <Link href="../homework/review" style={styles.homeworkLink}>제출 검사</Link>
-          <Link href="../homework/new" style={styles.homeworkLink}>+ 숙제 내기</Link>
+          <Link href="/homework" style={styles.homeworkLink}>낸 숙제</Link>
+          <Link href="/homework/review" style={styles.homeworkLink}>제출 검사</Link>
+          <Link href="/homework/new" style={styles.homeworkLink}>+ 숙제 내기</Link>
         </View>
       </View>
     </ScrollView>
@@ -79,7 +99,7 @@ const styles = StyleSheet.create({
   row: { paddingVertical: 10, color: colors.ink, fontWeight: "700" },
   dark: { backgroundColor: colors.ink, borderRadius: 18, padding: spacing.xl, gap: spacing.sm },
   darkTitle: { fontSize: 20, fontWeight: "900", color: colors.surface },
-  darkText: { color: "#C4CAD9" },
+  darkText: { color: colors.line },
   homeworkLinks: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm },
   homeworkLink: {
     backgroundColor: colors.brand,
@@ -89,5 +109,16 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
-  }
+  },
+  outlineButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.brand,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    minHeight: 52,
+    paddingHorizontal: spacing.lg
+  },
+  outlineButtonText: { color: colors.brand, fontSize: 16, fontWeight: "900" }
 });

@@ -53,6 +53,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (teacherProfile?.role && teacherProfile.role !== "teacher") {
       setMessage("과외쌤 계정으로 로그인해 주세요.");
       setProfile(null);
+      setSession(null);
+      await supabase.auth.signOut();
       return;
     }
     setProfile(teacherProfile as TeacherProfile | null);

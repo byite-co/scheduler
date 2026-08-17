@@ -11,9 +11,12 @@ import {
 import { useAuth } from "./auth";
 import { managementStyles as styles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
-import { screenStyles } from "./ui";
+import { ErrorState, LoadingState, screenStyles } from "./ui";
 
-type SubscriptionRow = Database["public"]["Tables"]["teacher_subscriptions"]["Row"];
+type SubscriptionRow = Pick<
+  Database["public"]["Tables"]["teacher_subscriptions"]["Row"],
+  "status" | "current_period_end"
+>;
 
 function statusColors(status: SubStatus) {
   if (status === "active") return { background: tints.successSoft, color: colors.success };
@@ -25,25 +28,51 @@ function statusColors(status: SubStatus) {
 export function BillingScreen() {
   const { session, setMessage } = useAuth();
   const [subscription, setSubscription] = useState<SubscriptionRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!session) {
+      setSubscription(null);
+      setLoading(false);
       return;
     }
 
+    setLoading(true);
+    setLoadError(null);
     const subscriptionResult = await supabase
       .from("teacher_subscriptions")
-      .select("teacher_id, status, provider, current_period_end, payment_method_last4, stripe_customer_id, updated_at")
+      .select("status, current_period_end")
       .eq("teacher_id", session.user.id)
       .maybeSingle();
 
     setSubscription(subscriptionResult.data);
+    setLoadError(subscriptionResult.error?.message ?? null);
     setMessage(subscriptionResult.error?.message ?? null);
+    setLoading(false);
   }, [session, setMessage]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>구독·정산</Text>
+        <LoadingState label="구독 상태를 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>구독·정산</Text>
+        <ErrorState body={loadError} onRetry={() => void refresh()} />
+      </ScrollView>
+    );
+  }
 
   const status = (subscription?.status ?? "none") as SubStatus;
   const billing = getTeacherBillingState(status);

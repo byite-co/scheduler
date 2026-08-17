@@ -8,7 +8,7 @@ import { SUBJECT_LABELS, getTodoScopeTextForDisplay, type Database, type Subject
 import { useAuth } from "./auth";
 import { homeworkStyles as styles } from "./homeworkStyles";
 import { supabase } from "./supabaseClient";
-import { EmptyState, PrimaryButton, screenStyles } from "./ui";
+import { EmptyState, ErrorState, LoadingState, PrimaryButton, screenStyles } from "./ui";
 
 type TodoRow = Pick<
   Database["public"]["Tables"]["todos"]["Row"],
@@ -45,6 +45,7 @@ export function HomeworkListScreen() {
   const { session, setMessage } = useAuth();
   const [items, setItems] = useState<HomeworkItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!session) {
@@ -54,6 +55,7 @@ export function HomeworkListScreen() {
     }
 
     setLoading(true);
+    setLoadError(null);
     const todosResult = await supabase
       .from("todos")
       .select("id, student_id, title, subject, scope_text, due_date, status, created_at")
@@ -111,12 +113,13 @@ export function HomeworkListScreen() {
       todos.map((todo) => ({
         ...todo,
         photoSharingAllowed: sharingByStudentId.get(todo.student_id) === true,
-        studentName: nameByStudentId.get(todo.student_id) ?? "학생",
+        studentName: nameByStudentId.get(todo.student_id)?.trim() || "이름 미입력",
         submission: latestSubmissionByTodo.get(todo.id) ?? null
       }))
     );
     const error =
       todosResult.error ?? connectionsResult.error ?? disclosuresResult.error ?? submissionsResult.error ?? profilesResult.error;
+    setLoadError(error?.message ?? null);
     setMessage(error?.message ?? null);
     setLoading(false);
   }, [session, setMessage]);
@@ -125,20 +128,38 @@ export function HomeworkListScreen() {
     void refresh();
   }, [refresh]);
 
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>낸 숙제</Text>
+        <LoadingState label="숙제 목록을 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>낸 숙제</Text>
+        <ErrorState body={loadError} onRetry={() => void refresh()} />
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
       <Text style={screenStyles.heading}>낸 숙제</Text>
       <Text style={screenStyles.subtitle}>학생별 제출 여부와 과외쌤 확인 상태를 한눈에 봐요.</Text>
       <View style={styles.actionRow}>
         <View style={{ flex: 1 }}>
-          <PrimaryButton onPress={() => router.push("./new")}>+ 숙제 내기</PrimaryButton>
+          <PrimaryButton onPress={() => router.push("/homework/new")}>+ 숙제 내기</PrimaryButton>
         </View>
-        <Pressable style={styles.secondaryButton} onPress={() => router.push("./review")}>
+        <Pressable style={styles.secondaryButton} onPress={() => router.push("/homework/review")}>
           <Text style={styles.secondaryButtonText}>제출 검사</Text>
         </Pressable>
       </View>
 
-      {!loading && items.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyState title="아직 낸 숙제가 없어요" body="연결된 학생에게 첫 숙제를 내면 제출 현황이 여기에 표시돼요." />
       ) : null}
 

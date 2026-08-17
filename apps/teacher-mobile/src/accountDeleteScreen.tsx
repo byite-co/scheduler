@@ -6,6 +6,7 @@ import { colors, spacing, tints } from "@ssamplanner/design-tokens";
 import {
   ACCOUNT_DELETE_STEPS,
   getAccountDeleteErrorMessage,
+  getTeacherBillingState,
   validateDeleteConfirmation,
   type SubStatus
 } from "@ssamplanner/shared";
@@ -13,7 +14,8 @@ import {
 import { useAuth } from "./auth";
 import { managementStyles as styles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
-import { screenStyles } from "./ui";
+import { ErrorState, LoadingState, screenStyles } from "./ui";
+import { toUserMessage } from "./userMessage";
 
 export function AccountDeleteScreen() {
   const router = useRouter();
@@ -22,11 +24,18 @@ export function AccountDeleteScreen() {
   const [activeConnections, setActiveConnections] = useState(0);
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubStatus>("none");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const canDelete = validateDeleteConfirmation(confirmation);
 
   const loadImpact = useCallback(async () => {
-    if (!session) return;
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
     const [connectionsResult, subscriptionResult] = await Promise.all([
       supabase
         .from("connections")
@@ -41,6 +50,8 @@ export function AccountDeleteScreen() {
     ]);
     setActiveConnections((connectionsResult.data ?? []).length);
     setSubscriptionStatus((subscriptionResult.data?.status as SubStatus | undefined) ?? "none");
+    setLoadError(connectionsResult.error?.message ?? subscriptionResult.error?.message ?? null);
+    setLoading(false);
   }, [session]);
 
   useEffect(() => {
@@ -63,6 +74,24 @@ export function AccountDeleteScreen() {
     router.replace("/login");
   }
 
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>회원 탈퇴</Text>
+        <LoadingState label="탈퇴 영향을 확인하는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>회원 탈퇴</Text>
+        <ErrorState body={loadError} onRetry={() => void loadImpact()} />
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
       <Text style={screenStyles.heading}>회원 탈퇴</Text>
@@ -74,7 +103,7 @@ export function AccountDeleteScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>탈퇴 시 영향</Text>
         <Text style={styles.meta}>연결 학생 {activeConnections}명과의 연동이 해제됩니다.</Text>
-        <Text style={styles.meta}>과외쌤 구독 상태: {subscriptionStatus}</Text>
+        <Text style={styles.meta}>과외쌤 구독 상태: {getTeacherBillingState(subscriptionStatus).label}</Text>
         <Text style={styles.meta}>수업·숙제·리포트·정산 기록과 계정 데이터가 영구 삭제됩니다.</Text>
       </View>
       <View style={{ gap: spacing.sm }}>
@@ -88,7 +117,7 @@ export function AccountDeleteScreen() {
           style={[styles.field, { borderColor: canDelete ? colors.danger : colors.line }]}
         />
       </View>
-      {message ? <Text style={{ color: colors.danger, fontWeight: "800" }}>{message}</Text> : null}
+      {message ? <Text style={{ color: colors.danger, fontWeight: "800" }}>{toUserMessage(message)}</Text> : null}
       <Pressable
         accessibilityRole="button"
         disabled={!canDelete || busy}
