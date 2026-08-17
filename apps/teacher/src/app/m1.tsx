@@ -18,7 +18,6 @@ import {
   CONSENT_DOCUMENTS,
   CONSENT_DOCUMENT_LABELS,
   CONSENT_PENDING_NOTICE,
-  DEFAULT_TEACHER_STUDENT_SETTINGS,
   M1_CONNECTION_STATUS_SCREENS,
   formatInviteCode,
   buildConsentRows,
@@ -1215,19 +1214,17 @@ function ConnectionList({ data, status }: { data: TeacherData; status: M1Connect
   const pendingNames = usePendingRequestNames(data.connections);
 
   async function decide(connection: ConnectionRow, decision: "accept" | "reject") {
-    const patch =
+    // 수락은 쓰기가 둘이다(설정 행 생성 + 상태 전이). 클라이언트에서 순차로 하면 사이에서
+    // 끊길 때 "설정 없는 active" 가 남고, 예전 코드는 두 번째 쓰기의 error 를 읽지도 않아
+    // 실패해도 "수락했습니다" 가 떴다. RPC 한 번으로 묶어 둘 다 되거나 둘 다 안 되게 한다.
+    // 거절은 쓰기가 하나뿐이라 그대로 UPDATE 한다.
+    const { error } =
       decision === "accept"
-        ? { status: "active" as const, activated_at: new Date().toISOString() }
-        : { status: "rejected" as const, activated_at: null };
-    const { error } = await supabase.from("connections").update(patch).eq("id", connection.id);
-
-    if (!error && decision === "accept") {
-      await supabase.from("per_student_settings").upsert({
-        connection_id: connection.id,
-        ai_check_subjects: DEFAULT_TEACHER_STUDENT_SETTINGS.aiCheckSubjects as SubjectCode[],
-        report_cycle: DEFAULT_TEACHER_STUDENT_SETTINGS.reportCycle
-      });
-    }
+        ? await supabase.rpc("accept_connection_request", { p_connection_id: connection.id })
+        : await supabase
+            .from("connections")
+            .update({ status: "rejected" as const, activated_at: null })
+            .eq("id", connection.id);
 
     data.setMessage(error ? error.message : decision === "accept" ? "연결을 수락했습니다." : "연결을 거절했습니다.");
     await data.refresh();

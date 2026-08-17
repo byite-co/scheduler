@@ -14,13 +14,20 @@ import {
   hasCurrentConsent,
   canCompleteStudentSignup,
   canRequestConnectionAgain,
+  describeInviteRedeemResult,
   formatConnectionTeacherLabel,
   formatInviteCode,
   getMissingStudentSignupSteps,
   normalizeInviteCode,
   requiresGuardianConsent
 } from "@ssamplanner/shared";
-import type { ConnectionStatus, ConsentSelection, ConsentStatusRow, Database } from "@ssamplanner/shared";
+import type {
+  ConnectionStatus,
+  ConsentSelection,
+  ConsentStatusRow,
+  Database,
+  InviteRedeemResult
+} from "@ssamplanner/shared";
 
 import { supabase } from "./supabaseClient";
 
@@ -481,11 +488,15 @@ export function StudentConnectScreen() {
       return;
     }
 
-    const { data: connection, error } = await supabase.rpc("request_connection_by_invite", {
+    // 코드 입력 실패는 error 가 아니라 결과값으로 온다(시도 기록이 롤백되지 않게 하려고
+    // 서버가 예외를 쓰지 않는다 — 20260819030000). 그래서 reason 을 읽어야 한다.
+    const { data: result, error } = await supabase.rpc("request_connection_by_invite", {
       p_code: normalizeInviteCode(inviteCode)
     });
 
-    data.setMessage(error ? error.message : `연결 요청이 ${connection.status} 상태로 저장되었습니다.`);
+    data.setMessage(
+      error ? error.message : describeInviteRedeemResult(result as unknown as InviteRedeemResult)
+    );
     await data.refresh();
   }
 

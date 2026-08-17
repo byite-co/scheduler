@@ -109,7 +109,16 @@ describeIfRemote("M1 RLS integration against linked Supabase", () => {
         p_code: inviteCode
       });
       assertOk(reopened);
-      const reopenedConnection = assertData(reopened.data);
+      // 20260819030000 부터 이 RPC 는 {ok, reason, connection} 을 돌려준다 — 사용자 입력 실패를
+      // 예외로 끝내면 시도 기록이 롤백돼 속도 제한을 셀 수 없기 때문이다.
+      const redeemed = assertData(reopened.data) as unknown as {
+        ok: boolean;
+        reason: string;
+        connection: { id: string; status: string };
+      };
+      expect(redeemed.ok).toBe(true);
+      expect(redeemed.reason).toBe("reopened");
+      const reopenedConnection = redeemed.connection;
       expect(reopenedConnection.status).toBe("pending");
 
       const activated = await admin

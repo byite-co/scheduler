@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -11,31 +11,6 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
-  }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
   }
   public: {
     Tables: {
@@ -566,6 +541,35 @@ export type Database = {
             columns: ["todo_id"]
             isOneToOne: false
             referencedRelation: "todos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invite_attempts: {
+        Row: {
+          attempted_at: string
+          id: number
+          outcome: string
+          student_id: string
+        }
+        Insert: {
+          attempted_at?: string
+          id?: never
+          outcome: string
+          student_id: string
+        }
+        Update: {
+          attempted_at?: string
+          id?: never
+          outcome?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invite_attempts_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -1396,6 +1400,25 @@ export type Database = {
       }
     }
     Functions: {
+      accept_connection_request: {
+        Args: { p_connection_id: string }
+        Returns: {
+          activated_at: string | null
+          created_at: string
+          id: string
+          invite_code: string | null
+          requested_by: string | null
+          status: Database["public"]["Enums"]["connection_status"]
+          student_id: string
+          teacher_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "connections"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       ai_check_claim_lease_minutes: { Args: never; Returns: number }
       ai_check_max_attempts_per_day: { Args: never; Returns: number }
       ai_check_max_attempts_per_month: { Args: never; Returns: number }
@@ -1668,6 +1691,8 @@ export type Database = {
           path: string
         }[]
       }
+      invite_attempt_max_failures: { Args: never; Returns: number }
+      invite_attempt_window_minutes: { Args: never; Returns: number }
       is_connected_active: {
         Args: { p_student: string; p_teacher: string }
         Returns: boolean
@@ -1784,25 +1809,7 @@ export type Database = {
       report_monthly_usage: { Args: { p_teacher_id: string }; Returns: number }
       report_quota_floor: { Args: never; Returns: number }
       report_quota_per_student: { Args: never; Returns: number }
-      request_connection_by_invite: {
-        Args: { p_code: string }
-        Returns: {
-          activated_at: string | null
-          created_at: string
-          id: string
-          invite_code: string | null
-          requested_by: string | null
-          status: Database["public"]["Enums"]["connection_status"]
-          student_id: string
-          teacher_id: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "connections"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
+      request_connection_by_invite: { Args: { p_code: string }; Returns: Json }
       revoke_report_share: { Args: { p_report_id: string }; Returns: undefined }
       save_focus_check: {
         Args: { p_checked_at?: string; p_drowsy: boolean; p_session_id: string }
@@ -2014,9 +2021,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       activity_type: ["school", "academy", "self", "class"],

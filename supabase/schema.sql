@@ -102,8 +102,17 @@ create policy conn_teacher_update_status on connections for update
   using (teacher_id = auth.uid())
   with check (teacher_id = auth.uid());
 
+-- ⚠️ 위 정책은 teacher_id 만 본다. with check 는 OLD 를 볼 수 없으므로 "student_id 가 바뀌지
+-- 않았다" 를 정책으로 표현할 수 없다 → 교사가 자기 연결의 student_id 를 임의의 학생으로
+-- 바꿔 그 학생의 데이터에 접근할 수 있었다(A5 에서 실측). 컬럼 단위 권한으로 막는다.
+revoke update on table connections from authenticated;
+revoke update on table connections from anon;
+grant update (status, activated_at) on table connections to authenticated;
+
+-- 초대 코드로 연결 요청. 사용자 입력 실패는 **예외가 아니라 결과값**으로 돌려준다 —
+-- 예외로 끝내면 시도 기록이 같은 트랜잭션에서 롤백돼 속도 제한을 셀 수 없다(20260819030000).
 create or replace function request_connection_by_invite(p_code text)
-returns connections
+returns jsonb
 language plpgsql
 security definer
 set search_path = public
@@ -113,10 +122,14 @@ declare
   invite_row invite_codes%rowtype;
   existing_row connections%rowtype;
   result_row connections%rowtype;
+  student uuid;
+  window_start timestamptz;
+  failures int;
+  oldest timestamptz;
+  outcome_reason text;
 begin
-  normalized_code := upper(regexp_replace(coalesce(p_code, ''), '[\s-]+', '', 'g'));
-
-  if auth.uid() is null then
+  student := auth.uid();
+  if student is null then
     raise exception 'authentication_required';
   end if;
 
@@ -124,65 +137,99 @@ begin
     raise exception 'student_profile_required';
   end if;
 
+  window_start := now() - make_interval(mins => invite_attempt_window_minutes());
+
+  delete from invite_attempts
+   where student_id = student
+     and attempted_at < window_start;
+
+  select count(*), min(attempted_at)
+    into failures, oldest
+    from invite_attempts
+   where student_id = student
+     and outcome <> 'success'
+     and attempted_at >= window_start;
+
+  if failures >= invite_attempt_max_failures() then
+    -- 차단된 시도는 기록하지 않는다. 기록하면 두드리는 동안 창이 갱신돼 영구 차단이 된다.
+    return jsonb_build_object(
+      'ok', false,
+      'reason', 'rate_limited',
+      'retry_after_seconds',
+        greatest(1, ceil(extract(epoch from (oldest + make_interval(mins => invite_attempt_window_minutes())) - now()))::int)
+    );
+  end if;
+
+  normalized_code := upper(regexp_replace(coalesce(p_code, ''), '[\s-]+', '', 'g'));
+
   if normalized_code !~ '^[A-Z0-9]{6,8}$' then
-    raise exception 'invalid_invite_code';
+    insert into invite_attempts (student_id, outcome) values (student, 'invalid_format');
+    return jsonb_build_object('ok', false, 'reason', 'invalid_format');
   end if;
 
   select *
     into invite_row
     from invite_codes
-    where code = normalized_code
-      and (expires_at is null or expires_at > now())
-    for update;
+   where code = normalized_code
+     and (expires_at is null or expires_at > now())
+   for update;
 
   if not found then
-    raise exception 'invite_code_not_found';
+    insert into invite_attempts (student_id, outcome) values (student, 'not_found');
+    return jsonb_build_object('ok', false, 'reason', 'not_found');
   end if;
 
-  if invite_row.used_by is not null and invite_row.used_by <> auth.uid() then
-    raise exception 'invite_code_already_used';
+  if invite_row.used_by is not null and invite_row.used_by <> student then
+    insert into invite_attempts (student_id, outcome) values (student, 'already_used');
+    return jsonb_build_object('ok', false, 'reason', 'already_used');
   end if;
 
   select *
     into existing_row
     from connections
-    where teacher_id = invite_row.teacher_id
-      and student_id = auth.uid()
-    for update;
+   where teacher_id = invite_row.teacher_id
+     and student_id = student
+   for update;
 
   if found then
     if existing_row.status in ('rejected', 'disconnected') then
       update connections
-        set status = 'pending',
-            invite_code = normalized_code,
-            requested_by = auth.uid(),
-            created_at = now(),
-            activated_at = null
-        where id = existing_row.id
-        returning * into result_row;
+         set status = 'pending',
+             invite_code = normalized_code,
+             requested_by = student,
+             created_at = now(),
+             activated_at = null
+       where id = existing_row.id
+      returning * into result_row;
+      outcome_reason := 'reopened';
     else
       result_row := existing_row;
+      outcome_reason := 'existing';
     end if;
   else
     insert into connections (teacher_id, student_id, status, invite_code, requested_by)
-    values (invite_row.teacher_id, auth.uid(), 'pending', normalized_code, auth.uid())
+    values (invite_row.teacher_id, student, 'pending', normalized_code, student)
     returning * into result_row;
+    outcome_reason := 'created';
   end if;
 
   update invite_codes
-    set used_by = auth.uid()
-    where code = normalized_code
-      and used_by is null;
+     set used_by = student
+   where code = normalized_code
+     and used_by is null;
 
   insert into disclosure_settings (connection_id)
   values (result_row.id)
   on conflict (connection_id) do nothing;
 
-  return result_row;
+  insert into invite_attempts (student_id, outcome) values (student, 'success');
+
+  return jsonb_build_object('ok', true, 'reason', outcome_reason, 'connection', to_jsonb(result_row));
 end;
 $$;
 
 revoke all on function request_connection_by_invite(text) from public;
+revoke all on function request_connection_by_invite(text) from anon;
 grant execute on function request_connection_by_invite(text) to authenticated;
 
 -- "이 과외쌤이 이 학생과 active 연결인가" — 다른 정책에서 재사용
@@ -3274,3 +3321,101 @@ comment on function my_consent_status() is
 revoke all on function my_consent_status() from public;
 revoke all on function my_consent_status() from anon;
 grant execute on function my_consent_status() to authenticated;
+
+-- ── 초대 코드 시도 제한 (20260819030000) ────────────────────────────────────
+-- 생성 엔트로피만으로는 부족하다. 시도에 비용이 없으면 낮은 확률을 무한히 곱할 수 있다.
+-- 실측: 제한 전에는 연속 30회 오입력이 전부 통과했다(차단 0회).
+create table if not exists invite_attempts (
+  id           bigint generated always as identity primary key,
+  student_id   uuid not null references profiles(id) on delete cascade,
+  outcome      text not null,
+  attempted_at timestamptz not null default now(),
+  constraint invite_attempts_outcome_check
+    check (outcome in ('success', 'not_found', 'already_used', 'invalid_format'))
+);
+
+create index if not exists invite_attempts_student_time_idx
+  on invite_attempts (student_id, attempted_at desc);
+
+-- 클라이언트는 이 표를 직접 만지지 않는다(RPC 는 security definer). 정책 0개 + 권한 회수.
+alter table invite_attempts enable row level security;
+revoke all on table invite_attempts from anon;
+revoke all on table invite_attempts from authenticated;
+
+create or replace function invite_attempt_window_minutes() returns integer
+language sql immutable as $$ select 10 $$;
+
+create or replace function invite_attempt_max_failures() returns integer
+language sql immutable as $$ select 10 $$;
+
+revoke all on function invite_attempt_window_minutes() from public, anon;
+revoke all on function invite_attempt_max_failures() from public, anon;
+grant execute on function invite_attempt_window_minutes() to authenticated, service_role;
+grant execute on function invite_attempt_max_failures() to authenticated, service_role;
+
+-- ── 연결 수락 원자화 (20260819020000) ───────────────────────────────────────
+-- 수락은 쓰기가 둘이다(설정 행 생성 + 상태 전이). 두 앱이 이걸 클라이언트에서 순차로 했고
+-- 순서가 서로 달라서 부분 실패 결과도 달랐다(고아 설정 / 설정 없는 active).
+-- 한 함수에 넣으면 단일 트랜잭션이라 중간 상태가 존재할 수 없다.
+create or replace function accept_connection_request(p_connection_id uuid)
+returns connections
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  conn connections%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'authentication_required';
+  end if;
+
+  select * into conn from connections where id = p_connection_id for update;
+
+  if not found then
+    raise exception 'connection_not_found';
+  end if;
+
+  -- security definer 라 RLS 가 적용되지 않는다 → 여기서 직접 확인해야 한다.
+  if conn.teacher_id <> auth.uid() then
+    raise exception 'not_connection_teacher';
+  end if;
+
+  -- 멱등: 이미 active 면 오류가 아니다. 과거 부분 실패로 설정 행이 없을 수 있어 보정만 한다.
+  if conn.status = 'active' then
+    insert into per_student_settings (connection_id)
+    values (conn.id)
+    on conflict (connection_id) do nothing;
+    return conn;
+  end if;
+
+  if conn.status <> 'pending' then
+    -- rejected·disconnected 를 수락으로 되살리지 않는다. 학생이 코드를 다시 넣어야 한다(재동의).
+    raise exception 'connection_not_pending';
+  end if;
+
+  -- 컬럼을 명시하지 않는다 — 표의 기본값이 shared 의 DEFAULT_TEACHER_STUDENT_SETTINGS 와 같다.
+  insert into per_student_settings (connection_id)
+  values (conn.id)
+  on conflict (connection_id) do nothing;
+
+  update connections
+     set status = 'active',
+         activated_at = now()
+   where id = conn.id
+  returning * into conn;
+
+  return conn;
+end;
+$$;
+
+revoke all on function accept_connection_request(uuid) from public;
+revoke all on function accept_connection_request(uuid) from anon;
+grant execute on function accept_connection_request(uuid) to authenticated;
+
+-- ── 정책 0개 표의 잔여 클라이언트 권한 회수 (20260819010000) ────────────────
+-- RLS 가 지금은 막아 주지만 안전이 한 겹뿐이었다. 누가 조회용 정책을 for all 로 붙이는
+-- 순간 쓰기까지 열린다(A1 의 ad_unlocks 가 그랬다). SELECT 은 남긴다 — 어차피 0행이다.
+revoke insert, update, delete, truncate on table report_views from anon, authenticated;
+revoke insert, update, delete, truncate on table storage_purge_log from anon, authenticated;
+revoke insert, update, delete, truncate on table storage_purge_queue from anon, authenticated;
