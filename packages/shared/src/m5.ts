@@ -128,7 +128,8 @@ export function getFeatureGateState(args: {
       unlocked: true,
       isPremium: true,
       canUnlockByAd: false,
-      reason: "프리미엄: 무제한 이용"
+      // "무제한" 을 지웠다 — 프리미엄이 지금 열어 주는 기능이 없다(§보고서).
+      reason: "프리미엄 이용 중"
     };
   }
 
@@ -143,7 +144,10 @@ export function getFeatureGateState(args: {
     unlocked: hasActiveUnlock,
     isPremium: false,
     canUnlockByAd: !hasActiveUnlock,
-    reason: hasActiveUnlock ? "광고 보상으로 언락됨" : "무료: 광고를 보면 한 번 열려요"
+    // "무료: 광고를 보면 한 번 열려요" 를 지웠다 — 광고 언락 발급이 서버에서 차단돼 있어
+    // (20260816010000) 광고를 봐도 열리지 않는다. 할 수 없는 일을 안내하면 안 된다.
+    // 잠금 화면은 AD_UNLOCK_DISABLED_NOTICE 를 따로 보여 준다.
+    reason: hasActiveUnlock ? "광고 보상으로 언락됨" : "지금은 이용할 수 없어요"
   };
 }
 

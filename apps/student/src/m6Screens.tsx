@@ -5,7 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing } from "@ssamplanner/design-tokens";
-import { PRICE_STUDENT_PREMIUM_KRW, formatKrw, getStudentPremiumState, type SubStatus } from "@ssamplanner/shared";
+import { getStudentPremiumState, type SubStatus } from "@ssamplanner/shared";
 
 import { supabase } from "./supabaseClient";
 
@@ -55,14 +55,17 @@ export function SubscribeScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.kicker}>프리미엄</Text>
-      <Text style={styles.title}>광고 없이, 무제한으로</Text>
-      <Text style={styles.price}>{formatKrw(PRICE_STUDENT_PREMIUM_KRW)} / 월</Text>
+      {/*
+        가격을 여기서 찍지 않는다. 학생 프리미엄은 인앱결제(IAP)로 확정됐고, 가격은 스토어
+        메타데이터가 정본이다 — 앱에 하드코딩하면 스토어 값과 갈라지고 그 순간 거짓이 된다.
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>프리미엄 혜택</Text>
-        <Text style={styles.cardBody}>• 나의 리포트 · AI 추천 무제한</Text>
-        <Text style={styles.cardBody}>• 혼공 AI 검사 무제한 (광고 없이)</Text>
-      </View>
+        혜택 목록도 지웠다. 세 항목 모두 지금 동작하지 않는다:
+          · 나의 리포트   — /report 는 진입점 0건(고아 화면), 출시 비노출 확정
+          · AI 추천       — 클라이언트 스텁이고 결과 쓰기가 서버에서 차단됨(20260816020000)
+          · 혼공 AI 검사  — AI_CHECK_RESULTS_ENABLED=false, Edge Function 이 503 으로 거절
+        남는 항목이 없어 목록 자체를 없앴다. 구체 기능명·가격을 약속하지 않는다.
+      */}
+      <Text style={styles.title}>준비 중</Text>
 
       <Text style={styles.notice}>{sub.message}</Text>
 
@@ -80,9 +83,11 @@ export function SubscribeScreen() {
         // 그건 보안 구멍이라 제거했다 — 상태 표시는 남기고 상태를 바꾸는 버튼만 없앴다.
         <View style={styles.pendingCard}>
           <Text style={styles.pendingTitle}>결제 준비 중</Text>
-          <Text style={styles.cardBody}>
-            인앱 결제 연동 후 여기서 바로 구독할 수 있어요. 그때까지는 광고 보상으로 열어서 써주세요.
-          </Text>
+          {/*
+            "그때까지는 광고 보상으로 열어서 써주세요" 를 지웠다 — 광고 언락은 서버에서
+            발급이 차단돼 있고(20260816010000) 버튼도 숨겨져 있어, 할 수 없는 일을 권하는
+            문구였다. 대체 문구를 새로 넣지 않는다(약속을 늘리지 않는다).
+          */}
         </View>
       )}
     </ScrollView>
@@ -109,14 +114,11 @@ export function SubscriptionManageScreen() {
       ) : null}
 
       {premium.isPremium ? (
-        // 해지는 결제 공급자(App Store / Google Play)에서 해야 한다 — 앱이 직접 상태를 바꾸면
-        // 실제 결제와 DB 가 어긋난다. 예전 mock 해지 버튼은 그래서 제거했다.
-        <View style={styles.pendingCard}>
-          <Text style={styles.pendingTitle}>해지 안내</Text>
-          <Text style={styles.cardBody}>
-            구독 해지는 결제하신 스토어(App Store · Google Play)의 구독 관리에서 할 수 있어요.
-          </Text>
-        </View>
+        // 해지 안내를 지웠다. IAP 연동이 없어 **결제한 사람이 존재할 수 없으므로**
+        // "결제하신 스토어에서 해지하세요" 는 허위 안내다(그 상태는 service_role 로
+        // 만든 테스트 데이터로만 도달한다). 연동이 붙으면 그때 실제 절차를 적는다.
+        // 상태 표시(제목·만료 예정)는 위에 그대로 남는다.
+        null
       ) : (
         <Pressable accessibilityRole="button" onPress={() => router.push("/subscribe")} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>프리미엄 보러가기</Text>
@@ -141,7 +143,6 @@ const styles = StyleSheet.create({
   centerText: { color: colors.muted, fontSize: 15, fontWeight: "700" },
   kicker: { color: colors.muted, fontSize: 13, fontWeight: "800", letterSpacing: 0.2 },
   title: { color: colors.ink, fontSize: 24, fontWeight: "900" },
-  price: { color: colors.brand, fontSize: 18, fontWeight: "900" },
   notice: { color: colors.muted, fontSize: 13, fontWeight: "700" },
   card: { gap: spacing.xs, padding: spacing.lg, borderWidth: 1, borderColor: colors.line, borderRadius: radii.card, backgroundColor: colors.surface },
   cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "900", marginBottom: spacing.xs },

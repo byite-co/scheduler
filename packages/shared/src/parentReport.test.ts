@@ -306,7 +306,9 @@ describe("요금제 게이팅 (과외쌤 구독)", () => {
   it("무료가 무엇을 못 하는지 문구로 말한다 — 리포트 자체는 막지 않는다", () => {
     const free = getReportGating(false);
     expect(free.notice).toContain("자동 그래프");
-    expect(free.notice).toContain("구독");
+    // "구독하면 ~가 리포트에 들어가요" 유도 문구는 제거했다(A3) — 결제 수단이 없어 지금은
+    // 구독을 시작할 방법이 없고, 없는 경로를 조건으로 내걸면 안 된다. 사실 서술만 남긴다.
+    expect(free.notice).not.toContain("구독");
   });
 
   it("과외쌤 구독 상태를 그대로 따른다 (학생 프리미엄과 무관)", () => {

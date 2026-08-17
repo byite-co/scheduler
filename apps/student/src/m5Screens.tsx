@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Link, type Href } from "expo-router";
 import type { Session } from "@supabase/supabase-js";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -118,16 +117,13 @@ function GateNotice({ gate, onWatchAd }: { gate: FeatureGateState; onWatchAd: ()
           <Text style={styles.primaryButtonText}>광고 보고 무료로 열기</Text>
         </Pressable>
       ) : null}
-      <Link href={"/subscribe" as Href} asChild>
-        <Pressable accessibilityRole="button" style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>
-            {AD_UNLOCK_ENABLED ? "월 구독하고 광고 없이 무제한" : "월 구독하고 무제한으로 쓰기"}
-          </Text>
-        </Pressable>
-      </Link>
-      <Text style={styles.gateHint}>
-        {AD_UNLOCK_ENABLED ? "광고 없이 매주 받고 싶다면? 월 구독 →" : AD_UNLOCK_DISABLED_NOTICE}
-      </Text>
+      {/*
+        "월 구독하고 무제한으로 쓰기" 버튼과 "광고 없이 매주 받고 싶다면? 월 구독 →" 힌트를
+        지웠다. 뒤에 결제가 없는 구매 유도 CTA 였고(IAP 미연동 → /subscribe 는 "준비 중"),
+        "무제한" 은 지금 아무 기능도 열어 주지 않으므로 약속 자체가 거짓이다.
+        구독 화면은 설정 › 구독 관리로 여전히 도달한다 — 새 진입점을 만들지 않았다.
+      */}
+      <Text style={styles.gateHint}>{AD_UNLOCK_DISABLED_NOTICE}</Text>
     </View>
   );
 }

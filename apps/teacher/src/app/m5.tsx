@@ -552,11 +552,12 @@ export function TeacherReportBuilder() {
                 </span>
                 {gating.notice}
               </span>
-              {gating.autoGraphs ? null : (
-                <a href="/billing" className="rounded-control bg-brand px-3 py-2 text-xs font-extrabold text-surface">
-                  구독 시작
-                </a>
-              )}
+              {/*
+                "구독 시작" 버튼을 지웠다. /billing 에는 결제 수단이 없어(웹 PG 미연동)
+                누르면 상태 표시 화면으로만 이동했다 — 뒤에 결제가 없는 구매 유도 CTA 다.
+                요금제 상태 표시(칩 + 안내)는 남는다. /billing 은 좌측 내비게이션으로 여전히
+                도달한다 — 새 진입점을 만들지 않았다.
+              */}
             </div>
 
             {/* 수업 회차 — 공개범위 대상이 아니다(과외쌤 자신의 기록). */}

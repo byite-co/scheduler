@@ -114,13 +114,14 @@ export function TeacherBilling() {
             예상 월 청구 = active {activeCount}명 × {formatKrw(PRICE_PER_STUDENT_KRW)} = {formatKrw(estimated)}
           </p>
           {/* 상태를 바꾸는 버튼은 제거했다(보안). 상태·금액 표시는 위에 그대로 남는다.
-              구독 시작·해지·일시정지는 실연동 Stripe 결제 화면이 담당할 예정이다. */}
+              결제 사업자 이름(Stripe)은 지웠다 — 과외쌤 결제는 **웹 국내 PG** 로 확정됐고,
+              사업자가 정해지지 않은 상태에서 특정 이름을 적으면 그 순간 거짓이 된다. */}
           <p className="mt-2 rounded-control border border-line bg-canvas px-4 py-3 text-sm font-bold text-muted">
             {billing.status === "active"
               ? "해지·일시정지는 결제 연동 후 이 화면에서 처리할 수 있어요."
               : billing.status === "past_due"
                 ? "미납 복구는 결제 연동 후 결제수단 업데이트로 처리돼요."
-                : "구독 시작은 결제 연동(Stripe) 후 이 화면에서 할 수 있어요."}
+                : "구독 시작은 결제 연동 후 이 화면에서 할 수 있어요."}
           </p>
         </section>
 
