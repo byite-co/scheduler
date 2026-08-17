@@ -4,7 +4,6 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
 import {
-  DEFAULT_TEACHER_STUDENT_SETTINGS,
   formatInviteCode,
   formatPendingRequestLabel,
   indexPendingRequests,
@@ -13,6 +12,7 @@ import {
 } from "@ssamplanner/shared";
 
 import { useAuth } from "./auth";
+import { acceptConnectionRequestForUi } from "./connectionAcceptance";
 import { AppIcon } from "./icons";
 import { managementStyles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
@@ -139,22 +139,18 @@ export function ConnectionRequestsScreen() {
     setBusyId(connection.id);
 
     if (accept) {
-      const settings = await supabase.from("per_student_settings").upsert({
-        connection_id: connection.id,
-        ai_check_subjects: DEFAULT_TEACHER_STUDENT_SETTINGS.aiCheckSubjects as Database["public"]["Enums"]["subject_code"][],
-        report_cycle: DEFAULT_TEACHER_STUDENT_SETTINGS.reportCycle
+      await acceptConnectionRequestForUi(connection.id, {
+        clearBusy: () => setBusyId(null),
+        refresh: loadConnections,
+        showMessage: setMessage
       });
-      if (settings.error) {
-        setMessage(settings.error.message);
-        setBusyId(null);
-        return;
-      }
+      return;
     }
 
-    const patch = accept
-      ? { status: "active" as const, activated_at: new Date().toISOString() }
-      : { status: "rejected" as const, activated_at: null };
-    const result = await supabase.from("connections").update(patch).eq("id", connection.id);
+    const result = await supabase
+      .from("connections")
+      .update({ status: "rejected" as const, activated_at: null })
+      .eq("id", connection.id);
     if (result.error) {
       setMessage(result.error.message);
       setBusyId(null);
@@ -163,7 +159,7 @@ export function ConnectionRequestsScreen() {
 
     setBusyId(null);
     await loadConnections();
-    setMessage(accept ? "연결을 수락했습니다." : "연결을 거절했습니다.");
+    setMessage("연결을 거절했습니다.");
   }
 
   return (

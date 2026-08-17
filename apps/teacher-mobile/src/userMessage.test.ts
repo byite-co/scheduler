@@ -15,6 +15,13 @@ describe("toUserMessage", () => {
     );
   });
 
+  it("연결 수락 RPC 오류를 사용자가 이해할 수 있는 문구로 바꾼다", () => {
+    expect(toUserMessage("connection_not_pending")).toBe("이미 처리된 연결 요청입니다.");
+    expect(toUserMessage("not_connection_teacher")).toBe("이 연결 요청을 처리할 수 없습니다.");
+    expect(toUserMessage("connection_not_found")).toBe("이 연결 요청을 처리할 수 없습니다.");
+    expect(toUserMessage("authentication_required")).toBe("로그인이 필요합니다.");
+  });
+
   it("maps common authentication failures", () => {
     expect(toUserMessage("Invalid login credentials")).toBe("이메일 또는 비밀번호를 확인해 주세요.");
   });
