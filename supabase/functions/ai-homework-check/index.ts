@@ -281,12 +281,6 @@ Deno.serve(async (req: Request) => {
   const snapshotPaths: unknown = attempt.photo_paths_snapshot;
   const paths = Array.isArray(snapshotPaths) ? (snapshotPaths as string[]) : [];
 
-  // 실패는 반드시 attempt 에 남기고 슬롯을 비운다. 남기지 않으면 processing 이 영원히 남아
-  // 재시도가 check_already_in_progress 로 막힌다.
-  const failAttempt = async (code: CheckErrorCode) => {
-    await asService.rpc("fail_homework_check_attempt", { p_attempt_id: attempt.id, p_error_code: code });
-  };
-
   const scopeText = typeof attempt.scope_text_snapshot === "string" ? attempt.scope_text_snapshot : null;
   const calls: Array<Record<string, unknown>> = [];
   let discard: { reason: string; detail: string } | null = null;
@@ -297,6 +291,43 @@ Deno.serve(async (req: Request) => {
   let totalLatency = 0;
   let lastModel: string | null = null;
   let lastStopReason: string | null = null;
+
+  // 실패는 반드시 attempt 에 남기고 슬롯을 비운다. 남기지 않으면 processing 이 영원히 남아
+  // 재시도가 check_already_in_progress 로 막힌다.
+  //
+  // 🚨 **이미 나간 돈은 반드시 함께 남긴다.** 예전에는 status·error_code 만 써서, AI 호출이
+  //    끝난 뒤 실패하면 토큰·비용이 어디에도 기록되지 않았다(2026-08-07~08-16 실제로 그랬다).
+  //    attempts 표가 비용 집계의 유일한 출처라 여기 없으면 청구서와 대조할 수단이 없다.
+  //    아직 한 번도 호출하지 않았다면 전부 null 로 넘어가고, RPC 가 coalesce 로 기존 값을 지킨다.
+  const failAttempt = async (code: CheckErrorCode | "attempt_complete_failed") => {
+    await asService.rpc("fail_homework_check_attempt", {
+      p_attempt_id: attempt.id,
+      p_error_code: code,
+      p_model: lastModel,
+      p_input_tokens: totalInput > 0 ? totalInput : null,
+      p_output_tokens: totalOutput > 0 ? totalOutput : null,
+      p_cost_usd_micros: totalCost > 0 ? totalCost : null,
+      p_latency_ms: totalLatency > 0 ? totalLatency : null
+    });
+  };
+
+  // 8-0) **AI 호출 권리를 선점한다.** 같은 키로 동시에 두 요청이 오면 둘 다 같은 행을 받고
+  //      둘 다 status='processing' 을 보므로, 이 관문이 없으면 **둘 다 AI 를 부른다**
+  //      — 사진 한 장에 돈이 두 번 나간다. start 안의 advisory lock 은 그 트랜잭션에서만
+  //      유효해 그 뒤의 AI 호출까지 직렬화하지 못한다.
+  //      조건부 UPDATE(ai_started_at is null)로 **한 요청만** 권리를 가져간다.
+  const { data: claimed, error: claimError } = await asService.rpc("claim_homework_check_attempt", {
+    p_attempt_id: attempt.id
+  });
+  if (claimError) {
+    await failAttempt("unknown");
+    return fail("attempt_start_failed", 500);
+  }
+  if (!claimed) {
+    // 다른 요청이 이미 AI 를 부르고 있다. 여기서 또 부르면 그게 곧 이중 과금이다.
+    // 이 실행을 failed 로 마감하지 **않는다** — 권리를 가진 쪽이 아직 돌고 있다.
+    return fail("check_already_in_progress", 409);
+  }
 
   try {
     // 8-1) 사진을 service_role 로 내려받는다. photo_paths 가 실제로 존재하는지 확인하는
@@ -396,10 +427,9 @@ Deno.serve(async (req: Request) => {
   });
 
   if (writeError) {
-    await asService.rpc("fail_homework_check_attempt", {
-      p_attempt_id: attempt.id,
-      p_error_code: "attempt_complete_failed"
-    });
+    // 여기가 **돈이 가장 크게 새던 지점**이다 — AI 호출은 이미 전부 끝났다.
+    // failAttempt 가 토큰·비용을 함께 남기므로 기록 실패로 끝나도 금액은 추적할 수 있다.
+    await failAttempt("attempt_complete_failed");
     return fail("write_failed", 500, { detail: writeError.message });
   }
 

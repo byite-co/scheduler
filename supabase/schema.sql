@@ -480,6 +480,9 @@ create table homework_check_attempts (
   error_code                text,
   created_at                timestamptz not null default now(),
   started_at                timestamptz,
+  -- 20260817000000: AI 호출 권리를 가져간 시각. 비어 있을 때만 claim 이 성공한다 —
+  --   동시 요청이 같은 사진에 두 번 과금하지 않게 하는 유일한 관문이다.
+  ai_started_at             timestamptz,
   completed_at              timestamptz,
   updated_at                timestamptz not null default now(),
 
@@ -496,6 +499,10 @@ create table homework_check_attempts (
   -- verdict 는 completed 일 때만. raw_ai_observation 은 failed(폐기)에도 있을 수 있다.
   constraint attempts_verdict_requires_completed
     check (verdict is null or status = 'completed'),
+  -- 20260817000000: 미종결(queued/processing)이 관찰 결과를 들고 있으면 부분 기록이
+  --   완료된 관찰로 읽힌다. 20260816040000 이 양방향을 쪼개면서 이 방향이 비어 있었다.
+  constraint attempts_observation_requires_settled
+    check (raw_ai_observation is null or status in ('completed', 'failed')),
   constraint attempts_latency_non_negative
     check (latency_ms is null or latency_ms >= 0),
   -- 사진 1~9개. array_length 는 빈 배열에 NULL 을 돌려주므로 coalesce 가 없으면
@@ -687,6 +694,34 @@ begin
 end;
 $$;
 
+
+-- 20260817000000: AI 호출 권리를 1회만 발급한다. 같은 키로 동시에 온 두 요청이 둘 다
+--   processing 을 보고 둘 다 AI 를 부르는 것을 막는다(사진 한 장에 돈이 두 번 나갔다).
+create or replace function claim_homework_check_attempt(p_attempt_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  claimed boolean := false;
+begin
+  update homework_check_attempts
+     set ai_started_at = now(),
+         updated_at = now()
+   where id = p_attempt_id
+     and status in ('queued', 'processing')
+     and ai_started_at is null;
+
+  get diagnostics claimed = row_count;
+  return claimed;
+end;
+$$;
+revoke all on function claim_homework_check_attempt(uuid) from public;
+revoke all on function claim_homework_check_attempt(uuid) from anon;
+revoke all on function claim_homework_check_attempt(uuid) from authenticated;
+grant execute on function claim_homework_check_attempt(uuid) to service_role;
+
 revoke all on function start_homework_check_attempt(uuid, uuid, text) from public;
 revoke all on function start_homework_check_attempt(uuid, uuid, text) from anon;
 revoke all on function start_homework_check_attempt(uuid, uuid, text) from authenticated;
@@ -741,9 +776,15 @@ end;
 $$;
 
 -- 3) 실패 기록. 실패해도 슬롯을 비워 재시도가 가능해야 한다.
+-- 20260817000000: 이미 나간 토큰·비용을 함께 기록한다 — 어떤 경로로 끝나든 돈이 나갔으면 남아야 한다.
 create or replace function fail_homework_check_attempt(
   p_attempt_id uuid,
-  p_error_code text
+  p_error_code text,
+  p_model text default null,
+  p_input_tokens integer default null,
+  p_output_tokens integer default null,
+  p_cost_usd_micros bigint default null,
+  p_latency_ms integer default null
 )
 returns homework_check_attempts
 language plpgsql
@@ -756,6 +797,12 @@ begin
   update homework_check_attempts
      set status = 'failed',
          error_code = coalesce(nullif(btrim(p_error_code), ''), 'unknown'),
+         -- 이미 기록된 값이 있으면 덮어쓰지 않는다(부분 성공 뒤 실패한 경우).
+         model = coalesce(p_model, model),
+         input_tokens = coalesce(p_input_tokens, input_tokens),
+         output_tokens = coalesce(p_output_tokens, output_tokens),
+         estimated_cost_usd_micros = coalesce(p_cost_usd_micros, estimated_cost_usd_micros),
+         latency_ms = coalesce(p_latency_ms, latency_ms),
          completed_at = now(),
          updated_at = now()
    where id = p_attempt_id
@@ -778,10 +825,10 @@ revoke all on function complete_homework_check_attempt(uuid, submission_verdict,
 revoke all on function complete_homework_check_attempt(uuid, submission_verdict, numeric, text, text, integer, integer, bigint) from authenticated;
 grant execute on function complete_homework_check_attempt(uuid, submission_verdict, numeric, text, text, integer, integer, bigint) to service_role;
 
-revoke all on function fail_homework_check_attempt(uuid, text) from public;
-revoke all on function fail_homework_check_attempt(uuid, text) from anon;
-revoke all on function fail_homework_check_attempt(uuid, text) from authenticated;
-grant execute on function fail_homework_check_attempt(uuid, text) to service_role;
+revoke all on function fail_homework_check_attempt(uuid, text, text, integer, integer, bigint, integer) from public;
+revoke all on function fail_homework_check_attempt(uuid, text, text, integer, integer, bigint, integer) from anon;
+revoke all on function fail_homework_check_attempt(uuid, text, text, integer, integer, bigint, integer) from authenticated;
+grant execute on function fail_homework_check_attempt(uuid, text, text, integer, integer, bigint, integer) to service_role;
 
 -- M4: AI 판정은 서버 권위적 — ai_* 는 서비스롤(정의자 RPC)로만 기록(채점 아님, 완료 확인).
 create or replace function apply_homework_ai_verdict(
