@@ -8,6 +8,7 @@ import { useAuth } from "./auth";
 import { managementStyles as styles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
 import { PrimaryButton, screenStyles } from "./ui";
+import { toUserMessage } from "./userMessage";
 
 const SUBJECTS: SubjectCode[] = ["math", "english", "korean", "science", "social", "etc"];
 
@@ -86,7 +87,7 @@ export function ProfileSettingsScreen() {
           })}
         </View>
       </View>
-      {message ? <Text style={{ color: message.includes("저장했습니다") ? colors.success : colors.danger, fontWeight: "800" }}>{message}</Text> : null}
+      {message ? <Text style={{ color: message.includes("저장했습니다") ? colors.success : colors.danger, fontWeight: "800" }}>{toUserMessage(message)}</Text> : null}
       <PrimaryButton disabled={saving} onPress={() => void saveProfile()}>{saving ? "저장 중…" : "프로필 저장"}</PrimaryButton>
     </ScrollView>
   );

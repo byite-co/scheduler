@@ -7,7 +7,7 @@ import { formatKrw, summarizeLessonFees, type Database } from "@ssamplanner/shar
 import { useAuth } from "./auth";
 import { managementStyles as styles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
-import { EmptyState, PrimaryButton, screenStyles } from "./ui";
+import { EmptyState, ErrorState, LoadingState, PrimaryButton, screenStyles } from "./ui";
 
 type LessonFeeRow = Database["public"]["Tables"]["lesson_fees"]["Row"];
 type LessonRow = Pick<Database["public"]["Tables"]["lessons"]["Row"], "student_id" | "taught_on" | "status">;
@@ -33,6 +33,7 @@ export function LessonFeesScreen() {
   const [plannedSessions, setPlannedSessions] = useState("");
   const [memo, setMemo] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -42,6 +43,7 @@ export function LessonFeesScreen() {
     }
 
     setLoading(true);
+    setLoadError(null);
     const [feesResult, connectionsResult, lessonsResult] = await Promise.all([
       supabase.from("lesson_fees").select("*").eq("teacher_id", session.user.id).order("period", { ascending: false }),
       supabase
@@ -65,6 +67,7 @@ export function LessonFeesScreen() {
     setLessons((lessonsResult.data ?? []) as LessonRow[]);
     setStudents((profilesResult.data ?? []) as StudentOption[]);
     const error = feesResult.error ?? connectionsResult.error ?? lessonsResult.error ?? profilesResult.error;
+    setLoadError(error?.message ?? null);
     setMessage(error?.message ?? null);
     setLoading(false);
   }, [session, setMessage]);
@@ -117,13 +120,15 @@ export function LessonFeesScreen() {
       { onConflict: "teacher_id,student_id,period" }
     );
     setSaving(false);
-    setMessage(error?.message ?? "월 수업료 기록을 저장했습니다.");
-    if (!error) {
-      setAmount("");
-      setPlannedSessions("");
-      setMemo("");
-      await refresh();
+    if (error) {
+      setMessage(error.message);
+      return;
     }
+    setAmount("");
+    setPlannedSessions("");
+    setMemo("");
+    await refresh();
+    setMessage("월 수업료 기록을 저장했습니다.");
   }
 
   async function togglePaid(fee: LessonFeeRow) {
@@ -146,6 +151,24 @@ export function LessonFeesScreen() {
     };
   }
 
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>수업료 관리</Text>
+        <LoadingState label="수업료 기록을 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>수업료 관리</Text>
+        <ErrorState body={loadError} onRetry={() => void refresh()} />
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
       <Text style={screenStyles.heading}>수업료 관리</Text>
@@ -163,7 +186,7 @@ export function LessonFeesScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>월 수업료 기록</Text>
-        {!loading && students.length === 0 ? (
+        {students.length === 0 ? (
           <EmptyState title="연결된 학생이 없어요" body="active 연결 학생이 생기면 수업료를 기록할 수 있어요." />
         ) : null}
         <Text style={styles.label}>학생</Text>
@@ -190,7 +213,7 @@ export function LessonFeesScreen() {
         </PrimaryButton>
       </View>
 
-      {!loading && fees.length === 0 ? (
+      {fees.length === 0 ? (
         <EmptyState title="아직 수업료 기록이 없어요" body="학생별 월 정액과 예정 회차를 저장하면 여기에 표시돼요." />
       ) : null}
 

@@ -13,9 +13,10 @@ import {
 } from "@ssamplanner/shared";
 
 import { useAuth } from "./auth";
+import { AppIcon } from "./icons";
 import { managementStyles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
-import { EmptyState, PrimaryButton, screenStyles } from "./ui";
+import { EmptyState, ErrorState, LoadingState, PrimaryButton, screenStyles } from "./ui";
 
 type Connection = Database["public"]["Tables"]["connections"]["Row"];
 type ConnectionStatus = Database["public"]["Enums"]["connection_status"];
@@ -75,9 +76,18 @@ export function ConnectionRequestsScreen() {
     () => new Map<string, PendingConnectionRequest>()
   );
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadConnections = useCallback(async () => {
-    if (!session) return;
+    if (!session) {
+      setConnections([]);
+      setPendingByConnectionId(new Map());
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
     const [connectionsResult, pendingResult] = await Promise.all([
       supabase
         .from("connections")
@@ -89,7 +99,9 @@ export function ConnectionRequestsScreen() {
     setConnections((connectionsResult.data ?? []) as ConnectionWithStudent[]);
     setPendingByConnectionId(indexPendingRequests(pendingResult.data));
     const error = connectionsResult.error ?? pendingResult.error;
-    if (error) setMessage(error.message);
+    setLoadError(error?.message ?? null);
+    setMessage(error?.message ?? null);
+    setLoading(false);
   }, [session, setMessage]);
 
   useEffect(() => {
@@ -105,17 +117,26 @@ export function ConnectionRequestsScreen() {
     [connections]
   );
 
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>연결 요청</Text>
+        <LoadingState label="연결 요청을 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>연결 요청</Text>
+        <ErrorState body={loadError} onRetry={() => void loadConnections()} />
+      </ScrollView>
+    );
+  }
+
   async function decide(connection: ConnectionWithStudent, accept: boolean) {
     setBusyId(connection.id);
-    const patch = accept
-      ? { status: "active" as const, activated_at: new Date().toISOString() }
-      : { status: "rejected" as const, activated_at: null };
-    const result = await supabase.from("connections").update(patch).eq("id", connection.id);
-    if (result.error) {
-      setMessage(result.error.message);
-      setBusyId(null);
-      return;
-    }
 
     if (accept) {
       const settings = await supabase.from("per_student_settings").upsert({
@@ -130,9 +151,19 @@ export function ConnectionRequestsScreen() {
       }
     }
 
-    setMessage(accept ? "연결을 수락했습니다." : "연결을 거절했습니다.");
+    const patch = accept
+      ? { status: "active" as const, activated_at: new Date().toISOString() }
+      : { status: "rejected" as const, activated_at: null };
+    const result = await supabase.from("connections").update(patch).eq("id", connection.id);
+    if (result.error) {
+      setMessage(result.error.message);
+      setBusyId(null);
+      return;
+    }
+
     setBusyId(null);
     await loadConnections();
+    setMessage(accept ? "연결을 수락했습니다." : "연결을 거절했습니다.");
   }
 
   return (
@@ -148,7 +179,7 @@ export function ConnectionRequestsScreen() {
           onPress={() => router.push("/students/invite")}
           style={styles.addButton}
         >
-          <Text style={styles.addButtonText}>＋</Text>
+          <AppIcon color={colors.surface} name="plus" size={30} />
         </Pressable>
       </View>
 
@@ -262,11 +293,6 @@ const styles = StyleSheet.create({
     height: 52,
     justifyContent: "center",
     width: 52
-  },
-  addButtonText: {
-    color: colors.surface,
-    fontSize: 30,
-    lineHeight: 34
   },
   card: {
     backgroundColor: colors.surface,

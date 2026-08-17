@@ -14,7 +14,7 @@ import {
 import { useAuth } from "./auth";
 import { homeworkStyles as styles } from "./homeworkStyles";
 import { supabase } from "./supabaseClient";
-import { EmptyState, PrimaryButton, screenStyles } from "./ui";
+import { EmptyState, ErrorState, LoadingState, PrimaryButton, screenStyles } from "./ui";
 
 type SubmissionRow = Pick<
   Database["public"]["Tables"]["homework_submissions"]["Row"],
@@ -59,6 +59,7 @@ export function HomeworkReviewScreen() {
   const [blockedStudents, setBlockedStudents] = useState<BlockedStudent[]>([]);
   const [comments, setComments] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -70,6 +71,7 @@ export function HomeworkReviewScreen() {
     }
 
     setLoading(true);
+    setLoadError(null);
     const connectionsResult = await supabase
       .from("connections")
       .select("id, student_id")
@@ -100,7 +102,7 @@ export function HomeworkReviewScreen() {
       .filter((connection) => disclosureByConnectionId.get(connection.id) !== true)
       .map((connection) => ({
         id: connection.student_id,
-        name: nameByStudentId.get(connection.student_id) ?? "학생"
+        name: nameByStudentId.get(connection.student_id)?.trim() || "이름 미입력"
       }));
     setBlockedStudents(privateStudents);
 
@@ -137,7 +139,7 @@ export function HomeworkReviewScreen() {
       const todo = todoById.get(submission.todo_id);
       return {
         ...submission,
-        studentName: nameByStudentId.get(submission.student_id) ?? "학생",
+        studentName: nameByStudentId.get(submission.student_id)?.trim() || "이름 미입력",
         todoTitle: todo?.title ?? "숙제",
         todoScopeText: todo ? getTodoScopeTextForDisplay(todo) : "",
         todoSubject: (todo?.subject ?? null) as SubjectCode | null,
@@ -150,6 +152,7 @@ export function HomeworkReviewScreen() {
     setComments(Object.fromEntries(nextItems.map((item) => [item.id, item.teacher_comment ?? ""])));
     const error =
       connectionsResult.error ?? disclosuresResult.error ?? profilesResult.error ?? submissionsResult.error ?? todosResult.error;
+    setLoadError(error?.message ?? null);
     setMessage(error?.message ?? signingError);
     setLoading(false);
   }, [session, setMessage]);
@@ -163,8 +166,30 @@ export function HomeworkReviewScreen() {
     const patch = createTeacherReviewPatch(action, comments[item.id]);
     const { error } = await supabase.from("homework_submissions").update(patch).eq("id", item.id);
     setSavingId(null);
-    setMessage(error?.message ?? (action === "confirm" ? "통과로 확인했습니다." : "미흡으로 표시하고 재제출을 요청했습니다."));
-    if (!error) await refresh();
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    await refresh();
+    setMessage(action === "confirm" ? "통과로 확인했습니다." : "미흡으로 표시하고 재제출을 요청했습니다.");
+  }
+
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>숙제 검사</Text>
+        <LoadingState label="제출 내역을 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>숙제 검사</Text>
+        <ErrorState body={loadError} onRetry={() => void refresh()} />
+      </ScrollView>
+    );
   }
 
   return (
@@ -173,9 +198,9 @@ export function HomeworkReviewScreen() {
       <Text style={screenStyles.subtitle}>AI 판정 없이 제출 사진을 직접 보고 ‘다 했는지’를 확인해요.</Text>
       <View style={styles.actionRow}>
         <View style={{ flex: 1 }}>
-          <PrimaryButton onPress={() => router.push("../new")}>+ 숙제 내기</PrimaryButton>
+          <PrimaryButton onPress={() => router.push("/homework/new")}>+ 숙제 내기</PrimaryButton>
         </View>
-        <Pressable style={styles.secondaryButton} onPress={() => router.push("..") }>
+        <Pressable style={styles.secondaryButton} onPress={() => router.push("/homework")}>
           <Text style={styles.secondaryButtonText}>낸 숙제</Text>
         </Pressable>
       </View>
@@ -187,7 +212,7 @@ export function HomeworkReviewScreen() {
         </View>
       ))}
 
-      {!loading && items.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyState
           title="아직 검사할 제출이 없어요"
           body="학생이 숙제를 제출하고 사진 공개를 허용하면 여기에서 직접 확인할 수 있어요."

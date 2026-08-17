@@ -118,8 +118,8 @@ export const homeworkStyles = StyleSheet.create({
   },
   switchRow: {
     alignItems: "center",
-    backgroundColor: tints.flameNudge,
-    borderColor: tints.flameNudgeBorder,
+    backgroundColor: tints.brandSoft,
+    borderColor: colors.brand,
     borderRadius: radii.card,
     borderWidth: 1,
     flexDirection: "row",

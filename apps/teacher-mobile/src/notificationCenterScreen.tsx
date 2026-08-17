@@ -7,7 +7,8 @@ import { NOTIF_TYPE_LABELS, unreadCount, type Database, type NotifType } from "@
 import { useAuth } from "./auth";
 import { managementStyles as styles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
-import { EmptyState, screenStyles } from "./ui";
+import { EmptyState, ErrorState, LoadingState, screenStyles } from "./ui";
+import { toUserMessage } from "./userMessage";
 
 type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
 
@@ -24,6 +25,7 @@ export function NotificationCenterScreen() {
   const { session, setMessage } = useAuth();
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -34,6 +36,7 @@ export function NotificationCenterScreen() {
     }
 
     setLoading(true);
+    setLoadError(null);
     const { data, error } = await supabase
       .from("notifications")
       .select("id, user_id, type, title, body, payload, read, created_at")
@@ -41,6 +44,7 @@ export function NotificationCenterScreen() {
       .order("created_at", { ascending: false })
       .limit(50);
     setNotifications(data ?? []);
+    setLoadError(error?.message ?? null);
     setMessage(error?.message ?? null);
     setLoading(false);
   }, [session, setMessage]);
@@ -75,6 +79,24 @@ export function NotificationCenterScreen() {
 
   const unread = unreadCount(notifications);
 
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>알림</Text>
+        <LoadingState label="알림을 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>알림</Text>
+        <ErrorState body={loadError} onRetry={() => void refresh()} />
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
       <View style={[styles.actionRow, { alignItems: "center", justifyContent: "space-between" }]}>
@@ -87,7 +109,7 @@ export function NotificationCenterScreen() {
         </Pressable>
       </View>
 
-      {!loading && notifications.length === 0 ? (
+      {notifications.length === 0 ? (
         <EmptyState title="아직 알림이 없어요" body="숙제 제출·검사·연결 요청과 리포트 소식이 여기에 모여요." />
       ) : null}
 
@@ -100,13 +122,13 @@ export function NotificationCenterScreen() {
         >
           <View style={[styles.actionRow, { alignItems: "center" }]}>
             <Text style={{ color: colors.brand, fontSize: 13, fontWeight: "900" }}>
-              {NOTIF_TYPE_LABELS[notification.type as NotifType]}
+              {NOTIF_TYPE_LABELS[notification.type as NotifType] ?? "알림"}
             </Text>
             {!notification.read ? <Text style={{ color: colors.brand, fontWeight: "900" }}>●</Text> : null}
             <Text style={[styles.meta, { marginLeft: "auto" }]}>{formatNotificationTime(notification.created_at)}</Text>
           </View>
-          <Text style={styles.cardTitle}>{notification.title}</Text>
-          {notification.body ? <Text style={styles.meta}>{notification.body}</Text> : null}
+          <Text style={styles.cardTitle}>{toUserMessage(notification.title)}</Text>
+          {notification.body ? <Text style={styles.meta}>{toUserMessage(notification.body)}</Text> : null}
         </Pressable>
       ))}
 

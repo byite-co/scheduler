@@ -7,7 +7,7 @@ import type { Database } from "@ssamplanner/shared";
 import { useAuth } from "./auth";
 import { managementStyles as styles } from "./managementStyles";
 import { supabase } from "./supabaseClient";
-import { EmptyState, PrimaryButton, screenStyles } from "./ui";
+import { EmptyState, ErrorState, LoadingState, PrimaryButton, screenStyles } from "./ui";
 
 type LessonRow = Database["public"]["Tables"]["lessons"]["Row"];
 type LessonStatus = "done" | "absent" | "canceled";
@@ -39,6 +39,12 @@ function displayTime(value: number | null) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
+function lessonStatusBackground(status: LessonStatus) {
+  if (status === "done") return tints.successSoft;
+  if (status === "absent") return tints.warningSoft;
+  return tints.dangerSoft;
+}
+
 function isValidDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00`);
@@ -58,6 +64,7 @@ export function LessonNotesScreen() {
   const [duration, setDuration] = useState("");
   const [memo, setMemo] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -67,6 +74,7 @@ export function LessonNotesScreen() {
     }
 
     setLoading(true);
+    setLoadError(null);
     const [lessonsResult, connectionsResult] = await Promise.all([
       supabase.from("lessons").select("*").eq("teacher_id", session.user.id).order("taught_on", { ascending: false }).limit(50),
       supabase
@@ -83,6 +91,7 @@ export function LessonNotesScreen() {
     setLessons(lessonsResult.data ?? []);
     setStudents((profilesResult.data ?? []) as StudentOption[]);
     const error = lessonsResult.error ?? connectionsResult.error ?? profilesResult.error;
+    setLoadError(error?.message ?? null);
     setMessage(error?.message ?? null);
     setLoading(false);
   }, [session, setMessage]);
@@ -129,13 +138,33 @@ export function LessonNotesScreen() {
       memo: memo.trim() || null
     });
     setSaving(false);
-    setMessage(error?.message ?? "수업 회차와 메모를 기록했습니다.");
-    if (!error) {
-      setStartedAt("");
-      setDuration("");
-      setMemo("");
-      await refresh();
+    if (error) {
+      setMessage(error.message);
+      return;
     }
+    setStartedAt("");
+    setDuration("");
+    setMemo("");
+    await refresh();
+    setMessage("수업 회차와 메모를 기록했습니다.");
+  }
+
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>내 수업 노트</Text>
+        <LoadingState label="수업 노트를 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>내 수업 노트</Text>
+        <ErrorState body={loadError} onRetry={() => void refresh()} />
+      </ScrollView>
+    );
   }
 
   return (
@@ -158,7 +187,7 @@ export function LessonNotesScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>수업 기록 추가</Text>
-        {!loading && students.length === 0 ? (
+        {students.length === 0 ? (
           <EmptyState title="연결된 학생이 없어요" body="active 연결 학생이 생기면 수업 회차를 기록할 수 있어요." />
         ) : null}
         <Text style={styles.label}>학생</Text>
@@ -203,7 +232,7 @@ export function LessonNotesScreen() {
         </PrimaryButton>
       </View>
 
-      {!loading && lessons.length === 0 ? (
+      {lessons.length === 0 ? (
         <EmptyState title="아직 수업 노트가 없어요" body="수업 완료·결석·취소와 메모를 남기면 최근 기록이 여기에 쌓여요." />
       ) : null}
 
@@ -214,7 +243,7 @@ export function LessonNotesScreen() {
               <Text style={styles.cardTitle}>{nameByStudentId.get(lesson.student_id) ?? "학생"}</Text>
               <Text style={styles.meta}>{lesson.taught_on} · {displayTime(lesson.started_at_min)}{lesson.duration_min ? ` · ${lesson.duration_min}분` : ""}</Text>
             </View>
-            <View style={[styles.chip, { backgroundColor: lesson.status === "done" ? tints.successSoft : lesson.status === "absent" ? tints.warningSoft : tints.dangerSoft }]}>
+            <View style={[styles.chip, { backgroundColor: lessonStatusBackground(lesson.status as LessonStatus) }]}>
               <Text style={styles.chipText}>{STATUS_LABELS[lesson.status as LessonStatus]}</Text>
             </View>
           </View>

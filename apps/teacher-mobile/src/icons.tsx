@@ -1,7 +1,18 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors } from "@ssamplanner/design-tokens";
 
-export type IconName = "dashboard" | "students" | "bell" | "settings" | "mail" | "lock" | "arrowLeft" | "check" | "book";
+export type IconName =
+  | "arrowLeft"
+  | "bell"
+  | "book"
+  | "check"
+  | "chevronRight"
+  | "dashboard"
+  | "lock"
+  | "mail"
+  | "plus"
+  | "settings"
+  | "students";
 
 const glyphs: Record<IconName, React.ComponentProps<typeof MaterialCommunityIcons>["name"]> = {
   dashboard: "view-dashboard-outline",
@@ -12,7 +23,9 @@ const glyphs: Record<IconName, React.ComponentProps<typeof MaterialCommunityIcon
   lock: "lock-outline",
   arrowLeft: "arrow-left",
   check: "check",
-  book: "file-document-outline"
+  book: "file-document-outline",
+  chevronRight: "chevron-right",
+  plus: "plus"
 };
 
 export function AppIcon({ name, size = 22, color = colors.ink }: { name: IconName; size?: number; color?: string }) {

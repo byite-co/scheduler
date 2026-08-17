@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 
 import { colors, spacing } from "@ssamplanner/design-tokens";
 import {
@@ -16,7 +17,7 @@ import {
 import { useAuth } from "./auth";
 import { homeworkStyles as styles } from "./homeworkStyles";
 import { supabase } from "./supabaseClient";
-import { EmptyState, PrimaryButton, screenStyles } from "./ui";
+import { EmptyState, ErrorState, LoadingState, PrimaryButton, screenStyles } from "./ui";
 
 type StudentOption = {
   connectionId: string;
@@ -27,6 +28,7 @@ type StudentOption = {
 const SUBJECTS: SubjectCode[] = ["math", "english", "korean", "science", "social", "etc"];
 
 export function HomeworkAssignScreen() {
+  const { studentId: requestedStudentId } = useLocalSearchParams<{ studentId?: string }>();
   const { session, setMessage } = useAuth();
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [studentId, setStudentId] = useState("");
@@ -36,6 +38,7 @@ export function HomeworkAssignScreen() {
   const [dueDate, setDueDate] = useState("");
   const [aiCheckEnabled, setAiCheckEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadStudents = useCallback(async () => {
@@ -46,6 +49,7 @@ export function HomeworkAssignScreen() {
     }
 
     setLoading(true);
+    setLoadError(null);
     const connectionsResult = await supabase
       .from("connections")
       .select("id, student_id")
@@ -55,19 +59,27 @@ export function HomeworkAssignScreen() {
     const studentIds = connections.map((connection) => connection.student_id);
     const profilesResult = studentIds.length
       ? await supabase.from("profiles").select("id, name").in("id", studentIds)
-      : { data: [] as Array<{ id: string; name: string }> };
+      : { data: [] as Array<{ id: string; name: string }>, error: null };
     const nameById = new Map((profilesResult.data ?? []).map((profile) => [profile.id, profile.name]));
 
-    setStudents(
-      connections.map((connection) => ({
+    const options = connections.map((connection) => ({
         connectionId: connection.id,
         studentId: connection.student_id,
-        name: nameById.get(connection.student_id) ?? "학생"
-      }))
-    );
-    setMessage(connectionsResult.error?.message ?? null);
+        name: nameById.get(connection.student_id)?.trim() || "이름 미입력"
+      }));
+    setStudents(options);
+    setStudentId((current) => {
+      if (options.some((student) => student.studentId === current)) return current;
+      if (requestedStudentId && options.some((student) => student.studentId === requestedStudentId)) {
+        return requestedStudentId;
+      }
+      return "";
+    });
+    const error = connectionsResult.error ?? profilesResult.error;
+    setLoadError(error?.message ?? null);
+    setMessage(error?.message ?? null);
     setLoading(false);
-  }, [session, setMessage]);
+  }, [requestedStudentId, session, setMessage]);
 
   useEffect(() => {
     void loadStudents();
@@ -117,6 +129,24 @@ export function HomeworkAssignScreen() {
       setScopeText("");
       setDueDate("");
     }
+  }
+
+  if (loading) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>숙제 출제</Text>
+        <LoadingState label="학생 정보를 불러오는 중…" />
+      </ScrollView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ScrollView style={screenStyles.screen} contentContainerStyle={screenStyles.content}>
+        <Text style={screenStyles.heading}>숙제 출제</Text>
+        <ErrorState body={loadError} onRetry={() => void loadStudents()} />
+      </ScrollView>
+    );
   }
 
   return (
@@ -199,11 +229,11 @@ export function HomeworkAssignScreen() {
         <Switch
           value={aiCheckEnabled}
           onValueChange={setAiCheckEnabled}
-          trackColor={{ false: colors.line, true: colors.flame }}
+          trackColor={{ false: colors.line, true: colors.brand }}
         />
       </View>
 
-      <PrimaryButton disabled={saving || loading || students.length === 0} onPress={() => void assignHomework()}>
+      <PrimaryButton disabled={saving || students.length === 0} onPress={() => void assignHomework()}>
         {saving ? "출제 중…" : "숙제 추가"}
       </PrimaryButton>
     </ScrollView>
