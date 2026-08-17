@@ -446,7 +446,10 @@ export function getReportGating(subscriptionActive: boolean): ReportGating {
     mode: "manual",
     autoGraphs: false,
     label: "수기 기록",
-    notice: "무료 플랜은 자동 그래프 없이 직접 쓴 코멘트로 보내요. 구독하면 공부량·수행률 그래프가 리포트에 들어가요."
+    // "구독하면 공부량·수행률 그래프가 리포트에 들어가요" 를 지웠다 — 결제 수단이 없어
+    // 지금은 구독을 시작할 방법이 없다. 없는 경로를 조건으로 내건 유도 문구였다.
+    // 사실 부분("무료 플랜은 직접 쓴 코멘트로 보낸다")만 남긴다.
+    notice: "무료 플랜은 자동 그래프 없이 직접 쓴 코멘트로 보내요."
   };
 }
 

@@ -38,7 +38,11 @@ export function getTeacherBillingState(status: SubStatus): TeacherBillingState {
     case "canceled":
       return { status, active: false, restricted: true, canRecover: true, label: "해지됨", tone: "muted", reason: "구독이 해지되었어요. 다시 시작할 수 있어요." };
     default:
-      return { status, active: false, restricted: true, canRecover: true, label: "구독 없음", tone: "muted", reason: "앱 구독을 시작하면 학생 관리 기능이 열려요." };
+      // "앱 구독을 시작하면 학생 관리 기능이 열려요" 를 지웠다 — **어떤 서버 게이트도
+      // teacher_subscriptions 를 보지 않는다**(A0 §3-15). 학생 관리는 구독과 무관하게
+      // 열려 있어 저 문장은 허위였다. 중립적인 상태 표시만 남긴다.
+      // (restricted 는 값을 유지한다 — 소비하는 화면이 있고, 문구 작업 범위를 넘는다.)
+      return { status, active: false, restricted: true, canRecover: true, label: "구독 없음", tone: "muted", reason: "현재 구독 중이 아니에요." };
   }
 }
 
