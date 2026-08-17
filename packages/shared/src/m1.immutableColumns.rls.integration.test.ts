@@ -70,11 +70,20 @@ describeIfRemote("불변 컬럼 스윕 (실행 테스트)", () => {
       const student = await signIn(env.url, anonKey, `student-${suffix}@a51.test`, password);
 
       // ── profiles.role: 승격은 막히고, 같은 값으로 저장하는 정상 흐름은 통과 ──
+      //
+      // 가드 테스트다 — guard_profile_immutable_fields_trigger 를 떼거나 끄면 이 단정이 실패한다
+      // (실측: 트리거를 disable 하고 돌리면 이 블록에서 떨어진다). 오류 객체 유무를 먼저 보는
+      // 이유는, message 만 보면 트리거 부재 시 "undefined 와 문자열 비교" 라는 엉뚱한 실패
+      // 메시지가 나와 원인을 못 읽기 때문이다.
       const escalate = await student.from("profiles").update({ role: "teacher" }).eq("id", studentId).select("id");
+      expect(
+        escalate.error,
+        "profiles.role 불변 트리거가 없다 — 학생이 스스로 교사가 될 수 있다"
+      ).not.toBeNull();
       expect(escalate.error?.message).toContain("role_is_not_self_assignable");
       const roleNow = await admin.from("profiles").select("role").eq("id", studentId).single();
       assertOk(roleNow);
-      expect(roleNow.data!.role).toBe("student");
+      expect(roleNow.data!.role, "role 이 실제로 바뀌었다").toBe("student");
 
       // 세 앱의 프로필 저장은 upsert 이고 role 을 매번 같은 값으로 보낸다 — 깨지면 안 된다.
       const normalSave = await student
@@ -128,11 +137,16 @@ describeIfRemote("불변 컬럼 스윕 (실행 테스트)", () => {
       assertOk(teacherTodo);
       expect(teacherTodo.data!.locked).toBe(true);
 
+      // 가드 테스트 — guard_locked_todo_delete_trigger 를 떼면 이 단정이 실패한다.
       const deleteTeacherTodo = await student.from("todos").delete().eq("id", teacherTodo.data!.id).select("id");
+      expect(
+        deleteTeacherTodo.error,
+        "선생님 숙제 DELETE 가드가 없다 — 학생이 잠긴 숙제를 지워서 없앨 수 있다"
+      ).not.toBeNull();
       expect(deleteTeacherTodo.error?.message).toContain("students_cannot_delete_teacher_todos");
       const survived = await admin.from("todos").select("id").eq("id", teacherTodo.data!.id);
       assertOk(survived);
-      expect(survived.data).toHaveLength(1);
+      expect(survived.data, "선생님 숙제가 실제로 지워졌다").toHaveLength(1);
 
       const selfTodo = await student
         .from("todos")
