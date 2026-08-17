@@ -366,6 +366,7 @@ export type Database = {
       }
       homework_check_attempts: {
         Row: {
+          ai_started_at: string | null
           completed_at: string | null
           confidence: number | null
           created_at: string
@@ -394,6 +395,7 @@ export type Database = {
           verdict: Database["public"]["Enums"]["submission_verdict"] | null
         }
         Insert: {
+          ai_started_at?: string | null
           completed_at?: string | null
           confidence?: number | null
           created_at?: string
@@ -422,6 +424,7 @@ export type Database = {
           verdict?: Database["public"]["Enums"]["submission_verdict"] | null
         }
         Update: {
+          ai_started_at?: string | null
           completed_at?: string | null
           confidence?: number | null
           created_at?: string
@@ -1359,6 +1362,10 @@ export type Database = {
         Args: { p_session: string; p_teacher: string }
         Returns: boolean
       }
+      claim_homework_check_attempt: {
+        Args: { p_attempt_id: string }
+        Returns: boolean
+      }
       complete_homework_check_attempt: {
         Args: {
           p_attempt_id: string
@@ -1371,6 +1378,7 @@ export type Database = {
           p_verdict: Database["public"]["Enums"]["submission_verdict"]
         }
         Returns: {
+          ai_started_at: string | null
           completed_at: string | null
           confidence: number | null
           created_at: string
@@ -1446,8 +1454,17 @@ export type Database = {
         Returns: undefined
       }
       fail_homework_check_attempt: {
-        Args: { p_attempt_id: string; p_error_code: string }
+        Args: {
+          p_attempt_id: string
+          p_cost_usd_micros?: number
+          p_error_code: string
+          p_input_tokens?: number
+          p_latency_ms?: number
+          p_model?: string
+          p_output_tokens?: number
+        }
         Returns: {
+          ai_started_at: string | null
           completed_at: string | null
           confidence: number | null
           created_at: string
@@ -1606,6 +1623,7 @@ export type Database = {
           p_stop_reason?: string
         }
         Returns: {
+          ai_started_at: string | null
           completed_at: string | null
           confidence: number | null
           created_at: string
@@ -1680,6 +1698,7 @@ export type Database = {
           p_submission_id: string
         }
         Returns: {
+          ai_started_at: string | null
           completed_at: string | null
           confidence: number | null
           created_at: string

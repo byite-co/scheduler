@@ -381,6 +381,81 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
       });
       expect(reRecord.error?.message ?? "").toContain("check_attempt_not_open");
 
+      // ── (7-c) 미종결 상태는 관찰 결과를 가질 수 없다 (20260817000000) ──────
+      // 20260816040000 이 양방향 등식을 쪼개면서 이 방향이 비었다 — queued/processing 인 행이
+      // 관찰을 들고 있으면 부분 기록이 "완료된 관찰" 로 읽힌다.
+      const inflight = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: assertData(discardSubmission.data).id,
+        p_requested_by: studentId,
+        p_idempotency_key: `run-6-${suffix}`
+      });
+      assertOk(inflight);
+      const inflightId = (inflight.data as Record<string, unknown>).id as string;
+      const sneak = await admin
+        .from("homework_check_attempts")
+        .update({ raw_ai_observation: { sneaked: true } })
+        .eq("id", inflightId);
+      expect(sneak.error?.message ?? "").toContain("attempts_observation_requires_settled");
+
+      // ── (7-d) AI 호출 권리는 한 번만 발급된다 (동시 요청 이중 과금 차단) ──
+      // 같은 attempt 에 두 번 claim 하면 두 번째는 false 여야 한다. false 를 받은 요청은
+      // AI 를 부르지 않는다 — 이 관문이 없으면 사진 한 장에 돈이 두 번 나간다.
+      const firstClaim = await admin.rpc("claim_homework_check_attempt", { p_attempt_id: inflightId });
+      assertOk(firstClaim);
+      expect(firstClaim.data).toBe(true);
+      const secondClaim = await admin.rpc("claim_homework_check_attempt", { p_attempt_id: inflightId });
+      assertOk(secondClaim);
+      expect(secondClaim.data).toBe(false);
+
+      // 동시 요청 두 개가 **정말로 동시에** 들어와도 한 쪽만 이긴다.
+      const raceRun = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: assertData(discardSubmission.data).id,
+        p_requested_by: studentId,
+        p_idempotency_key: `run-7-${suffix}`
+      });
+      // 앞 attempt 가 아직 processing 이라 슬롯이 하나뿐이다 — 같은 행을 다시 받거나 거부된다.
+      if (!raceRun.error) {
+        const raceId = (raceRun.data as Record<string, unknown>).id as string;
+        const [a, b] = await Promise.all([
+          admin.rpc("claim_homework_check_attempt", { p_attempt_id: raceId }),
+          admin.rpc("claim_homework_check_attempt", { p_attempt_id: raceId })
+        ]);
+        expect([a.data, b.data].filter(Boolean)).toHaveLength(raceId === inflightId ? 0 : 1);
+      }
+
+      // ── (7-e) 실패로 끝나도 이미 나간 비용이 남는다 (20260817000000) ───────
+      // 예전에는 status·error_code 만 써서, AI 호출이 끝난 뒤 실패하면 토큰·비용이
+      // 어디에도 기록되지 않았다. 나간 돈을 나중에 셀 수 없다는 뜻이다.
+      const failedWithCost = await admin.rpc("fail_homework_check_attempt", {
+        p_attempt_id: inflightId,
+        p_error_code: "attempt_complete_failed",
+        p_model: "integration-no-ai-call",
+        p_input_tokens: 2892,
+        p_output_tokens: 130,
+        p_cost_usd_micros: 3542,
+        p_latency_ms: 900
+      });
+      assertOk(failedWithCost);
+      const failedRow = assertData(failedWithCost.data as Record<string, unknown> | null);
+      expect(failedRow.status).toBe("failed");
+      expect(failedRow.estimated_cost_usd_micros).toBe(3542);
+      expect(failedRow.input_tokens).toBe(2892);
+      expect(failedRow.model).toBe("integration-no-ai-call");
+
+      // 기존 2-인자 호출도 그대로 동작해야 한다(다른 실패 경로가 인자 없이 부른다).
+      const legacyRun = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: assertData(discardSubmission.data).id,
+        p_requested_by: studentId,
+        p_idempotency_key: `run-8-${suffix}`
+      });
+      assertOk(legacyRun);
+      const legacyFail = await admin.rpc("fail_homework_check_attempt", {
+        p_attempt_id: (legacyRun.data as Record<string, unknown>).id as string,
+        p_error_code: "upstream_timeout"
+      });
+      assertOk(legacyFail);
+      expect((legacyFail.data as Record<string, unknown>).status).toBe("failed");
+
       // ── (8) 과외쌤: 공개범위 안에서는 읽히고, 끄면 읽히지 않는다 ─────────
       const teacherSees = await teacherClient
         .from("homework_check_attempts")
@@ -466,3 +541,169 @@ function assertData<T>(data: T | null): T {
   if (!data) throw new Error("Expected Supabase response data");
   return data;
 }
+
+// ── [A2 작업5] 조건부 보호의 실체 — 트리거가 사라지면 무엇이 열리는가 ────────
+//
+// A1 에서 [조건부]로 판정한 표들(todos·homework_submissions)은 RLS 정책이 for all 이라
+// **트리거 하나가 유일한 방어선**이다. 정책은 "본인 행" 까지만 보장하고, "본인 행의
+// 어느 컬럼을 바꿀 수 있는가" 는 전부 트리거가 정한다.
+//
+// 그래서 두 가지를 **실측**으로 고정한다:
+//   (1) 트리거가 실제로 붙어 있다 (pg_trigger 조회 — 문자열 단정이 아니다)
+//   (2) 트리거가 실제로 막는다 (금지된 UPDATE 를 실행해 거부를 확인)
+// 하나라도 깨지면 학생이 자기 AI 판정·쌤 확인 상태·쌤 숙제를 마음대로 바꿀 수 있다.
+describeIfRemote("A2 — 조건부 보호(허용목록 트리거)의 실측", () => {
+  afterAll(assertNoLeakedTestUsers);
+
+  it("트리거가 붙어 있고, 실제로 금지된 변경을 막는다", async () => {
+    if (!env) throw new Error("Missing Supabase test environment");
+    const keys = await fetchApiKeys(env);
+    const anonKey = getApiKey(keys, "anon");
+    const admin = createClient<Database>(env.url, getApiKey(keys, "service_role"), {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+    const studentClient = createClient<Database>(env.url, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+
+    const suffix = randomUUID().slice(0, 8);
+    const password = `Guard!${suffix}aA1`;
+    const studentEmail = `guard-s-${suffix}@a2-guard.test`;
+    const teacherEmail = `guard-t-${suffix}@a2-guard.test`;
+    let studentId = "";
+    let teacherId = "";
+
+    // 🚨 중간에 실패해도 계정이 남지 않게 try/finally 로 감싼다.
+    //    (감싸기 전에 실제로 테스트가 중간 실패해 검증 계정 12개가 남았다.)
+    try {
+      const student = await admin.auth.admin.createUser({
+        email: studentEmail,
+        password,
+        email_confirm: true
+      });
+      assertOk(student);
+      const teacher = await admin.auth.admin.createUser({
+        email: teacherEmail,
+        password,
+        email_confirm: true
+      });
+      assertOk(teacher);
+      studentId = assertData(student.data.user).id;
+      teacherId = assertData(teacher.data.user).id;
+      assertOk(
+        await admin.from("profiles").insert([
+          { id: studentId, role: "student", name: "가드검증학생", onboarded: true },
+          { id: teacherId, role: "teacher", name: "가드검증쌤", onboarded: true }
+        ])
+      );
+      const connection = await admin
+        .from("connections")
+        .insert({
+          teacher_id: teacherId,
+          student_id: studentId,
+          status: "active",
+          requested_by: studentId,
+          activated_at: new Date().toISOString()
+        })
+        .select("id")
+        .single();
+      assertOk(connection);
+
+      // (1) 트리거 존재 확인 = **아래의 차단 동작 전부**다.
+      //     트리거 목록을 돌려주는 RPC 를 새로 만들면 그 자체가 새 공개 표면이 된다.
+      //     대신 "막혀야 하는 것이 막힌다" 를 실측한다 — 트리거가 지워지면 이 단정들이
+      //     전부 깨지므로 존재 여부와 동작을 같은 테스트가 한 번에 지킨다.
+      //     (schema.sql 문자열 검사는 "파일에 적혀 있다" 만 말할 뿐 "지금 붙어 있다" 는 못 말한다.)
+
+      const teacherTodo = await admin
+        .from("todos")
+        .insert({
+          student_id: studentId,
+          created_by: teacherId,
+          connection_id: assertData(connection.data).id,
+          title: "가드검증 숙제",
+          subject: "math",
+          source: "teacher",
+          ai_check_enabled: true,
+          scope_text: "쎈 1p",
+          due_date: "2026-08-20",
+          status: "todo"
+        })
+        .select("id")
+        .single();
+      assertOk(teacherTodo);
+      const todoId = assertData(teacherTodo.data).id;
+
+      const submission = await admin
+        .from("homework_submissions")
+        .insert({ todo_id: todoId, student_id: studentId, photo_paths: [`${studentId}/g1.jpg`] })
+        .select("id")
+        .single();
+      assertOk(submission);
+      const submissionId = assertData(submission.data).id;
+
+      const signIn = await studentClient.auth.signInWithPassword({ email: studentEmail, password });
+      assertOk(signIn);
+
+      // (2-a) todos: 학생은 **선생님 숙제의 status 만** 바꿀 수 있다.
+      //       제목·범위·검사여부를 바꾸면 locked_teacher_todo_fields 로 막혀야 한다.
+      const allowed = await studentClient.from("todos").update({ status: "done" }).eq("id", todoId);
+      expect(allowed.error, "학생이 선생님 숙제를 완료 처리하는 것은 허용된다").toBeNull();
+
+      for (const [label, patch] of [
+        ["제목", { title: "몰래 바꾼 제목" }],
+        ["범위", { scope_text: "몰래 바꾼 범위" }],
+        ["AI 검사 토글", { ai_check_enabled: false }]
+      ] as const) {
+        const blocked = await studentClient.from("todos").update(patch).eq("id", todoId);
+        expect(blocked.error?.message ?? "", `학생이 선생님 숙제의 ${label}`).toContain(
+          "locked_teacher_todo_fields"
+        );
+      }
+
+      // (2-b) 학생이 선생님 숙제를 **직접 만들 수** 없다.
+      const forged = await studentClient.from("todos").insert({
+        student_id: studentId,
+        title: "위조 숙제",
+        subject: "math",
+        source: "teacher",
+        due_date: "2026-08-21",
+        status: "todo"
+      });
+      expect(forged.error?.message ?? "").toContain("students_cannot_create_teacher_todos");
+
+      // (2-c) homework_submissions: AI 판정 컬럼은 서버만 쓴다.
+      for (const [label, patch] of [
+        ["판정", { ai_verdict: "pass" as const }],
+        ["확신도", { ai_confidence: 0.99 }],
+        ["사유", { ai_reason: "내가 썼다" }]
+      ] as const) {
+        const blocked = await studentClient.from("homework_submissions").update(patch).eq("id", submissionId);
+        expect(blocked.error?.message ?? "", `학생이 AI ${label} 수정`).toContain("ai_fields_are_server_set");
+      }
+
+      // (2-d) 쌤 확인 상태도 학생이 못 바꾼다.
+      for (const [label, patch] of [
+        ["확인 상태", { teacher_status: "confirmed" as const }],
+        ["코멘트", { teacher_comment: "내가 썼다" }],
+        ["재제출 요청", { resubmit_requested: true }]
+      ] as const) {
+        const blocked = await studentClient.from("homework_submissions").update(patch).eq("id", submissionId);
+        expect(blocked.error?.message ?? "", `학생이 쌤 ${label} 수정`).toContain(
+          "teacher_fields_not_student_editable"
+        );
+      }
+
+      // (2-e) 남의 폴더 사진 경로는 service_role 도 못 넣는다(트리거에 예외가 없다).
+      const otherFolder = await admin
+        .from("homework_submissions")
+        .update({ photo_paths: [`${teacherId}/stolen.jpg`] })
+        .eq("id", submissionId);
+      expect(otherFolder.error?.message ?? "").toContain("photo_paths_must_be_in_own_folder");
+
+    } finally {
+      await studentClient.auth.signOut();
+      await deleteTestUsers(admin, [studentId, teacherId].filter(Boolean));
+    }
+  });
+});
