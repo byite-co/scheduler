@@ -423,6 +423,7 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
         expect([a.data, b.data].filter(Boolean)).toHaveLength(raceId === inflightId ? 0 : 1);
       }
 
+
       // ── (7-e) 실패로 끝나도 이미 나간 비용이 남는다 (20260817000000) ───────
       // 예전에는 status·error_code 만 써서, AI 호출이 끝난 뒤 실패하면 토큰·비용이
       // 어디에도 기록되지 않았다. 나간 돈을 나중에 셀 수 없다는 뜻이다.
@@ -455,6 +456,105 @@ describeIfRemote("M4 homework_check_attempts — 실행 레코드 RLS/제약", (
       });
       assertOk(legacyFail);
       expect((legacyFail.data as Record<string, unknown>).status).toBe("failed");
+
+      // ── (7-d-2) 임차 만료 탈환 (20260817010000) ───────────────────────────
+      // 전용 제출·attempt 를 새로 만든다 — 제출당 재검사 상한(3회)과 (7-e) 의 대상과
+      // 겹치지 않아야 한다(겹치면 서로의 상태를 닫아 버린다).
+      const leaseSubmission = await admin
+        .from("homework_submissions")
+        .insert({ todo_id: todoId, student_id: studentId, photo_paths: [`${studentId}/p4.jpg`] })
+        .select("id")
+        .single();
+      assertOk(leaseSubmission);
+      const leaseRun = await admin.rpc("start_homework_check_attempt", {
+        p_submission_id: assertData(leaseSubmission.data).id,
+        p_requested_by: studentId,
+        p_idempotency_key: `lease-1-${suffix}`
+      });
+      assertOk(leaseRun);
+      const leaseId = (leaseRun.data as Record<string, unknown>).id as string;
+
+      // 권리를 가져간 요청이 크래시하면 그 행은 processing + ai_started_at 채워진 채로
+      // 영구히 남아 **그 제출을 다시는 검사할 수 없었다**(모든 재시도가 409).
+      // 임계가 지나고도 미종결이면 다음 요청이 탈환할 수 있어야 한다.
+      //
+      // 시계 의존이라 실제로 기다리지 않는다 — ai_started_at 을 과거로 직접 세팅해 재현한다.
+      const leaseMinutes = await admin.rpc("ai_check_claim_lease_minutes");
+      assertOk(leaseMinutes);
+      expect(leaseMinutes.data).toBe(10);
+
+      // ② 신선한 claim 은 탈환되지 않는다. 1분 전은 10분 임계 안이다.
+      assertOk(
+        await admin
+          .from("homework_check_attempts")
+          .update({ ai_started_at: new Date(Date.now() - 60_000).toISOString() })
+          .eq("id", leaseId)
+      );
+      const freshSteal = await admin.rpc("claim_homework_check_attempt", { p_attempt_id: leaseId });
+      assertOk(freshSteal);
+      expect(freshSteal.data, "임계 이내(1분 전)에는 탈환할 수 없다").toBe(false);
+
+      // ③ 임계를 넘긴 stale claim 은 탈환된다. 그리고 **이전 비용은 보존**된다 —
+      //    죽은 실행도 AI 를 이미 불렀을 수 있고 그 돈은 실제로 나간 돈이다.
+      assertOk(
+        await admin
+          .from("homework_check_attempts")
+          .update({
+            ai_started_at: new Date(Date.now() - 11 * 60_000).toISOString(),
+            estimated_cost_usd_micros: 1234,
+            input_tokens: 111,
+            model: "crashed-run"
+          })
+          .eq("id", leaseId)
+      );
+      const staleSteal = await admin.rpc("claim_homework_check_attempt", { p_attempt_id: leaseId });
+      assertOk(staleSteal);
+      expect(staleSteal.data, "임계(10분) 경과 후에는 탈환할 수 있다").toBe(true);
+
+      const afterSteal = await admin
+        .from("homework_check_attempts")
+        .select("status, ai_started_at, estimated_cost_usd_micros, input_tokens, model")
+        .eq("id", leaseId)
+        .single();
+      assertOk(afterSteal);
+      const stolen = assertData(afterSteal.data);
+      // 탈환은 리스만 갱신한다 — 상태도 비용도 건드리지 않는다.
+      expect(stolen.status).toBe("processing");
+      expect(stolen.estimated_cost_usd_micros, "죽은 실행이 쓴 비용은 지워지지 않는다").toBe(1234);
+      expect(stolen.input_tokens).toBe(111);
+      expect(stolen.model).toBe("crashed-run");
+      // 리스가 새로 시작됐으므로 바로 다시 탈환되지 않는다.
+      const rightAfter = await admin.rpc("claim_homework_check_attempt", { p_attempt_id: leaseId });
+      assertOk(rightAfter);
+      expect(rightAfter.data, "탈환 직후에는 리스가 신선하다").toBe(false);
+
+      // 탈환한 요청은 파이프라인을 계속 진행할 수 있어야 한다(관찰 기록까지).
+      const afterStealRecord = await admin.rpc("record_homework_check_observation", {
+        p_attempt_id: leaseId,
+        p_raw_observation: { schema_version: "1.0", images: [] },
+        p_prompt_version: "obs-prompt-1",
+        p_schema_version: "1.0",
+        p_scope_included: true,
+        p_stop_reason: "end_turn",
+        p_model: "reclaimed-run",
+        p_input_tokens: 222,
+        p_output_tokens: 20,
+        p_cost_usd_micros: 500,
+        p_latency_ms: 100
+      });
+      assertOk(afterStealRecord);
+      expect((afterStealRecord.data as Record<string, unknown>).status).toBe("completed");
+
+      // 종결된 뒤에는 임계를 아무리 넘겨도 탈환되지 않는다(재검사는 새 attempt 로 한다).
+      assertOk(
+        await admin
+          .from("homework_check_attempts")
+          .update({ ai_started_at: new Date(Date.now() - 60 * 60_000).toISOString() })
+          .eq("id", leaseId)
+      );
+      const settledSteal = await admin.rpc("claim_homework_check_attempt", { p_attempt_id: leaseId });
+      assertOk(settledSteal);
+      expect(settledSteal.data, "종결된 실행은 탈환 대상이 아니다").toBe(false);
 
       // ── (8) 과외쌤: 공개범위 안에서는 읽히고, 끄면 읽히지 않는다 ─────────
       const teacherSees = await teacherClient

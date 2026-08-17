@@ -697,6 +697,13 @@ $$;
 
 -- 20260817000000: AI 호출 권리를 1회만 발급한다. 같은 키로 동시에 온 두 요청이 둘 다
 --   processing 을 보고 둘 다 AI 를 부르는 것을 막는다(사진 한 장에 돈이 두 번 나갔다).
+-- 20260817010000: **임차(lease)** 로 바꿨다. 권리를 가져간 요청이 크래시하면 그 행이
+--   status=processing + ai_started_at 채워진 채 영구히 남아 그 제출을 다시는 검사할 수
+--   없었다(모든 재시도가 409). 임계가 지나고도 미종결이면 다음 요청이 탈환한다.
+--   ⚠️ 탈환 시 비용 컬럼은 건드리지 않는다 — 죽은 실행이 이미 쓴 돈은 실제로 나간 돈이다.
+create or replace function ai_check_claim_lease_minutes() returns integer
+  language sql immutable as $$ select 10 $$;
+
 create or replace function claim_homework_check_attempt(p_attempt_id uuid)
 returns boolean
 language plpgsql
@@ -711,12 +718,18 @@ begin
          updated_at = now()
    where id = p_attempt_id
      and status in ('queued', 'processing')
-     and ai_started_at is null;
+     and (
+       ai_started_at is null
+       or ai_started_at < now() - make_interval(mins => ai_check_claim_lease_minutes())
+     );
 
   get diagnostics claimed = row_count;
   return claimed;
 end;
 $$;
+revoke all on function ai_check_claim_lease_minutes() from public;
+revoke all on function ai_check_claim_lease_minutes() from anon;
+grant execute on function ai_check_claim_lease_minutes() to authenticated, service_role;
 revoke all on function claim_homework_check_attempt(uuid) from public;
 revoke all on function claim_homework_check_attempt(uuid) from anon;
 revoke all on function claim_homework_check_attempt(uuid) from authenticated;
