@@ -1313,6 +1313,7 @@ export type Database = {
       }
     }
     Functions: {
+      ai_check_claim_lease_minutes: { Args: never; Returns: number }
       ai_check_max_attempts_per_day: { Args: never; Returns: number }
       ai_check_max_attempts_per_month: { Args: never; Returns: number }
       ai_check_max_attempts_per_submission: { Args: never; Returns: number }
