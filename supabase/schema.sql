@@ -92,12 +92,12 @@ create table connections (
 alter table connections enable row level security;
 create policy conn_party_read on connections for select
   using (teacher_id = auth.uid() or student_id = auth.uid());
-create policy conn_student_insert_pending on connections for insert
-  with check (
-    student_id = auth.uid()
-    and requested_by = auth.uid()
-    and status = 'pending'
-  );
+-- ⚠️ conn_student_insert_pending 은 제거했다(20260820020000). teacher_id 를 확인하지 않고
+-- 초대 코드도 요구하지 않아서, 학생이 임의의 교사에게 pending 연결을 직접 INSERT 할 수
+-- 있었다 — A5 의 시도 제한을 지나치는 두 번째 입구였다. 연결 생성은 이제
+-- request_connection_by_invite(security definer) 하나만 한다.
+revoke insert on table connections from authenticated;
+revoke insert on table connections from anon;
 create policy conn_teacher_update_status on connections for update
   using (teacher_id = auth.uid())
   with check (teacher_id = auth.uid());
@@ -1394,8 +1394,25 @@ create table lesson_fees (
   unique (teacher_id, student_id, period)
 );
 alter table lesson_fees enable row level security;
+-- 연결이 존재하는 학생에게만. 형제 표(lessons·exam_records)와 같은 잣대다(20260820010000).
+-- active 를 요구하지 않는 이유: 연결이 끊긴 뒤에도 미납 청구서에 접근해야 한다.
 create policy fees_teacher_rw on lesson_fees for all
-  using (teacher_id = auth.uid()) with check (teacher_id = auth.uid());
+  using (
+    teacher_id = auth.uid()
+    and exists (
+      select 1 from connections c
+       where c.teacher_id = auth.uid()
+         and c.student_id = lesson_fees.student_id
+    )
+  )
+  with check (
+    teacher_id = auth.uid()
+    and exists (
+      select 1 from connections c
+       where c.teacher_id = auth.uid()
+         and c.student_id = lesson_fees.student_id
+    )
+  );
 
 -- ============================================================================
 -- 10. 구독/결제  (★ 앱 구독료 — 수업료와 별개)
@@ -3419,3 +3436,76 @@ grant execute on function accept_connection_request(uuid) to authenticated;
 revoke insert, update, delete, truncate on table report_views from anon, authenticated;
 revoke insert, update, delete, truncate on table storage_purge_log from anon, authenticated;
 revoke insert, update, delete, truncate on table storage_purge_queue from anon, authenticated;
+
+-- ── A5.1: OLD-불가시성 클래스 (20260820000000 / 20260820010000) ─────────────
+-- UPDATE 정책이 소유자만 확인하고 행에 불변이어야 할 컬럼이 있으면, 소유자가 그 컬럼을
+-- 자유롭게 바꿀 수 있다. with check 는 OLD 를 못 보므로 정책으로 표현할 수 없다.
+-- 도구는 둘이다: 클라이언트가 그 컬럼을 아예 안 쓰면 **컬럼 권한**, 같은 값으로 매번
+-- 실어 보내면(upsert) **트리거**.
+
+-- profiles.role: 학생이 role='teacher' 로 승격할 수 있었다(실측 확인).
+-- 세 앱의 프로필 저장이 upsert 이고 role 을 매번 같은 값으로 보내므로 컬럼 권한 회수는
+-- 프로필 저장을 깨뜨린다 → 트리거로 "바뀌는 것" 만 막는다.
+create or replace function guard_profile_immutable_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  if new.role is distinct from old.role then
+    raise exception 'role_is_not_self_assignable';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists guard_profile_immutable_fields_trigger on profiles;
+create trigger guard_profile_immutable_fields_trigger
+  before update on profiles
+  for each row execute function guard_profile_immutable_fields();
+
+-- todos DELETE: guard_student_todo_source_lock 이 INSERT·UPDATE 만 다뤄서 학생이 잠긴
+-- 선생님 숙제를 **지워서** 없앨 수 있었다(실측: 남은 행 0건). locked 를 풀 필요가 없었다.
+create or replace function guard_locked_todo_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    return old;
+  end if;
+
+  if old.source = 'teacher' and auth.uid() = old.student_id then
+    raise exception 'students_cannot_delete_teacher_todos';
+  end if;
+
+  return old;
+end;
+$$;
+
+drop trigger if exists guard_locked_todo_delete_trigger on todos;
+create trigger guard_locked_todo_delete_trigger
+  before delete on todos
+  for each row execute function guard_locked_todo_delete();
+
+-- reports: share_token 은 로그인 없이 열리는 학부모 리포트의 유일한 자격증명이다.
+-- 교사가 임의 값으로 덮어써서 추측 가능하게 만들 수 있었고, student_id 를 미연결 학생으로
+-- 갈아 끼울 수도 있었다(정책의 with check 첫 가지만으로 통과). 클라이언트가 실제로
+-- UPDATE 하는 컬럼은 status·sent_at 둘뿐이다(m5.tsx:445).
+-- share_token 은 create_report_share / revoke_report_share(definer)가 만든다.
+revoke update on table reports from authenticated;
+revoke update on table reports from anon;
+grant update (status, sent_at) on table reports to authenticated;
+
+-- invite_codes: 교사가 used_by 를 임의 학생으로 채워 그 학생이 코드를 못 쓰게 만들 수
+-- 있었다. 클라이언트는 발급(INSERT)만 한다 — used_by 는 request_connection_by_invite 의 몫이다.
+revoke update on table invite_codes from authenticated;
+revoke update on table invite_codes from anon;
