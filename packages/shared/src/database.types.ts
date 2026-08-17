@@ -239,6 +239,47 @@ export type Database = {
           },
         ]
       }
+      consent_records: {
+        Row: {
+          action: string
+          document: string
+          id: string
+          method: string
+          recorded_at: string
+          subject: string
+          user_id: string
+          version: string
+        }
+        Insert: {
+          action?: string
+          document: string
+          id?: string
+          method?: string
+          recorded_at?: string
+          subject?: string
+          user_id: string
+          version: string
+        }
+        Update: {
+          action?: string
+          document?: string
+          id?: string
+          method?: string
+          recorded_at?: string
+          subject?: string
+          user_id?: string
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consent_records_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       disclosure_settings: {
         Row: {
           connection_id: string
@@ -962,10 +1003,50 @@ export type Database = {
           },
         ]
       }
+      storage_purge_log: {
+        Row: {
+          attempt_no: number
+          bucket_id: string
+          deleted_paths: string[]
+          error: string | null
+          id: string
+          outcome: string
+          prefix: string
+          queue_id: string | null
+          ran_at: string
+          user_id: string
+        }
+        Insert: {
+          attempt_no: number
+          bucket_id: string
+          deleted_paths?: string[]
+          error?: string | null
+          id?: string
+          outcome: string
+          prefix: string
+          queue_id?: string | null
+          ran_at?: string
+          user_id: string
+        }
+        Update: {
+          attempt_no?: number
+          bucket_id?: string
+          deleted_paths?: string[]
+          error?: string | null
+          id?: string
+          outcome?: string
+          prefix?: string
+          queue_id?: string | null
+          ran_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       storage_purge_queue: {
         Row: {
           attempts: number
           bucket_id: string
+          claimed_at: string | null
           completed_at: string | null
           created_at: string
           deleted_count: number
@@ -978,6 +1059,7 @@ export type Database = {
         Insert: {
           attempts?: number
           bucket_id: string
+          claimed_at?: string | null
           completed_at?: string | null
           created_at?: string
           deleted_count?: number
@@ -990,6 +1072,7 @@ export type Database = {
         Update: {
           attempts?: number
           bucket_id?: string
+          claimed_at?: string | null
           completed_at?: string | null
           created_at?: string
           deleted_count?: number
@@ -1367,6 +1450,28 @@ export type Database = {
         Args: { p_attempt_id: string }
         Returns: boolean
       }
+      claim_storage_purge_batch: {
+        Args: { p_limit?: number }
+        Returns: {
+          attempts: number
+          bucket_id: string
+          claimed_at: string | null
+          completed_at: string | null
+          created_at: string
+          deleted_count: number
+          id: string
+          last_error: string | null
+          prefix: string
+          status: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "storage_purge_queue"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       complete_homework_check_attempt: {
         Args: {
           p_attempt_id: string
@@ -1415,10 +1520,16 @@ export type Database = {
         }
       }
       complete_storage_purge: {
-        Args: { p_deleted_count: number; p_error?: string; p_id: string }
+        Args: {
+          p_deleted_count: number
+          p_deleted_paths?: string[]
+          p_error?: string
+          p_id: string
+        }
         Returns: {
           attempts: number
           bucket_id: string
+          claimed_at: string | null
           completed_at: string | null
           created_at: string
           deleted_count: number
@@ -1598,6 +1709,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      my_consent_status: {
+        Args: never
+        Returns: {
+          action: string
+          document: string
+          recorded_at: string
+          subject: string
+          version: string
+        }[]
+      }
       pending_connection_requests: {
         Args: { p_connection_id?: string }
         Returns: {
@@ -1740,6 +1861,8 @@ export type Database = {
           path: string
         }[]
       }
+      storage_purge_lease_minutes: { Args: never; Returns: number }
+      storage_purge_max_attempts: { Args: never; Returns: number }
     }
     Enums: {
       activity_type: "school" | "academy" | "self" | "class"

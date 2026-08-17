@@ -1,3 +1,4 @@
+export * from "./consent";
 export * from "./database.types";
 export * from "./featureFlags";
 export * from "./m1";

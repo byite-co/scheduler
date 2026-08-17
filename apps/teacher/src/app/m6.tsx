@@ -4,10 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 
 import {
-  PRICE_PER_STUDENT_KRW,
   formatKrw,
   getTeacherBillingState,
-  getTeacherMonthlySubscriptionAmount,
   summarizeLessonFees,
   type SubStatus
 } from "@ssamplanner/shared";
@@ -30,7 +28,6 @@ export function TeacherBilling() {
   const [session, setSession] = useState<Session | null>(null);
   const [status, setStatus] = useState<SubStatus>("none");
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
-  const [activeCount, setActiveCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("세션 확인 중");
 
@@ -43,14 +40,12 @@ export function TeacherBilling() {
       setLoading(false);
       return;
     }
-    const [subResult, invoiceResult, connectionResult] = await Promise.all([
+    const [subResult, invoiceResult] = await Promise.all([
       supabase.from("teacher_subscriptions").select("status").eq("teacher_id", active.user.id).maybeSingle(),
-      supabase.from("billing_invoices").select("*").eq("teacher_id", active.user.id).order("issued_at", { ascending: false }),
-      supabase.from("connections").select("id").eq("teacher_id", active.user.id).eq("status", "active")
+      supabase.from("billing_invoices").select("*").eq("teacher_id", active.user.id).order("issued_at", { ascending: false })
     ]);
     setStatus((subResult.data?.status as SubStatus) ?? "none");
     setInvoices(invoiceResult.data ?? []);
-    setActiveCount((connectionResult.data ?? []).length);
     setMessage(invoiceResult.error?.message ?? "");
     setLoading(false);
   }, []);
@@ -59,9 +54,7 @@ export function TeacherBilling() {
     void refresh();
   }, [refresh]);
 
-  const billing = getTeacherBillingState(status);
-  const estimated = getTeacherMonthlySubscriptionAmount(activeCount);
-
+  const billing = getTeacherBillingState(status);
   // 상태를 바꾸는 mock RPC 호출은 제거했다 — 과외쌤이 스스로 앱 구독료를 active 로 만들 수
   // 있는 구멍이었고 실행 권한을 회수했다(20260806000000). 실제 전이는 Stripe 웹훅이 담당한다.
   // 개발/테스트에서 상태를 만들려면 scripts/dev-set-subscription.mjs (service_role 필요).
@@ -110,9 +103,11 @@ export function TeacherBilling() {
       <section className={`grid gap-2 rounded-card border bg-surface p-5 ${toneClass}`}>
           <p className="text-lg font-extrabold">{billing.label}</p>
           <p className="text-sm font-bold text-muted">{billing.reason}</p>
-          <p className="font-mono text-sm font-bold text-ink">
-            예상 월 청구 = active {activeCount}명 × {formatKrw(PRICE_PER_STUDENT_KRW)} = {formatKrw(estimated)}
-          </p>
+          {/*
+            "예상 월 청구 = active N명 × 4,900원 = …" 를 지웠다. 가격이 확정되지 않았고 결제
+            수단도 없다 — 예상 청구액을 보여 주면 그 금액이 청구될 것처럼 읽힌다.
+            연동 학생 수는 대시보드에 있고, 실제 청구는 인보이스 목록이 보여 준다.
+          */}
           {/* 상태를 바꾸는 버튼은 제거했다(보안). 상태·금액 표시는 위에 그대로 남는다.
               결제 사업자 이름(Stripe)은 지웠다 — 과외쌤 결제는 **웹 국내 PG** 로 확정됐고,
               사업자가 정해지지 않은 상태에서 특정 이름을 적으면 그 순간 거짓이 된다. */}

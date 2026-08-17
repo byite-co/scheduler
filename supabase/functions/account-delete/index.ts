@@ -78,12 +78,17 @@ function assertScoped(paths: string[], prefix: string): void {
   }
 }
 
-/** 한 사용자 폴더를 비운다. 지운 개수를 돌려준다. */
+/**
+ * 한 사용자 폴더를 비운다.
+ *
+ * 지운 **경로 목록까지** 돌려준다 — 감사 로그(storage_purge_log)에 "무엇을 지웠는지" 를
+ * 남기려면 건수만으로는 부족하다. 개인정보 삭제는 나중에 "정말 지웠나" 를 증명해야 한다.
+ */
 async function purgePrefix(
   service: SupabaseClient,
   bucket: string,
   prefix: string
-): Promise<number> {
+): Promise<{ deleted: number; paths: string[] }> {
   const { data, error } = await service.rpc("storage_paths_for_prefix", {
     p_bucket: bucket,
     p_prefix: prefix
@@ -91,18 +96,20 @@ async function purgePrefix(
   if (error) throw new Error(`list_failed: ${error.message}`);
 
   const paths = (data ?? []).map((row: { path: string }) => row.path);
-  if (paths.length === 0) return 0;
+  if (paths.length === 0) return { deleted: 0, paths: [] };
 
   assertScoped(paths, prefix);
 
   let deleted = 0;
+  const removedPaths: string[] = [];
   for (let i = 0; i < paths.length; i += REMOVE_CHUNK) {
     const chunk = paths.slice(i, i + REMOVE_CHUNK);
     const { data: removed, error: removeError } = await service.storage.from(bucket).remove(chunk);
     if (removeError) throw new Error(`remove_failed: ${removeError.message}`);
     deleted += removed?.length ?? chunk.length;
+    removedPaths.push(...chunk);
   }
-  return deleted;
+  return { deleted, paths: removedPaths };
 }
 
 Deno.serve(async (req: Request) => {
@@ -136,24 +143,38 @@ Deno.serve(async (req: Request) => {
   if (mode === "sweep") {
     if (!isServiceRole(authHeader, serviceKey)) return fail("sweep_requires_service_role", 403);
 
-    const { data: rows, error } = await service
-      .from("storage_purge_queue")
-      .select("id, user_id, bucket_id, prefix")
-      .neq("status", "done")
-      .order("created_at", { ascending: true })
-      .limit(SWEEP_LIMIT);
+    // 🚨 **선점해서 가져온다.** 예전에는 `.neq("status","done")` 로 직접 읽었는데 두 가지 문제가 있었다:
+    //   · 두 sweep 이 동시에 돌면 같은 행을 둘 다 처리한다(시도 횟수·로그 이중 계상).
+    //   · failed 행까지 매번 다시 집어, 최대 시도 횟수를 넘긴 영구 실패를 무한 재시도했다.
+    // claim_storage_purge_batch 가 pending + 시도 여력 있음 + 미선점(또는 임차 만료)만 골라
+    // claimed_at 을 채워 돌려준다. 처리기가 죽어도 임차가 만료되면 다음 실행이 탈환한다.
+    const { data: rows, error } = await service.rpc("claim_storage_purge_batch", { p_limit: SWEEP_LIMIT });
     if (error) return fail("queue_read_failed", 500, { detail: error.message });
 
     const results: Array<Record<string, unknown>> = [];
-    for (const row of rows ?? []) {
+    for (const row of (rows ?? []) as Array<{ id: string; bucket_id: string; prefix: string }>) {
       try {
-        const deleted = await purgePrefix(service, row.bucket_id, row.prefix);
-        await service.rpc("complete_storage_purge", { p_id: row.id, p_deleted_count: deleted, p_error: null });
+        const { deleted, paths } = await purgePrefix(service, row.bucket_id, row.prefix);
+        // 지운 경로를 함께 넘겨 감사 로그에 남긴다. 0건도 기록한다 —
+        // "지울 것이 없었다" 도 사실이고, 나중에 "왜 안 지웠나" 를 설명해야 한다.
+        await service.rpc("complete_storage_purge", {
+          p_id: row.id,
+          p_deleted_count: deleted,
+          p_error: null,
+          p_deleted_paths: paths
+        });
         results.push({ id: row.id, deleted, status: "done" });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        await service.rpc("complete_storage_purge", { p_id: row.id, p_deleted_count: 0, p_error: message });
-        results.push({ id: row.id, status: "failed", error: message });
+        // 실패는 조용히 버리지 않는다 — RPC 가 시도 여력이 남았으면 pending 으로 되돌리고,
+        // 최대 횟수를 넘기면 failed 로 굳힌다(행은 지우지 않는다).
+        await service.rpc("complete_storage_purge", {
+          p_id: row.id,
+          p_deleted_count: 0,
+          p_error: message,
+          p_deleted_paths: []
+        });
+        results.push({ id: row.id, status: "retry_or_failed", error: message });
       }
     }
     return new Response(JSON.stringify({ swept: results.length, results }), { status: 200, headers: jsonHeaders });
@@ -169,9 +190,12 @@ Deno.serve(async (req: Request) => {
 
   // 1) 파일 먼저. 실패해도 계정 삭제는 막지 않는다(사용자의 삭제 요구가 우선).
   let deleted = 0;
+  let deletedPaths: string[] = [];
   let purgeError: string | null = null;
   try {
-    deleted = await purgePrefix(service, PHOTO_BUCKET, prefix);
+    const purged = await purgePrefix(service, PHOTO_BUCKET, prefix);
+    deleted = purged.deleted;
+    deletedPaths = purged.paths;
   } catch (e) {
     purgeError = e instanceof Error ? e.message : String(e);
   }
@@ -199,7 +223,9 @@ Deno.serve(async (req: Request) => {
     await service.rpc("complete_storage_purge", {
       p_id: queueRow,
       p_deleted_count: deleted,
-      p_error: purgeError
+      p_error: purgeError,
+      // 감사 로그용. 실패했으면 지운 것이 없으므로 빈 배열이다.
+      p_deleted_paths: purgeError ? [] : deletedPaths
     });
   }
 

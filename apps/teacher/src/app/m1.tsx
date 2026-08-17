@@ -15,15 +15,19 @@ import {
 } from "lucide-react";
 
 import {
+  CONSENT_DOCUMENTS,
+  CONSENT_DOCUMENT_LABELS,
+  CONSENT_PENDING_NOTICE,
   DEFAULT_TEACHER_STUDENT_SETTINGS,
   M1_CONNECTION_STATUS_SCREENS,
-  PRICE_PER_STUDENT_KRW,
   formatInviteCode,
+  buildConsentRows,
+  canProceedWithConsent,
+  hasCurrentConsent,
   formatPendingRequestLabel,
-  getTeacherMonthlySubscriptionAmount,
   indexPendingRequests
 } from "@ssamplanner/shared";
-import type { Database, M1ConnectionStatus, PendingConnectionRequest } from "@ssamplanner/shared";
+import type { ConsentSelection, ConsentStatusRow, Database, M1ConnectionStatus, PendingConnectionRequest } from "@ssamplanner/shared";
 
 import { supabase } from "./supabaseClient";
 
@@ -33,6 +37,36 @@ type InviteCodeRow = Database["public"]["Tables"]["invite_codes"]["Row"];
 type PerStudentSettingsRow = Database["public"]["Tables"]["per_student_settings"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type SubjectCode = Database["public"]["Enums"]["subject_code"];
+
+// 이메일 인증이 필요한 설정에서는 가입 직후 세션이 없어 동의를 기록할 수 없다(RLS 가 본인
+// 행만 허용한다). 체크 상태를 잠시 보관하고 **온보딩 프로필 저장 시점**에 기록한다.
+// localStorage 를 쓰는 이유: 인증 메일 링크를 누르면 새 탭·새 로드가 되므로 메모리로는 유실된다.
+const TEACHER_CONSENT_KEY = "ssamplanner.teacherConsent";
+
+function writeTeacherConsent(selection: ConsentSelection): void {
+  try {
+    localStorage.setItem(TEACHER_CONSENT_KEY, JSON.stringify(selection));
+  } catch {
+    // 저장 실패는 치명적이지 않다 — 프로필 화면에서 다시 받을 수 있다.
+  }
+}
+
+function readTeacherConsent(): ConsentSelection {
+  try {
+    const raw = localStorage.getItem(TEACHER_CONSENT_KEY);
+    return raw ? (JSON.parse(raw) as ConsentSelection) : {};
+  } catch {
+    return {};
+  }
+}
+
+function clearTeacherConsent(): void {
+  try {
+    localStorage.removeItem(TEACHER_CONSENT_KEY);
+  } catch {
+    // 무시.
+  }
+}
 
 // 로그인/가입 후 갈 곳을 온보딩 상태로 결정.
 async function resolveTeacherRoute(): Promise<string> {
@@ -341,10 +375,9 @@ function StudentFocusTable({ students }: { students: DashboardStudent[] }) {
 export function TeacherDashboardContent() {
   const data = useTeacherData();
   useRequireOnboarding(data);
-  const activeCount = data.connections.filter((connection) => connection.status === "active").length;
   const pendingCount = data.connections.filter((connection) => connection.status === "pending").length;
   const rejectedCount = data.connections.filter((connection) => connection.status === "rejected").length;
-  const monthlyAmount = getTeacherMonthlySubscriptionAmount(activeCount);
+  const activeCount = data.connections.filter((connection) => connection.status === "active").length;
   const dashStudents = useDashboardStudents(data.connections);
 
   return (
@@ -366,11 +399,11 @@ export function TeacherDashboardContent() {
         <StatCard label="담당 학생" value={`${activeCount}명`} hint="active 연결" />
         <StatCard label="대기 요청" value={`${pendingCount}건`} hint="수락 대기" tone={pendingCount ? "warning" : "muted"} />
         <StatCard label="거절" value={`${rejectedCount}건`} hint="최근" />
-        <StatCard
-          label="이번 달 구독료"
-          value={`${monthlyAmount.toLocaleString("ko-KR")}원`}
-          hint={`학생당 ${PRICE_PER_STUDENT_KRW.toLocaleString("ko-KR")}원`}
-        />
+        {/*
+          "이번 달 구독료 / 학생당 4,900원" 카드를 지웠다. 가격이 확정되지 않았고 결제 수단도
+          없다 — 확정 전 금액을 대시보드 첫 화면에 숫자로 박아 두면 사용자는 그걸 확정가로 읽는다.
+          대체 문구를 넣지 않는다(제거만 한다).
+        */}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
@@ -580,6 +613,19 @@ export function TeacherProfileContent() {
       data.setMessage(error.message);
       return;
     }
+
+    // 가입 때 세션이 없어 기록하지 못한 동의를 여기서 남긴다(이메일 인증 경로).
+    // 이미 기록돼 있으면 중복을 만들지 않는다 — append-only 표라 이력이 지저분해진다.
+    const stashed = readTeacherConsent();
+    if (canProceedWithConsent(stashed)) {
+      const { data: status } = await supabase.rpc("my_consent_status");
+      if (!hasCurrentConsent(status as ConsentStatusRow[] | null)) {
+        const rows = buildConsentRows(data.session.user.id, stashed, "teacher_web_onboarding");
+        if (rows.length) await supabase.from("consent_records").insert(rows);
+      }
+      clearTeacherConsent();
+    }
+
     await data.refresh();
     // 프로필 저장 완료 → 대시보드로.
     router.replace("/");
@@ -617,8 +663,6 @@ export function TeacherSettingsContent() {
     setSubjects(data.profile?.subjects?.length ? data.profile.subjects : ["math", "english"]);
   }, [data.profile]);
 
-  const activeCount = data.connections.filter((connection) => connection.status === "active").length;
-  const monthlyAmount = getTeacherMonthlySubscriptionAmount(activeCount);
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -664,12 +708,13 @@ export function TeacherSettingsContent() {
       <div className="mt-4">
         <Panel title="구독 · 정산">
           <div className="flex flex-wrap items-end justify-between gap-3">
+            {/*
+              금액("이번 달 앱 구독료 · N원 · 학생당 4,900원")을 지웠다. 가격 미확정 + 결제 미연동
+              상태에서 숫자를 보여 주면 확정가로 읽힌다. 연동 학생 수는 대시보드 상단 카드에
+              이미 있어 여기서 다시 말하지 않는다.
+            */}
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-bold text-muted">이번 달 앱 구독료</p>
-              <p className="text-2xl font-extrabold text-ink">{monthlyAmount.toLocaleString("ko-KR")}원</p>
-              <p className="text-xs font-bold text-muted">
-                연동 학생 {activeCount}명 · 학생당 {PRICE_PER_STUDENT_KRW.toLocaleString("ko-KR")}원
-              </p>
+              <p className="text-sm font-bold text-muted">앱 구독</p>
             </div>
             <a
               href="/billing"
@@ -1000,13 +1045,51 @@ function TeacherAuthLayout({
   );
 }
 
+/**
+ * 가입 동의 체크 골격. **문안은 준비 중이라 본문·링크가 없다.**
+ * 지금 하는 일은 두 가지뿐이다: 필수 동의를 받고, 그 사실을 기록할 수 있게 하는 것.
+ */
+function ConsentChecklist({
+  selection,
+  onChange
+}: {
+  selection: ConsentSelection;
+  onChange: (next: ConsentSelection) => void;
+}) {
+  return (
+    <fieldset className="grid gap-2 rounded-control border border-line bg-canvas p-4">
+      <legend className="px-1 text-xs font-extrabold text-muted">약관 동의</legend>
+      {CONSENT_DOCUMENTS.map((doc) => (
+        <label key={doc} className="flex items-center gap-2 text-sm font-bold text-ink">
+          <input
+            type="checkbox"
+            checked={selection[doc] === true}
+            onChange={(event) => onChange({ ...selection, [doc]: event.target.checked })}
+          />
+          {CONSENT_DOCUMENT_LABELS[doc]}
+        </label>
+      ))}
+      <p className="text-xs font-bold text-muted">{CONSENT_PENDING_NOTICE}</p>
+    </fieldset>
+  );
+}
+
 function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // 🚨 과외쌤 웹 가입에는 동의 절차가 **아예 없었다**(A0 §A4). 학생 앱에는 있는데 과외쌤은
+  //    이메일·비밀번호만 받고 계정이 생겼다 — 학생의 개인정보를 다루는 쪽이라 더 필요하다.
+  const [consent, setConsent] = useState<ConsentSelection>({});
+  const consentOk = canProceedWithConsent(consent);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // 버튼도 잠겨 있지만 여기서 한 번 더 막는다(폼은 Enter 로도 제출된다).
+    if (mode === "signup" && !consentOk) {
+      data.setMessage("필수 약관에 동의해 주세요.");
+      return;
+    }
     const result =
       mode === "login"
         ? await supabase.auth.signInWithPassword({ email, password })
@@ -1024,9 +1107,16 @@ function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData 
 
     if (mode === "signup") {
       if (result.data.session) {
+        // 동의 증적을 남긴다. RLS 가 본인 행만 허용하므로 **세션이 있어야** 기록할 수 있다.
+        const rows = buildConsentRows(result.data.session.user.id, consent, "teacher_web_signup");
+        if (rows.length) await supabase.from("consent_records").insert(rows);
         // 가입 즉시 로그인됨 → 온보딩(프로필)으로.
         router.replace("/onboarding/profile");
       } else {
+        // 이메일 인증이 필요한 설정에서는 아직 세션이 없어 **지금은 기록할 수 없다.**
+        // 체크 상태를 남겨 두고 온보딩(프로필 저장) 시점에 기록한다.
+        // ⚠️ mailer_autoconfirm 을 끄면(출시 전 필수) 이 경로가 기본이 된다.
+        writeTeacherConsent(consent);
         data.setMessage("가입 요청을 보냈어요. 인증 메일의 링크를 누른 뒤 로그인해 주세요.");
       }
       return;
@@ -1039,7 +1129,10 @@ function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData 
     <form className="flex flex-col gap-3" onSubmit={submit}>
       <Field label="이메일" type="email" value={email} onChange={setEmail} required />
       <Field label="비밀번호" type="password" value={password} onChange={setPassword} required />
-      <SubmitButton>{mode === "login" ? "로그인" : "인증 메일 보내기"}</SubmitButton>
+      {mode === "signup" ? <ConsentChecklist selection={consent} onChange={setConsent} /> : null}
+      <SubmitButton disabled={mode === "signup" && !consentOk}>
+        {mode === "login" ? "로그인" : "인증 메일 보내기"}
+      </SubmitButton>
       <div className="flex items-center justify-between text-sm">
         <a href={mode === "login" ? "/signup" : "/login"} className="font-bold text-muted hover:text-ink">
           {mode === "login" ? "처음이신가요? 회원가입" : "이미 계정이 있나요? 로그인"}
@@ -1339,9 +1432,13 @@ function Field({
   );
 }
 
-function SubmitButton({ children }: { children: ReactNode }) {
+function SubmitButton({ children, disabled }: { children: ReactNode; disabled?: boolean }) {
   return (
-    <button className="inline-flex min-h-11 items-center justify-center rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white" type="submit">
+    <button
+      className="inline-flex min-h-11 items-center justify-center rounded-button bg-brand px-4 py-2 text-sm font-extrabold text-white disabled:opacity-50"
+      disabled={disabled}
+      type="submit"
+    >
       {children}
     </button>
   );

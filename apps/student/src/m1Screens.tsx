@@ -7,7 +7,11 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from
 
 import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
 import {
+  CONSENT_PENDING_NOTICE,
   DEFAULT_DISCLOSURE_SCOPE,
+  buildConsentRows,
+  canProceedWithConsent,
+  hasCurrentConsent,
   canCompleteStudentSignup,
   canRequestConnectionAgain,
   formatConnectionTeacherLabel,
@@ -16,7 +20,7 @@ import {
   normalizeInviteCode,
   requiresGuardianConsent
 } from "@ssamplanner/shared";
-import type { ConnectionStatus, Database } from "@ssamplanner/shared";
+import type { ConnectionStatus, ConsentSelection, ConsentStatusRow, Database } from "@ssamplanner/shared";
 
 import { supabase } from "./supabaseClient";
 
@@ -318,6 +322,7 @@ export function StudentTermsScreen() {
     >
       <ToggleRow label="서비스 이용약관 (필수)" value={termsAccepted} onValueChange={setTermsAccepted} />
       <ToggleRow label="개인정보 처리방침 (필수)" value={privacyAccepted} onValueChange={setPrivacyAccepted} />
+      <Notice tone="warning">{CONSENT_PENDING_NOTICE}</Notice>
       <Notice tone={canContinue ? "success" : "warning"}>
         {canContinue ? "동의 완료! 다음 단계로 넘어가요." : "필수 약관에 모두 동의해야 계속할 수 있어요."}
       </Notice>
@@ -401,6 +406,24 @@ export function StudentProfileScreen() {
       data.setMessage(error.message);
       return;
     }
+    // 🚨 동의 **증적**을 남긴다. 예전에는 토글 상태를 온보딩 단계 사이에서만 들고 다니고
+    //    어디에도 기록하지 않아 "언제 무엇에 동의했는지" 를 증명할 수 없었다.
+    //    기록 실패가 가입을 되돌리지는 않는다(프로필은 이미 저장됐다) — 대신 조용히 넘기지 않고
+    //    안내에 남긴다. append-only 표라 이미 있으면 중복을 만들지 않는다.
+    const stored = readSignupConsent();
+    const selection: ConsentSelection = {
+      terms_of_service: stored.termsAccepted || termsAccepted,
+      privacy_policy: stored.privacyAccepted || termsAccepted
+    };
+    if (canProceedWithConsent(selection)) {
+      const { data: status } = await supabase.rpc("my_consent_status");
+      if (!hasCurrentConsent(status as ConsentStatusRow[] | null)) {
+        const rows = buildConsentRows(data.session.user.id, selection, "student_app_signup");
+        const consentResult = await supabase.from("consent_records").insert(rows);
+        if (consentResult.error) data.setMessage(`동의 기록 실패: ${consentResult.error.message}`);
+      }
+    }
+
     // 온보딩 완료 → 임시 동의 보존값 정리.
     clearSignupConsent();
     await data.refresh();
