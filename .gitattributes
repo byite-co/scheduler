@@ -1,0 +1,28 @@
+# 줄바꿈을 저장소 기준 LF 로 고정한다.
+#
+# 왜 필요했나 — CI 가 빨갛고 로컬이 초록이던 실제 사고(PR #55)의 토양이었다.
+# 이 파일이 없으면 체크아웃 줄바꿈이 **개발자의 git 설정**에 좌우된다.
+# Git for Windows 는 system 설정으로 core.autocrlf=true 를 넣으므로 Windows 워킹트리는
+# CRLF 가 되고, Linux CI 는 LF 가 된다. 소스를 문자열로 단정하는 테스트가 `\n` 앵커를 쓰면
+# 한쪽에서만 매칭돼 "로컬 초록 / CI 빨강"(또는 그 반대)이 된다.
+#
+# text=auto → 텍스트로 판별된 파일은 저장소에 LF 로 저장하고,
+# eol=lf    → 체크아웃도 LF 로 한다(플랫폼 무관하게 동일).
+* text=auto eol=lf
+
+# 바이너리는 절대 변환하지 않는다.
+# ⚠️ UI 카탈로그 PNG 187장이 여기 걸린다 — 변환되면 파일이 깨진다.
+#    text=auto 의 자동 판별에만 맡기지 않고 명시한다.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp4 binary
+*.zip binary

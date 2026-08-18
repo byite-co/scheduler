@@ -1,20 +1,11 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
-const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
-const guards = readFileSync(
-  new URL("../../../supabase/migrations/20260820000000_role_and_delete_guards.sql", import.meta.url),
-  "utf8"
-);
-const grants = readFileSync(
-  new URL("../../../supabase/migrations/20260820010000_immutable_column_grants.sql", import.meta.url),
-  "utf8"
-);
-const rpcOnly = readFileSync(
-  new URL("../../../supabase/migrations/20260820020000_connections_insert_via_rpc_only.sql", import.meta.url),
-  "utf8"
-);
+import { readSource, sliceBetween, sliceFrom } from "./testSource";
+
+const schema = readSource(new URL("../../../supabase/schema.sql", import.meta.url));
+const guards = readSource(new URL("../../../supabase/migrations/20260820000000_role_and_delete_guards.sql", import.meta.url));
+const grants = readSource(new URL("../../../supabase/migrations/20260820010000_immutable_column_grants.sql", import.meta.url));
+const rpcOnly = readSource(new URL("../../../supabase/migrations/20260820020000_connections_insert_via_rpc_only.sql", import.meta.url));
 
 // ── ① 트리거로 막은 것 ───────────────────────────────────────────────────────
 describe("불변 컬럼 — 트리거", () => {
@@ -33,9 +24,10 @@ describe("불변 컬럼 — 트리거", () => {
   });
 
   it("service_role·마이그레이션은 통과시킨다 — 역할 정정은 서버의 일이다", () => {
-    const fn = guards.slice(
-      guards.indexOf("create or replace function guard_profile_immutable_fields"),
-      guards.indexOf("drop trigger if exists guard_profile_immutable_fields_trigger")
+    const fn = sliceBetween(
+      guards,
+      "create or replace function guard_profile_immutable_fields",
+      "drop trigger if exists guard_profile_immutable_fields_trigger"
     );
     expect(fn).toContain("if auth.uid() is null then");
     expect(fn).toContain("return new;");
@@ -50,9 +42,10 @@ describe("불변 컬럼 — 트리거", () => {
   });
 
   it("DELETE 가드는 학생 본인의 self 숙제는 막지 않는다", () => {
-    const fn = guards.slice(
-      guards.indexOf("create or replace function guard_locked_todo_delete"),
-      guards.indexOf("drop trigger if exists guard_locked_todo_delete_trigger")
+    const fn = sliceBetween(
+      guards,
+      "create or replace function guard_locked_todo_delete",
+      "drop trigger if exists guard_locked_todo_delete_trigger"
     );
     // source='self' 조건 없이 전부 막으면 학생이 자기 할 일을 못 지운다.
     expect(fn).toContain("old.source = 'teacher'");
@@ -69,7 +62,7 @@ describe("불변 컬럼 — 컬럼 권한", () => {
   });
 
   it("share_token·student_id·teacher_id 는 허용 목록에 없다", () => {
-    const grant = grants.slice(grants.indexOf("grant update ("), grants.indexOf("on table reports to authenticated"));
+    const grant = sliceBetween(grants, "grant update (", "on table reports to authenticated");
     for (const column of ["share_token", "share_expires_at", "student_id", "teacher_id"]) {
       expect(grant, column).not.toContain(column);
     }
@@ -89,19 +82,17 @@ describe("불변 컬럼 — 컬럼 권한", () => {
 describe("불변 컬럼 — 정책", () => {
   it("lesson_fees 는 연결이 존재하는 학생에게만", () => {
     for (const source of [grants, schema]) {
-      const policy = source.slice(
-        source.indexOf("create policy fees_teacher_rw on lesson_fees"),
-        source.indexOf("create policy fees_teacher_rw on lesson_fees") + 700
-      );
+      const policy = sliceFrom(source, "create policy fees_teacher_rw on lesson_fees", 700);
       expect(policy).toContain("exists (");
       expect(policy).toContain("c.student_id = lesson_fees.student_id");
     }
   });
 
   it("active 를 요구하지 않는다 — 연결이 끊겨도 미납 청구서에 접근해야 한다", () => {
-    const policy = grants.slice(
-      grants.indexOf("create policy fees_teacher_rw on lesson_fees"),
-      grants.indexOf("comment on policy fees_teacher_rw")
+    const policy = sliceBetween(
+      grants,
+      "create policy fees_teacher_rw on lesson_fees",
+      "comment on policy fees_teacher_rw"
     );
     expect(policy).not.toContain("'active'");
   });
