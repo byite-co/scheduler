@@ -49,3 +49,15 @@ export function codeOnly(source: string): string {
     })
     .join("\n");
 }
+
+/**
+ * `startAnchor` 부터 `length` 글자를 잘라낸다(끝 앵커가 마땅치 않은 고정 창).
+ * 시작 앵커가 없으면 던진다 — `indexOf` 가 -1 을 돌려주면 `slice(-1, ...)` 이 되어
+ * 창이 조용히 빈 문자열이나 꼬리 한 글자로 바뀐다.
+ */
+export function sliceFrom(source: string, startAnchor: string, length: number): string {
+  const text = normalizeEol(source);
+  const start = text.indexOf(startAnchor);
+  if (start < 0) throw new Error(`시작 앵커를 찾지 못했다: ${JSON.stringify(startAnchor)}`);
+  return text.slice(start, start + length);
+}
