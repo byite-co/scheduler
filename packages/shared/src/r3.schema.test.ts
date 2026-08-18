@@ -1,20 +1,14 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
-const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
-const consentMig = readFileSync(
-  new URL("../../../supabase/migrations/20260821000000_onboarding_consent_atomic.sql", import.meta.url),
-  "utf8"
-);
-const publishMig = readFileSync(
-  new URL("../../../supabase/migrations/20260821010000_publish_report_atomic.sql", import.meta.url),
-  "utf8"
-);
-const studentApp = readFileSync(new URL("../../../apps/student/src/m1Screens.tsx", import.meta.url), "utf8");
-const teacherM1 = readFileSync(new URL("../../../apps/teacher/src/app/m1.tsx", import.meta.url), "utf8");
-const teacherM5 = readFileSync(new URL("../../../apps/teacher/src/app/m5.tsx", import.meta.url), "utf8");
-const studentM7 = readFileSync(new URL("../../../apps/student/src/m7Screens.tsx", import.meta.url), "utf8");
+import { codeOnly, readSource, sliceBetween } from "./testSource";
+
+const schema = readSource(new URL("../../../supabase/schema.sql", import.meta.url));
+const consentMig = readSource(new URL("../../../supabase/migrations/20260821000000_onboarding_consent_atomic.sql", import.meta.url));
+const publishMig = readSource(new URL("../../../supabase/migrations/20260821010000_publish_report_atomic.sql", import.meta.url));
+const studentApp = readSource(new URL("../../../apps/student/src/m1Screens.tsx", import.meta.url));
+const teacherM1 = readSource(new URL("../../../apps/teacher/src/app/m1.tsx", import.meta.url));
+const teacherM5 = readSource(new URL("../../../apps/teacher/src/app/m5.tsx", import.meta.url));
+const studentM7 = readSource(new URL("../../../apps/student/src/m7Screens.tsx", import.meta.url));
 
 /** `profiles` upsert 의 인자 객체만 떼어 온다(주석·주변 코드 제외). */
 function upsertArgs(source: string): string {
@@ -22,20 +16,6 @@ function upsertArgs(source: string): string {
   if (start < 0) throw new Error("profiles upsert 를 찾지 못했다");
   const end = source.indexOf("});", start);
   return source.slice(start, end);
-}
-
-/**
- * 줄 주석(`//`, `--`)을 걷어낸다 — 산문에 걸려 오탐하는 것을 막는다.
- * 이 함정에 세 번 걸렸다: 주석이 코드와 같은 문장을 설명하면 문자열 단정이 주석을 잡는다.
- */
-function codeOnly(source: string): string {
-  return source
-    .split(/\r?\n/)
-    .filter((line) => {
-      const t = line.trimStart();
-      return !t.startsWith("//") && !t.startsWith("--");
-    })
-    .join("\n");
 }
 
 describe("R3 동의 원자화", () => {
@@ -111,12 +91,12 @@ describe("R3 리포트 발송 원자화", () => {
   });
 
   it("연동 전 채널은 토큰을 발급하지 않는다", () => {
-    const fn = publishMig.slice(publishMig.indexOf("if p_channel = 'link' then"), publishMig.indexOf("return jsonb_build_object"));
+    const fn = sliceBetween(publishMig, "if p_channel = 'link' then", "return jsonb_build_object");
     expect(fn).toContain("delivery_status := 'pending'");
   });
 
   it("화면이 RPC 하나만 부른다 — 옛 4단계 잔재가 없다", () => {
-    const send = teacherM5.slice(teacherM5.indexOf("async function saveAndSend"), teacherM5.indexOf("await loadStudent(studentId);\n  }"));
+    const send = sliceBetween(teacherM5, "async function saveAndSend", "async function revokeShare");
     expect(send).toContain('supabase.rpc("publish_report"');
     // 옛 경로: reports insert → create_report_share → status 업데이트 → deliveries insert
     expect(send).not.toContain('from("reports")');
@@ -146,7 +126,7 @@ describe("R3 조회 실패를 '기록 없음' 으로 정규화하지 않는다",
 
 describe("R3 성공 선표시·fail-open 정리", () => {
   it("푸시 토큰 등록 성공을 확인한 뒤에만 granted 로 바꾼다", () => {
-    const enable = studentM7.slice(studentM7.indexOf("async function enable()"), studentM7.indexOf("return (\n    <ScrollView"));
+    const enable = sliceBetween(studentM7, "async function enable()", "return (");
     // 실패 시 조기 반환이 setStatus 보다 앞에 있어야 한다.
     expect(enable.indexOf("알림을 켜지 못했어요")).toBeLessThan(enable.indexOf('setStatus("granted")'));
   });
