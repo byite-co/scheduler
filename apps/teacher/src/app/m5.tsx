@@ -178,6 +178,12 @@ export function TeacherReportBuilder() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("세션 확인 중");
+  // 🚨 "네 번째 상태" — 조회 실패.
+  //    리포트 지표는 hidden(학생이 비공개) / no_data(기록 없음) / value 세 가지였다. 그런데
+  //    빌더가 모든 조회의 error 를 버리고 `?? []` 로 넘겨서 **조회가 실패해도 "기록 없음"** 이
+  //    됐다. 그 상태로 발송하면 학부모에게 "이번 주 기록이 없다" 가 사실처럼 나간다.
+  //    조회 실패는 정규화하지 않고 따로 세우고, 이 상태에서는 발송을 막는다.
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const week = useMemo(() => weekRange(new Date()), []);
 
@@ -290,6 +296,25 @@ export function TeacherReportBuilder() {
           .eq("period", week.start.slice(0, 7))
           .maybeSingle()
       ]);
+      // 조회 실패를 여기서 한 번에 걷어낸다. 하나라도 실패했으면 아래에서 만드는 리포트는
+      // "기록 없음" 이 아니라 **모르는 상태**다 — 그대로 발송되지 않게 dataError 를 세운다.
+      const failures = (
+        [
+          ["공부 기록", sessionsResult.error],
+          ["주간 추이", trendResult.error],
+          ["숙제", todosResult.error],
+          ["집중도", focusResult.error],
+          ["시험 기록", examsResult.error],
+          ["공개 범위", disclosureResult.error],
+          ["발송 이력", historyResult.error],
+          ["수업 회차", lessonResult.error],
+          ["예정 회차", feeResult.error]
+        ] as const
+      )
+        .filter(([, err]) => Boolean(err))
+        .map(([label, err]) => `${label}(${err?.message ?? "알 수 없음"})`);
+      setDataError(failures.length ? failures.join(", ") : null);
+
       setLessons(
         buildLessonBlock(
           (lessonResult.data ?? []) as never,
@@ -394,79 +419,55 @@ export function TeacherReportBuilder() {
       setMessage(quota.notice ?? "이번 달 발급 한도를 다 썼어요.");
       return;
     }
+    // 🚨 조회가 실패한 상태로는 보내지 않는다. 그 리포트의 "기록 없음" 은 사실이 아니라
+    //    모르는 것이다 — 학부모에게 사실처럼 나가면 되돌릴 수 없다.
+    if (dataError) {
+      setMessage(`데이터를 불러오지 못해서 보낼 수 없어요. 새로 고친 뒤 다시 시도해 주세요: ${dataError}`);
+      return;
+    }
     setBusy(true);
 
-    const inserted = await supabase
-      .from("reports")
-      .insert({
-        student_id: studentId,
-        teacher_id: session.user.id,
-        type: "weekly",
-        period_start: week.start,
-        period_end: week.end,
-        // 발송 시점의 값을 그대로 굳힌다 — 나중에 학생 기록이 바뀌어도 보낸 리포트는 그대로여야 한다.
-        // 무료 플랜은 자동 그래프를 안 쓰므로 스냅샷에도 넣지 않는다(학부모 웹뷰가 그리면 안 된다).
-        data: { ...(gating.autoGraphs ? report : {}), lessons, branding, gating: gating.mode } as never,
-        teacher_comment: narrative.teacherComment,
-        home_support: narrative.homeSupport || null,
-        next_week_focus: narrative.nextWeekFocus || null,
-        included_subjects: included,
-        status: "draft"
-      })
-      .select("id")
-      .single();
-    if (inserted.error || !inserted.data) {
+    // 저장 → 토큰 발급 → status=sent → 발송 이력. 예전에는 이 네 단계가 클라이언트에서
+    // 순차 실행됐고 뒤쪽 두 개는 error 를 읽지도 않았다 — 중간에 끊기면 링크는 살아 있는데
+    // 발송 이력이 없고, 그런데도 "발급했어요" 가 떴다. RPC 하나로 묶어 부분 성공을 없앤다.
+    const published = await supabase.rpc("publish_report", {
+      p_student_id: studentId,
+      p_period_start: week.start,
+      p_period_end: week.end,
+      // 발송 시점의 값을 그대로 굳힌다 — 나중에 학생 기록이 바뀌어도 보낸 리포트는 그대로여야 한다.
+      // 무료 플랜은 자동 그래프를 안 쓰므로 스냅샷에도 넣지 않는다(학부모 웹뷰가 그리면 안 된다).
+      p_data: { ...(gating.autoGraphs ? report : {}), lessons, branding, gating: gating.mode } as never,
+      p_teacher_comment: narrative.teacherComment,
+      p_home_support: narrative.homeSupport || undefined,
+      p_next_week_focus: narrative.nextWeekFocus || undefined,
+      p_included_subjects: included,
+      p_channel: channel
+    });
+
+    if (published.error) {
       setBusy(false);
       // 한도는 DB 트리거가 최종적으로 막는다(화면만 막으면 직접 호출로 우회된다).
       setMessage(
-        isReportQuotaError(inserted.error?.message)
+        isReportQuotaError(published.error.message)
           ? (quota.notice ?? `이번 달 발급 한도(${quota.quota}건)를 다 썼어요.`)
-          : (inserted.error?.message ?? "리포트 저장 실패")
+          : `발송 실패(아무것도 저장되지 않았어요): ${published.error.message}`
       );
       return;
     }
+
+    // 여기까지 오면 네 단계가 **모두** 커밋됐다. 그래서 이제서야 성공을 말한다.
+    const result = published.data as unknown as {
+      delivery_status: "pending" | "sent";
+      token: string | null;
+    };
     setQuotaUsed((n) => n + 1);
-    const reportId = inserted.data.id as string;
-
-    // 링크만 실제로 발급된다. 카톡·PDF 는 아직 연동이 없어 **pending 으로만** 남긴다 —
-    // 되는 척하면 과외쌤이 보냈다고 믿는다.
-    let deliveryStatus: "pending" | "sent" | "failed" = "pending";
-    let deliveryError: string | null = null;
-    if (channel === "link") {
-      // 만료는 DB 기본값(90일)을 쓴다. 여기서 168시간을 넘기면 학부모가 일주일 안에 못 열었을 때
-      // 링크가 죽는다 — 그 문의는 전부 과외쌤에게 돌아온다.
-      const shared = await supabase.rpc("create_report_share", { p_report_id: reportId });
-      if (shared.error) {
-        deliveryStatus = "failed";
-        deliveryError = shared.error.message;
-      } else {
-        deliveryStatus = "sent";
-        setShareLink(`/r/${(shared.data as { token: string }).token}`);
-        await supabase.from("reports").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", reportId);
-      }
-    }
-
-    await supabase.from("report_deliveries").insert({
-      report_id: reportId,
-      channel,
-      status: deliveryStatus,
-      error: deliveryError,
-      sent_at: deliveryStatus === "sent" ? new Date().toISOString() : null
-    });
-
-    const { data: deliveryRows } = await supabase
-      .from("report_deliveries")
-      .select("channel, status, error")
-      .eq("report_id", reportId);
-    setDeliveries((deliveryRows ?? []) as never);
+    if (result.token) setShareLink(`/r/${result.token}`);
 
     setBusy(false);
     setMessage(
-      deliveryStatus === "sent"
+      result.delivery_status === "sent"
         ? "리포트를 저장하고 공유 링크를 발급했어요."
-        : deliveryStatus === "failed"
-          ? `발송 실패: ${deliveryError}`
-          : `${REPORT_DELIVERY_CHANNEL_LABELS[channel]} 연동 전이라 발송 대기로만 기록했어요.`
+        : `${REPORT_DELIVERY_CHANNEL_LABELS[channel]} 연동 전이라 발송 대기로만 기록했어요.`
     );
     await loadStudent(studentId);
   }
@@ -897,13 +898,30 @@ export function TeacherReportBuilder() {
               {!canSendReport(narrative) ? (
                 <p className="text-xs font-bold text-muted">선생님 코멘트를 채우면 보낼 수 있어요.</p>
               ) : null}
+              {/* 조회 실패는 "기록 없음" 이 아니다. 이 상태로 보내면 모르는 것을 사실로 보낸다. */}
+              {dataError ? (
+                <div className="grid gap-2 rounded-control border border-danger bg-canvas p-3">
+                  <p className="text-xs font-bold text-danger">
+                    데이터를 불러오지 못했어요. 지금 보이는 &quot;기록 없음&quot; 은 사실이 아닐 수 있어서 발송을 막았어요.
+                  </p>
+                  <p className="break-all text-[11px] font-bold text-muted">{dataError}</p>
+                  <button
+                    className="justify-self-start rounded-control border border-line px-3 py-1 text-xs font-extrabold disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => void loadStudent(studentId)}
+                    type="button"
+                  >
+                    다시 불러오기
+                  </button>
+                </div>
+              ) : null}
               {REPORT_DELIVERY_CHANNELS.map((channel) => (
                 <button
                   key={channel}
                   className={`rounded-control px-4 py-2 text-sm font-extrabold disabled:opacity-50 ${
                     channel === "link" ? "bg-brand text-surface" : "border border-line text-ink"
                   }`}
-                  disabled={busy || !canSendReport(narrative) || quota.exceeded}
+                  disabled={busy || !canSendReport(narrative) || quota.exceeded || dataError !== null}
                   onClick={() => void saveAndSend(channel)}
                   type="button"
                 >

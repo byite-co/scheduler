@@ -229,8 +229,14 @@ export function PushPrimingScreen() {
     const { error } = await supabase
       .from("push_tokens")
       .upsert({ user_id: active.user.id, token: `expo-mock-${active.user.id}`, platform: Platform.OS }, { onConflict: "user_id,token" });
+    // 등록이 실패했는데 granted 로 넘기면, 알림이 오지 않는데 화면은 "켜졌다" 고 말한다.
+    // 성공을 확인한 뒤에만 상태를 옮긴다.
+    if (error) {
+      setMessage(`알림을 켜지 못했어요: ${error.message}`);
+      return;
+    }
     setStatus("granted");
-    setMessage(error ? error.message : "알림을 켰어요. (모의 토큰 등록)");
+    setMessage("알림을 켰어요. (모의 토큰 등록)");
   }
 
   return (
@@ -258,12 +264,33 @@ export function PushPrimingScreen() {
 export function SystemStatusScreen() {
   const [config, setConfig] = useState<SystemConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  // 🚨 조회 실패를 "정상" 으로 바꾸지 않는다.
+  //    예전에는 error 를 버리고 data 가 null 이면 하드코딩된 건강한 기본값
+  //    (maintenance:false, min_supported_build:1)으로 대체했다 — 점검 중이거나 강제 업데이트가
+  //    필요한 상황에서도 조회만 실패하면 화면이 "정상 동작 중" 이라고 말했다.
+  //    게이트를 fail-closed 로 바꾸는 게 아니라(그러면 조회 실패마다 앱이 잠긴다),
+  //    **오류를 오류로 보이게** 하고 다시 시도할 길을 준다.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const { data } = await supabase.from("app_config").select("latest_build, min_supported_build, maintenance, maintenance_message").eq("id", 1).maybeSingle();
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("app_config")
+        .select("latest_build, min_supported_build, maintenance, maintenance_message")
+        .eq("id", 1)
+        .maybeSingle();
       if (cancelled) return;
+      if (error) {
+        setLoadError(error.message);
+        setConfig(null);
+        setLoading(false);
+        return;
+      }
+      setLoadError(null);
+      // 행이 아예 없는 것은 오류와 다르다(설정이 아직 없는 상태) — 기본값으로 본다.
       setConfig(
         data
           ? { latest_build: data.latest_build, min_supported_build: data.min_supported_build, maintenance: data.maintenance, maintenance_message: data.maintenance_message }
@@ -275,9 +302,24 @@ export function SystemStatusScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
-  if (loading || !config) return <Center text="시스템 상태 확인 중" />;
+  if (loading) return <Center text="시스템 상태 확인 중" />;
+
+  if (loadError || !config) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.title}>상태를 확인할 수 없어요</Text>
+        <Text style={styles.notice}>
+          점검 중인지 확인하지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.
+          {loadError ? `\n(${loadError})` : ""}
+        </Text>
+        <Pressable accessibilityRole="button" onPress={() => setAttempt((n) => n + 1)} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>다시 확인</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   const gate = getSystemGateState(APP_BUILD, config);
 

@@ -70,6 +70,20 @@ export function buildConsentRows(
   }));
 }
 
+/**
+ * 체크 상태를 `finish_onboarding_with_consent` RPC 의 문서 목록으로 바꾼다.
+ *
+ * 그 RPC 는 "동의 기록 + onboarded=true" 를 한 트랜잭션으로 처리한다 — 예전에는 화면이
+ * onboarded=true 를 먼저 저장하고 동의를 나중에 넣어서, 동의 기록이 실패하면 **증적 없이
+ * 온보딩이 끝난 계정**이 남았다. 순서를 뒤집는 대신 아예 서버에 묶었다.
+ *
+ * 필수 문서가 빠지면 서버가 거부하므로(그래서 onboarded 가 false 로 남는다) 여기서는
+ * 체크된 것을 그대로 넘긴다.
+ */
+export function consentDocumentsForRpc(selection: ConsentSelection): ConsentDocument[] {
+  return CONSENT_DOCUMENTS.filter((doc) => selection[doc] === true);
+}
+
 export type ConsentStatusRow = {
   document: string;
   version: string;

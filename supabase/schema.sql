@@ -3509,3 +3509,199 @@ grant update (status, sent_at) on table reports to authenticated;
 -- 있었다. 클라이언트는 발급(INSERT)만 한다 — used_by 는 request_connection_by_invite 의 몫이다.
 revoke update on table invite_codes from authenticated;
 revoke update on table invite_codes from anon;
+
+-- ── R3: 원자화 RPC (20260821000000 / 20260821010000) ─────────────────────────
+-- 동의 기록 + onboarded 를 한 트랜잭션으로. 예전에는 onboarded=true 를 먼저 저장하고 동의를
+-- 나중에 넣어서, 동의 기록이 실패하면 증적 없이 온보딩이 끝난 계정이 남았다.
+create or replace function finish_onboarding_with_consent(
+  p_documents text[],
+  p_version text,
+  p_method text default 'onboarding'
+)
+returns profiles
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me uuid;
+  profile_row profiles%rowtype;
+  required text[] := array['terms_of_service', 'privacy_policy'];
+  missing text[];
+begin
+  me := auth.uid();
+  if me is null then
+    raise exception 'authentication_required';
+  end if;
+
+  if p_version is null or btrim(p_version) = '' then
+    raise exception 'consent_version_required';
+  end if;
+
+  -- 프로필이 먼저 있어야 한다. 클라이언트가 프로필 필드를 저장한 **뒤** 부르는 순서다.
+  select * into profile_row from profiles where id = me for update;
+  if not found then
+    raise exception 'profile_not_found';
+  end if;
+
+  -- 필수 문서 검사.
+  --
+  -- 이번에 넘어온 문서 **또는 이미 이 버전으로 기록된 문서**를 합쳐서 판정한다.
+  -- 두 경로가 다 있기 때문이다:
+  --   · 가입 때 세션이 있었으면 동의가 그 시점에 이미 기록된다 → 여기로는 빈 목록이 온다.
+  --   · 이메일 인증 경로는 가입 때 기록할 수 없어 화면이 체크 상태를 들고 왔다 → 목록이 온다.
+  -- 그래서 "이미 기록돼 있으면 통과" 를 **서버가** 판정한다. 화면이 "아마 했을 것" 으로
+  -- 추정해 목록을 채워 보내면 동의하지 않은 사용자의 증적을 만들어 낼 수 있다 — 그건 위조다.
+  -- 둘 다 없으면 거부하고 아무것도 쓰지 않는다 → onboarded 는 false 로 남는다.
+  -- ⚠️ 컬럼 이름을 명시적으로 준다: `unnest(required) r` 로 두면 테이블 별칭과 컬럼 이름이
+  --    둘 다 r 이 되고, 상관 서브쿼리 안의 맨 r 이 컬럼이 아니라 **행 전체(composite)** 로
+  --    해석될 수 있다. 그러면 `c.document = r` 이 조용히 never-match 가 된다
+  --    (오류가 아니라 잘못된 결과다 — 실행 테스트가 이걸 잡았다).
+  select array_agg(req.doc) into missing
+    from unnest(required) as req(doc)
+   where not (req.doc = any (coalesce(p_documents, array[]::text[])))
+     and not exists (
+       select 1 from consent_records c
+        where c.user_id = me
+          and c.document = req.doc
+          and c.version = p_version
+          and c.action = 'accepted'
+     );
+
+  if missing is not null and array_length(missing, 1) > 0 then
+    raise exception 'consent_required_missing: %', array_to_string(missing, ',');
+  end if;
+
+  -- 동의 기록. append-only 표라 같은 (문서, 버전) 이 이미 accepted 면 다시 넣지 않는다
+  -- — 재시도·중복 호출로 이력이 지저분해지는 것을 막는다(멱등).
+  insert into consent_records (user_id, document, version, action, method, subject)
+  select distinct me, d.doc, p_version, 'accepted', coalesce(p_method, 'onboarding'), 'self'
+    from unnest(coalesce(p_documents, array[]::text[])) as d(doc)
+   where not exists (
+     select 1 from consent_records c
+      where c.user_id = me
+        and c.document = d.doc
+        and c.version = p_version
+        and c.action = 'accepted'
+   );
+
+  -- 여기까지 왔으면 동의가 기록됐다. 이제서야 온보딩을 완료로 표시한다.
+  update profiles
+     set onboarded = true
+   where id = me
+  returning * into profile_row;
+
+  return profile_row;
+end;
+$$;
+
+revoke all on function finish_onboarding_with_consent(text[], text, text) from public;
+revoke all on function finish_onboarding_with_consent(text[], text, text) from anon;
+grant execute on function finish_onboarding_with_consent(text[], text, text) to authenticated;
+
+comment on function finish_onboarding_with_consent(text[], text, text) is
+  '동의 기록 + onboarded=true 를 한 트랜잭션으로. 필수 문서(이용약관·개인정보)가 없으면 아무것도 '
+  '쓰지 않고 거부한다 → 동의 없이 온보딩이 완료되는 상태가 존재할 수 없다. 멱등. 20260821000000 참고.';
+
+-- 리포트 저장 + 토큰 + status=sent + 발송 이력을 한 트랜잭션으로. 예전에는 네 단계가
+-- 클라이언트에서 순차 실행됐고 뒤쪽 둘은 error 를 읽지도 않았다 — 링크는 살아 있는데
+-- 발송 이력이 없고, 그런데도 성공 메시지가 떴다.
+create or replace function publish_report(
+  p_student_id uuid,
+  p_period_start date,
+  p_period_end date,
+  p_data jsonb,
+  p_teacher_comment text,
+  p_included_subjects subject_code[],
+  p_channel text,
+  p_home_support text default null,
+  p_next_week_focus text default null,
+  p_type report_type default 'weekly',
+  p_ttl_hours integer default 2160
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me uuid;
+  new_report_id uuid;
+  new_token text;
+  expires timestamptz;
+  delivery_status text;
+  sent timestamptz;
+begin
+  me := auth.uid();
+  if me is null then
+    raise exception 'authentication_required';
+  end if;
+
+  if p_channel is null or p_channel not in ('link', 'kakao', 'pdf') then
+    raise exception 'invalid_delivery_channel';
+  end if;
+
+  if p_teacher_comment is null or btrim(p_teacher_comment) = '' then
+    -- 자동 수집 데이터만으로는 보내지 않는다(화면 규칙과 같은 잣대를 서버에도 둔다).
+    raise exception 'teacher_comment_required';
+  end if;
+
+  if not exists (
+    select 1 from connections c
+     where c.teacher_id = me
+       and c.student_id = p_student_id
+       and c.status = 'active'
+  ) then
+    raise exception 'not_connected_student';
+  end if;
+
+  -- ① 리포트 저장. 한도 초과면 여기서 트리거가 터지고 아래는 아무것도 일어나지 않는다.
+  insert into reports (
+    student_id, teacher_id, type, period_start, period_end,
+    data, teacher_comment, home_support, next_week_focus, included_subjects, status
+  )
+  values (
+    p_student_id, me, p_type, p_period_start, p_period_end,
+    p_data, p_teacher_comment, nullif(btrim(coalesce(p_home_support, '')), ''),
+    nullif(btrim(coalesce(p_next_week_focus, '')), ''), p_included_subjects, 'draft'
+  )
+  returning id into new_report_id;
+
+  -- ② 링크 채널이면 토큰 발급 + 발송 상태 전이를 같은 자리에서 한다.
+  if p_channel = 'link' then
+    -- UUID 두 개 = 64자 hex ≈ 256비트 (create_report_share 와 같은 방식).
+    new_token := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
+    expires := now() + make_interval(hours => greatest(1, coalesce(p_ttl_hours, 2160)));
+    sent := now();
+    update reports
+       set share_token = new_token,
+           share_expires_at = expires,
+           status = 'sent',
+           sent_at = sent
+     where id = new_report_id;
+    delivery_status := 'sent';
+  else
+    delivery_status := 'pending';
+  end if;
+
+  -- ③ 발송 이력. 실패하면 위의 저장·토큰까지 함께 롤백된다 — 이력 없는 발송이 생기지 않는다.
+  insert into report_deliveries (report_id, channel, status, sent_at)
+  values (new_report_id, p_channel, delivery_status, sent);
+
+  return jsonb_build_object(
+    'report_id', new_report_id,
+    'channel', p_channel,
+    'delivery_status', delivery_status,
+    'token', new_token,
+    'expires_at', expires
+  );
+end;
+$$;
+
+revoke all on function publish_report(uuid, date, date, jsonb, text, subject_code[], text, text, text, report_type, integer) from public;
+revoke all on function publish_report(uuid, date, date, jsonb, text, subject_code[], text, text, text, report_type, integer) from anon;
+grant execute on function publish_report(uuid, date, date, jsonb, text, subject_code[], text, text, text, report_type, integer) to authenticated;
+
+comment on function publish_report(uuid, date, date, jsonb, text, subject_code[], text, text, text, report_type, integer) is
+  '리포트 저장 + 토큰 발급 + 발송 상태 + 발송 이력을 한 트랜잭션으로. 부분 성공이 없다. '
+  'active 연결된 학생만 대상(표 정책의 OR 첫 가지 우회를 닫는다). 20260821010000 참고.';
