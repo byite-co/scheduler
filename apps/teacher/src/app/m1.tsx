@@ -17,16 +17,17 @@ import {
 import {
   CONSENT_DOCUMENTS,
   CONSENT_DOCUMENT_LABELS,
+  CONSENT_DOCUMENT_VERSION,
   CONSENT_PENDING_NOTICE,
   M1_CONNECTION_STATUS_SCREENS,
   formatInviteCode,
   buildConsentRows,
   canProceedWithConsent,
-  hasCurrentConsent,
+  consentDocumentsForRpc,
   formatPendingRequestLabel,
   indexPendingRequests
 } from "@ssamplanner/shared";
-import type { ConsentSelection, ConsentStatusRow, Database, M1ConnectionStatus, PendingConnectionRequest } from "@ssamplanner/shared";
+import type { ConsentSelection, Database, M1ConnectionStatus, PendingConnectionRequest } from "@ssamplanner/shared";
 
 import { supabase } from "./supabaseClient";
 
@@ -599,13 +600,16 @@ export function TeacherProfileContent() {
       return;
     }
 
+    // 🚨 **onboarded 는 여기서 켜지 않는다.** 예전에는 onboarded=true 를 먼저 저장하고 동의를
+    //    나중에 넣었는데, 그 insert 의 error 를 읽지도 않아서 동의 증적 없이 온보딩이 끝난
+    //    계정이 조용히 생길 수 있었다. 지금은 프로필 필드만 저장하고, 동의 기록과 onboarded 를
+    //    RPC 하나가 한 트랜잭션으로 처리한다.
     const { error } = await supabase.from("profiles").upsert({
       id: data.session.user.id,
       role: "teacher",
       name,
       bio,
-      subjects,
-      onboarded: true
+      subjects
     });
 
     if (error) {
@@ -613,17 +617,20 @@ export function TeacherProfileContent() {
       return;
     }
 
-    // 가입 때 세션이 없어 기록하지 못한 동의를 여기서 남긴다(이메일 인증 경로).
-    // 이미 기록돼 있으면 중복을 만들지 않는다 — append-only 표라 이력이 지저분해진다.
+    // 가입 때 세션이 없어 기록하지 못한 동의를 여기서 넘긴다(이메일 인증 경로).
+    // 비어 있어도 그대로 넘긴다 — 가입 시점에 이미 기록됐는지는 **서버가** 확인한다.
+    // 여기서 "아마 동의했을 것" 으로 목록을 채우면 동의하지 않은 계정의 증적을 만들어 낸다.
     const stashed = readTeacherConsent();
-    if (canProceedWithConsent(stashed)) {
-      const { data: status } = await supabase.rpc("my_consent_status");
-      if (!hasCurrentConsent(status as ConsentStatusRow[] | null)) {
-        const rows = buildConsentRows(data.session.user.id, stashed, "teacher_web_onboarding");
-        if (rows.length) await supabase.from("consent_records").insert(rows);
-      }
-      clearTeacherConsent();
+    const finished = await supabase.rpc("finish_onboarding_with_consent", {
+      p_documents: consentDocumentsForRpc(stashed),
+      p_version: CONSENT_DOCUMENT_VERSION,
+      p_method: "teacher_web_onboarding"
+    });
+    if (finished.error) {
+      data.setMessage(`동의 기록에 실패해서 온보딩을 마치지 못했어요: ${finished.error.message}`);
+      return;
     }
+    clearTeacherConsent();
 
     await data.refresh();
     // 프로필 저장 완료 → 대시보드로.
@@ -1107,8 +1114,14 @@ function AuthForm({ mode, data }: { mode: "login" | "signup"; data: TeacherData 
     if (mode === "signup") {
       if (result.data.session) {
         // 동의 증적을 남긴다. RLS 가 본인 행만 허용하므로 **세션이 있어야** 기록할 수 있다.
+        // 실패하면 조용히 넘기지 않는다 — 체크 상태를 남겨 두어 온보딩에서 다시 기록하게 하고
+        // (거기서 onboarded 와 한 트랜잭션으로 묶인다), 사용자에게도 알린다.
         const rows = buildConsentRows(result.data.session.user.id, consent, "teacher_web_signup");
-        if (rows.length) await supabase.from("consent_records").insert(rows);
+        const recorded = rows.length ? await supabase.from("consent_records").insert(rows) : { error: null };
+        if (recorded.error) {
+          writeTeacherConsent(consent);
+          data.setMessage(`동의 기록이 지연됐어요(온보딩에서 다시 시도해요): ${recorded.error.message}`);
+        }
         // 가입 즉시 로그인됨 → 온보딩(프로필)으로.
         router.replace("/onboarding/profile");
       } else {

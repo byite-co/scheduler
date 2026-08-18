@@ -7,11 +7,10 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from
 
 import { colors, radii, spacing, tints } from "@ssamplanner/design-tokens";
 import {
+  CONSENT_DOCUMENT_VERSION,
   CONSENT_PENDING_NOTICE,
   DEFAULT_DISCLOSURE_SCOPE,
-  buildConsentRows,
-  canProceedWithConsent,
-  hasCurrentConsent,
+  consentDocumentsForRpc,
   canCompleteStudentSignup,
   canRequestConnectionAgain,
   describeInviteRedeemResult,
@@ -24,7 +23,6 @@ import {
 import type {
   ConnectionStatus,
   ConsentSelection,
-  ConsentStatusRow,
   Database,
   InviteRedeemResult
 } from "@ssamplanner/shared";
@@ -398,6 +396,11 @@ export function StudentProfileScreen() {
       return;
     }
 
+    // 🚨 순서가 중요하다. **onboarded 는 여기서 켜지 않는다.**
+    //    예전에는 onboarded=true 를 먼저 저장하고 동의를 나중에 기록해서, 동의 기록이
+    //    실패하면 "증적 없이 온보딩이 끝난 계정" 이 남았다(기록 실패를 메시지에만 남기고
+    //    /today 로 넘어갔다). 지금은 프로필 필드만 저장하고, 동의 기록과 onboarded 를
+    //    RPC 하나가 한 트랜잭션으로 처리한다 — 둘 다 되거나 둘 다 안 된다.
     const { error } = await supabase.from("profiles").upsert({
       id: data.session.user.id,
       role: "student",
@@ -405,30 +408,28 @@ export function StudentProfileScreen() {
       birth_date: birthDate,
       grade,
       target_univ: targetUniv,
-      guardian_consented_at: guardianConsentAccepted ? new Date().toISOString() : null,
-      onboarded: true
+      guardian_consented_at: guardianConsentAccepted ? new Date().toISOString() : null
     });
 
     if (error) {
       data.setMessage(error.message);
       return;
     }
-    // 🚨 동의 **증적**을 남긴다. 예전에는 토글 상태를 온보딩 단계 사이에서만 들고 다니고
-    //    어디에도 기록하지 않아 "언제 무엇에 동의했는지" 를 증명할 수 없었다.
-    //    기록 실패가 가입을 되돌리지는 않는다(프로필은 이미 저장됐다) — 대신 조용히 넘기지 않고
-    //    안내에 남긴다. append-only 표라 이미 있으면 중복을 만들지 않는다.
+
     const stored = readSignupConsent();
     const selection: ConsentSelection = {
       terms_of_service: stored.termsAccepted || termsAccepted,
       privacy_policy: stored.privacyAccepted || termsAccepted
     };
-    if (canProceedWithConsent(selection)) {
-      const { data: status } = await supabase.rpc("my_consent_status");
-      if (!hasCurrentConsent(status as ConsentStatusRow[] | null)) {
-        const rows = buildConsentRows(data.session.user.id, selection, "student_app_signup");
-        const consentResult = await supabase.from("consent_records").insert(rows);
-        if (consentResult.error) data.setMessage(`동의 기록 실패: ${consentResult.error.message}`);
-      }
+    // 동의 기록 + onboarded=true. 실패하면 온보딩을 완료하지 않는다(화면에 머문다).
+    const finished = await supabase.rpc("finish_onboarding_with_consent", {
+      p_documents: consentDocumentsForRpc(selection),
+      p_version: CONSENT_DOCUMENT_VERSION,
+      p_method: "student_app_signup"
+    });
+    if (finished.error) {
+      data.setMessage(`동의 기록에 실패해서 가입을 마치지 못했어요: ${finished.error.message}`);
+      return;
     }
 
     // 온보딩 완료 → 임시 동의 보존값 정리.

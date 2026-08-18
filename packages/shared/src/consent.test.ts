@@ -18,6 +18,7 @@ const migration = readFileSync(
 );
 const teacherWeb = readFileSync(new URL("../../../apps/teacher/src/app/m1.tsx", import.meta.url), "utf8");
 const studentApp = readFileSync(new URL("../../../apps/student/src/m1Screens.tsx", import.meta.url), "utf8");
+const consentSource = readFileSync(new URL("./consent.ts", import.meta.url), "utf8");
 
 describe("약관 동의 — 필수 항목 게이트", () => {
   it("필수 두 개가 다 체크돼야 진행할 수 있다", () => {
@@ -145,13 +146,33 @@ describe("가입 플로우가 동의를 실제로 기록한다", () => {
   });
 
   it("과외쌤 웹: 세션이 있으면 즉시, 없으면 온보딩에서 기록한다", () => {
+    // 가입 시점 기록은 그대로다.
     expect(teacherWeb).toContain('buildConsentRows(result.data.session.user.id, consent, "teacher_web_signup")');
-    expect(teacherWeb).toContain('buildConsentRows(data.session.user.id, stashed, "teacher_web_onboarding")');
+    // 온보딩 시점 기록은 R3 에서 **RPC 로 옮겼다**(20260821000000) — 동의 기록과 onboarded 를
+    // 한 트랜잭션으로 묶기 위해서다. 예전에는 여기서 consent_records 에 직접 insert 했고
+    // 그 error 를 읽지도 않아 증적 없이 온보딩이 끝날 수 있었다.
+    expect(teacherWeb).toContain('p_method: "teacher_web_onboarding"');
+    expect(teacherWeb).toContain('supabase.rpc("finish_onboarding_with_consent"');
   });
 
   it("학생 앱: 가입 완료 시 동의를 기록한다", () => {
-    expect(studentApp).toContain('buildConsentRows(data.session.user.id, selection, "student_app_signup")');
-    // 이미 기록됐으면 중복을 만들지 않는다.
-    expect(studentApp).toContain("hasCurrentConsent");
+    // R3: 직접 insert → RPC(동의 기록 + onboarded 원자화).
+    expect(studentApp).toContain('supabase.rpc("finish_onboarding_with_consent"');
+    expect(studentApp).toContain('p_method: "student_app_signup"');
+    // 중복 방지는 이제 RPC 안에서 한다(같은 문서·버전이 accepted 면 넣지 않는다).
+    expect(consentSource).toContain("consentDocumentsForRpc");
+  });
+
+  it("동의 기록 실패가 온보딩 완료를 막는다 — 순서 역전이 되살아나면 실패한다", () => {
+    // 두 화면 모두 프로필 저장에서 onboarded 를 켜지 않아야 한다.
+    for (const [label, source] of [
+      ["학생", studentApp],
+      ["과외쌤", teacherWeb]
+    ] as const) {
+      const start = source.indexOf('supabase.from("profiles").upsert({');
+      expect(start, `${label} 프로필 upsert 를 찾지 못했다`).toBeGreaterThan(-1);
+      const args = source.slice(start, source.indexOf("});", start));
+      expect(args, `${label} 프로필 저장이 onboarded 를 직접 켠다`).not.toContain("onboarded");
+    }
   });
 });

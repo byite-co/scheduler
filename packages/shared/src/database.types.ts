@@ -1634,6 +1634,30 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      finish_onboarding_with_consent: {
+        Args: { p_documents: string[]; p_method?: string; p_version: string }
+        Returns: {
+          avatar_url: string | null
+          bio: string | null
+          birth_date: string | null
+          created_at: string
+          grade: string | null
+          guardian_consented_at: string | null
+          id: string
+          name: string
+          onboarded: boolean
+          role: Database["public"]["Enums"]["user_role"]
+          subjects: Database["public"]["Enums"]["subject_code"][] | null
+          target_univ: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       generate_teacher_invoice: {
         Args: { p_period: string }
         Returns: {
@@ -1754,6 +1778,22 @@ export type Database = {
         }[]
       }
       price_per_student_krw: { Args: never; Returns: number }
+      publish_report: {
+        Args: {
+          p_channel: string
+          p_data: Json
+          p_home_support?: string
+          p_included_subjects: Database["public"]["Enums"]["subject_code"][]
+          p_next_week_focus?: string
+          p_period_end: string
+          p_period_start: string
+          p_student_id: string
+          p_teacher_comment: string
+          p_ttl_hours?: number
+          p_type?: Database["public"]["Enums"]["report_type"]
+        }
+        Returns: Json
+      }
       record_homework_check_observation: {
         Args: {
           p_attempt_id: string

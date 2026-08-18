@@ -200,8 +200,16 @@ describe("공유 링크 — 토큰·만료·회수", () => {
     for (const source of [migration, schema]) {
       expect(source).toContain("p_ttl_hours integer default 2160");
     }
-    expect(screen).toContain('supabase.rpc("create_report_share", { p_report_id: reportId })');
-    expect(screen).not.toContain("p_ttl_hours: 168");
+    // R3: 화면은 create_report_share 를 직접 부르지 않는다. 발송을 publish_report 로 원자화했고
+    // (저장→토큰→sent→발송이력이 한 트랜잭션), 그 RPC 도 같은 기본값(2160시간)을 쓴다.
+    const publishMigration = readFileSync(
+      new URL("../../../supabase/migrations/20260821010000_publish_report_atomic.sql", import.meta.url),
+      "utf8"
+    );
+    expect(publishMigration).toContain("p_ttl_hours integer default 2160");
+    expect(screen).toContain('supabase.rpc("publish_report"');
+    // 화면이 만료를 직접 넘기지 않는다(넘기면 DB 기본값이 무력화된다).
+    expect(screen).not.toContain("p_ttl_hours");
   });
 
   it("회수 수단이 있고 화면에서 도달 가능하다", () => {
