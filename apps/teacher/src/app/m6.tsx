@@ -54,7 +54,7 @@ export function TeacherBilling() {
     void refresh();
   }, [refresh]);
 
-  const billing = getTeacherBillingState(status);
+  const billing = getTeacherBillingState(status);
   // 상태를 바꾸는 mock RPC 호출은 제거했다 — 과외쌤이 스스로 앱 구독료를 active 로 만들 수
   // 있는 구멍이었고 실행 권한을 회수했다(20260806000000). 실제 전이는 Stripe 웹훅이 담당한다.
   // 개발/테스트에서 상태를 만들려면 scripts/dev-set-subscription.mjs (service_role 필요).
