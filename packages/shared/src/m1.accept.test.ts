@@ -1,28 +1,16 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
+
+import { readSource, sliceBetween } from "./testSource";
 
 import { describeInviteRedeemResult, isInviteRedeemSuccess, type InviteRedeemResult } from "./m1";
 
-const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
-const freeze = readFileSync(
-  new URL("../../../supabase/migrations/20260819000000_connection_identity_freeze.sql", import.meta.url),
-  "utf8"
-);
-const strayGrants = readFileSync(
-  new URL("../../../supabase/migrations/20260819010000_revoke_stray_client_grants.sql", import.meta.url),
-  "utf8"
-);
-const accept = readFileSync(
-  new URL("../../../supabase/migrations/20260819020000_accept_connection_atomic.sql", import.meta.url),
-  "utf8"
-);
-const limit = readFileSync(
-  new URL("../../../supabase/migrations/20260819030000_invite_attempt_limit.sql", import.meta.url),
-  "utf8"
-);
-const teacherWeb = readFileSync(new URL("../../../apps/teacher/src/app/m1.tsx", import.meta.url), "utf8");
-const studentApp = readFileSync(new URL("../../../apps/student/src/m1Screens.tsx", import.meta.url), "utf8");
+const schema = readSource(new URL("../../../supabase/schema.sql", import.meta.url));
+const freeze = readSource(new URL("../../../supabase/migrations/20260819000000_connection_identity_freeze.sql", import.meta.url));
+const strayGrants = readSource(new URL("../../../supabase/migrations/20260819010000_revoke_stray_client_grants.sql", import.meta.url));
+const accept = readSource(new URL("../../../supabase/migrations/20260819020000_accept_connection_atomic.sql", import.meta.url));
+const limit = readSource(new URL("../../../supabase/migrations/20260819030000_invite_attempt_limit.sql", import.meta.url));
+const teacherWeb = readSource(new URL("../../../apps/teacher/src/app/m1.tsx", import.meta.url));
+const studentApp = readSource(new URL("../../../apps/student/src/m1Screens.tsx", import.meta.url));
 
 // ── 초대 코드 결과 문구 ──────────────────────────────────────────────────────
 describe("초대 코드 사용 결과 → 사용자 문구", () => {
@@ -77,7 +65,7 @@ describe("연결 신원 컬럼 동결", () => {
   });
 
   it("신원 컬럼이 허용 목록에 없다 — 있으면 남의 학생을 붙일 수 있다", () => {
-    const grant = freeze.slice(freeze.indexOf("grant update ("), freeze.indexOf("on table connections to authenticated"));
+    const grant = sliceBetween(freeze, "grant update (", "on table connections to authenticated");
     for (const column of ["student_id", "teacher_id", "invite_code", "requested_by"]) {
       expect(grant, column).not.toContain(column);
     }
@@ -113,9 +101,10 @@ describe("정책 0개 표의 클라이언트 쓰기 권한 회수", () => {
 
 // ── 수락 원자화 (20260819020000) ─────────────────────────────────────────────
 describe("연결 수락 RPC", () => {
-  const fn = accept.slice(
-    accept.indexOf("create or replace function accept_connection_request"),
-    accept.indexOf("revoke all on function accept_connection_request")
+  const fn = sliceBetween(
+    accept,
+    "create or replace function accept_connection_request",
+    "revoke all on function accept_connection_request"
   );
 
   it("한 함수 안에서 설정 생성과 상태 전이를 모두 한다", () => {
@@ -159,7 +148,7 @@ describe("연결 수락 RPC", () => {
   it("과외쌤 웹이 실제로 이 RPC 를 쓴다 — 안 쓰면 2단계 수락이 그대로 남는다", () => {
     expect(teacherWeb).toContain('supabase.rpc("accept_connection_request", { p_connection_id: connection.id })');
     // 옛 경로가 남아 있으면 안 된다: 수락 시 per_student_settings 를 클라이언트가 직접 만들던 코드.
-    const decide = teacherWeb.slice(teacherWeb.indexOf("async function decide("), teacherWeb.indexOf("if (!rows.length)"));
+    const decide = sliceBetween(teacherWeb, "async function decide(", "if (!rows.length)");
     expect(decide).not.toContain("per_student_settings");
   });
 });
@@ -174,7 +163,7 @@ describe("초대 코드 시도 제한", () => {
   });
 
   it("입력한 코드 자체는 저장하지 않는다 — 운 좋게 맞힌 코드가 표에 남는다", () => {
-    const table = limit.slice(limit.indexOf("create table if not exists invite_attempts"), limit.indexOf(");"));
+    const table = sliceBetween(limit, "create table if not exists invite_attempts", ");");
     expect(table).not.toContain("code");
     expect(table).toContain("outcome");
   });
@@ -191,9 +180,10 @@ describe("초대 코드 시도 제한", () => {
     expect(limit).toMatch(/invite_attempt_max_failures\(\) returns integer\s*\r?\nlanguage sql immutable as \$\$ select 10 \$\$/);
   });
 
-  const fn = limit.slice(
-    limit.indexOf("create function request_connection_by_invite"),
-    limit.indexOf("revoke all on function request_connection_by_invite")
+  const fn = sliceBetween(
+    limit,
+    "create function request_connection_by_invite",
+    "revoke all on function request_connection_by_invite"
   );
 
   it("사용자 입력 실패를 예외로 던지지 않는다 — 던지면 시도 기록이 롤백된다", () => {
@@ -215,7 +205,7 @@ describe("초대 코드 시도 제한", () => {
   });
 
   it("차단된 시도는 기록하지 않는다 — 기록하면 두드리는 동안 영구 차단이 된다", () => {
-    const blocked = fn.slice(fn.indexOf("if failures >= invite_attempt_max_failures()"), fn.indexOf("normalized_code :="));
+    const blocked = sliceBetween(fn, "if failures >= invite_attempt_max_failures()", "normalized_code :=");
     expect(blocked).not.toContain("insert into invite_attempts");
     expect(blocked).toContain("retry_after_seconds");
   });

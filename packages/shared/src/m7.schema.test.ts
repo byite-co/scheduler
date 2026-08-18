@@ -1,19 +1,13 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
+
+import { readSource, sliceBetween } from "./testSource";
 
 import { NOTIFICATION_EVENTS } from "./m7";
 import { REPORT_QUOTA_FLOOR, REPORT_QUOTA_PER_STUDENT, reportMonthlyQuota } from "./parentReport";
 
-const schema = readFileSync(new URL("../../../supabase/schema.sql", import.meta.url), "utf8");
-const migration = readFileSync(
-  new URL("../../../supabase/migrations/20260627000000_m7_account_system.sql", import.meta.url),
-  "utf8"
-);
-const notifyMigration = readFileSync(
-  new URL("../../../supabase/migrations/20260809000000_notification_events.sql", import.meta.url),
-  "utf8"
-);
+const schema = readSource(new URL("../../../supabase/schema.sql", import.meta.url));
+const migration = readSource(new URL("../../../supabase/migrations/20260627000000_m7_account_system.sql", import.meta.url));
+const notifyMigration = readSource(new URL("../../../supabase/migrations/20260809000000_notification_events.sql", import.meta.url));
 
 describe("M7 account + system schema coverage", () => {
   it("self-service account deletion cascades from auth.users", () => {
@@ -93,14 +87,8 @@ describe("알림 생성 트리거 (shared ↔ schema ↔ migration)", () => {
 // 화면까지 도달하게 만들어도 RPC 가 실패하면 고쳐진 게 아니다.
 describe("회원 탈퇴를 막지 않는 FK", () => {
   const fkMigrations = [
-    readFileSync(
-      new URL("../../../supabase/migrations/20260809010000_account_deletion_fk_fix.sql", import.meta.url),
-      "utf8"
-    ),
-    readFileSync(
-      new URL("../../../supabase/migrations/20260809020000_account_deletion_fk_fix_2.sql", import.meta.url),
-      "utf8"
-    )
+    readSource(new URL("../../../supabase/migrations/20260809010000_account_deletion_fk_fix.sql", import.meta.url)),
+    readSource(new URL("../../../supabase/migrations/20260809020000_account_deletion_fk_fix_2.sql", import.meta.url))
   ].join("\n");
 
   it("profiles 를 참조하는 감사용 FK 는 전부 SET NULL 이다", () => {
@@ -124,19 +112,17 @@ describe("회원 탈퇴를 막지 않는 FK", () => {
   it("탈퇴하면 Storage 사진 정리가 대기열에 반드시 남는다", () => {
     // delete_my_account 는 DB 만 지운다. Storage 파일은 Postgres 트랜잭션에서 못 지운다.
     // Edge Function 을 안 거치고 RPC 만 불러도 트리거가 대기열에 남겨야 조용히 새지 않는다.
-    const purge = readFileSync(
-      new URL("../../../supabase/migrations/20260810000000_account_storage_purge.sql", import.meta.url),
-      "utf8"
-    );
+    const purge = readSource(new URL("../../../supabase/migrations/20260810000000_account_storage_purge.sql", import.meta.url));
     for (const source of [schema, purge]) {
       expect(source).toContain("create table if not exists storage_purge_queue");
       expect(source).toContain("create trigger enqueue_storage_purge_on_profile_delete_trigger");
       expect(source).toContain("before delete on profiles");
       // 대기열이 profiles 를 참조하면 계정과 함께 사라져서 존재 의미가 없다.
       // (notifications 등 다른 테이블에는 그 FK 가 정상적으로 있으므로 이 표 안에서만 본다.)
-      const table = source.slice(
-        source.indexOf("create table if not exists storage_purge_queue"),
-        source.indexOf("create index if not exists storage_purge_queue_pending_idx")
+      const table = sliceBetween(
+        source,
+        "create table if not exists storage_purge_queue",
+        "create index if not exists storage_purge_queue_pending_idx"
       );
       expect(table.length).toBeGreaterThan(100);
       expect(table).not.toMatch(/references\s+profiles/);
@@ -154,10 +140,7 @@ describe("회원 탈퇴를 막지 않는 FK", () => {
   });
 
   it("탈퇴 화면이 RPC 를 직접 부르지 않는다 — 부르면 사진이 남는다", () => {
-    const fn = readFileSync(
-      new URL("../../../supabase/functions/account-delete/index.ts", import.meta.url),
-      "utf8"
-    );
+    const fn = readSource(new URL("../../../supabase/functions/account-delete/index.ts", import.meta.url));
     // 파일 → 계정 순서. 그리고 계정 삭제는 **호출자 권한**이어야 auth.uid() 가 맞는다.
     expect(fn).toContain('asUser.rpc("delete_my_account")');
     expect(fn).toContain("assertScoped");
@@ -167,7 +150,7 @@ describe("회원 탈퇴를 막지 않는 FK", () => {
       ["학생", "../../../apps/student/src/m7Screens.tsx"],
       ["과외쌤", "../../../apps/teacher/src/app/m7.tsx"]
     ] as const) {
-      const screen = readFileSync(new URL(path, import.meta.url), "utf8");
+      const screen = readSource(new URL(path, import.meta.url));
       expect(screen, label).toContain('supabase.functions.invoke("account-delete"');
       expect(screen, label).not.toContain('supabase.rpc("delete_my_account")');
     }
@@ -181,10 +164,7 @@ describe("회원 탈퇴를 막지 않는 FK", () => {
 
 // ── 수업 회차 · 발급 한도 (20260815020000) ───────────────────────────────────
 describe("수업 회차와 리포트 발급 한도", () => {
-  const lessonsMigration = readFileSync(
-    new URL("../../../supabase/migrations/20260815020000_lessons_and_report_quota.sql", import.meta.url),
-    "utf8"
-  );
+  const lessonsMigration = readSource(new URL("../../../supabase/migrations/20260815020000_lessons_and_report_quota.sql", import.meta.url));
 
   it("회차는 exam_records 와 같은 원칙으로 막는다 — teacher_id + active 연결", () => {
     for (const source of [schema, lessonsMigration]) {
